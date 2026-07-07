@@ -113,6 +113,32 @@ function distToSeg(px: number, py: number, ax: number, ay: number, bx: number, b
   return Math.hypot(px - (ax + t * vx), py - (ay + t * vy))
 }
 
+/** Closest point on any runway centerline to p (null if there are no runways). */
+function nearestRunwayPoint(p: Point, runways: SurfaceFeature[]): Point | null {
+  let best: Point | null = null
+  let bestD = Infinity
+  for (const f of runways) {
+    for (let i = 1; i < f.points.length; i += 1) {
+      const a = f.points[i - 1]
+      const b = f.points[i]
+      if (!a || !b) continue
+      const vx = b[0] - a[0]
+      const vy = b[1] - a[1]
+      const l2 = vx * vx + vy * vy
+      let t = l2 > 0 ? ((p[0] - a[0]) * vx + (p[1] - a[1]) * vy) / l2 : 0
+      t = t < 0 ? 0 : t > 1 ? 1 : t
+      const cx = a[0] + t * vx
+      const cy = a[1] + t * vy
+      const d = Math.hypot(p[0] - cx, p[1] - cy)
+      if (d < bestD) {
+        bestD = d
+        best = [cx, cy]
+      }
+    }
+  }
+  return best
+}
+
 /** Draw crisp label text with a dark halo so it reads on any surface. */
 function label(ctx: Ctx, text: string, x: number, y: number, color: string): void {
   ctx.lineWidth = 3
@@ -152,9 +178,20 @@ export function drawLabels(ctx: Ctx, v: View, surface: AirportSurface): void {
   ctx.textBaseline = 'middle'
   ctx.lineJoin = 'round'
   ctx.font = '600 10px ui-monospace, "SF Mono", Menlo, monospace'
-  for (const [ref, { score, mid }] of best) {
-    if (score < 1e6) continue // would only sit on the runway — skip it
-    const [sx, sy] = toScreen(v, mid[0], mid[1])
+  for (const [ref, { mid }] of best) {
+    // If the anchor sits on/near the runway, nudge it clear of the pavement so
+    // runway connectors (C1, C6, …) stay labeled and readable.
+    let anchor = mid
+    const np = nearestRunwayPoint(mid, runways)
+    if (np) {
+      const d = Math.hypot(mid[0] - np[0], mid[1] - np[1])
+      if (d < 0.045) {
+        const ux = d > 1e-6 ? (mid[0] - np[0]) / d : 0
+        const uy = d > 1e-6 ? (mid[1] - np[1]) / d : 1
+        anchor = [np[0] + ux * 0.06, np[1] + uy * 0.06]
+      }
+    }
+    const [sx, sy] = toScreen(v, anchor[0], anchor[1])
     label(ctx, ref, sx, sy, COLORS.labelTaxi)
   }
 
