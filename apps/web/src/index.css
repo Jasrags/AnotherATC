@@ -271,6 +271,78 @@ body {
   border-color: #b5544a;
 }
 
+/* Flight-strip command menu — numbered, state-gated action list. */
+.cmd-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid #16242f;
+}
+.cmd-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 5px 8px;
+  font-family: inherit;
+  font-size: 12px;
+  text-align: left;
+  color: #cfe6dd;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.cmd-item:hover:not(:disabled) {
+  background: #13323f;
+}
+.cmd-item.cmd-open {
+  background: #13323f;
+}
+.cmd-num {
+  min-width: 12px;
+  font-size: 10px;
+  color: #5f8977;
+  text-align: right;
+}
+.cmd-label {
+  flex: 1;
+}
+.cmd-caret {
+  color: #d79a2b;
+  font-size: 14px;
+}
+.cmd-soon {
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #4f6f5c;
+}
+.cmd-item.cmd-disabled {
+  color: #47645a;
+  cursor: default;
+}
+.cmd-sub {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 3px 8px 5px 29px;
+}
+.cmd-sub-item {
+  width: auto;
+  padding: 3px 10px;
+  color: #9ff0c0;
+  background: #123526;
+  border: 1px solid #245c43;
+  border-radius: 3px;
+  font-size: 11px;
+}
+.cmd-sub-item:hover {
+  background: #16412e;
+}
+
 .clearance {
   display: flex;
   flex-wrap: wrap;

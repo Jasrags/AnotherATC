@@ -65,27 +65,28 @@ current phase, with submenus for commands that need a target. This is the intera
 individual command features below plug into; it generalizes across controller modes later.
 
 ### Menu framework
-- ⬜ **Open a command menu from the selected strip** — click the strip (or a caret) to open a numbered
-  action list; `1`–`9`/`0` keyboard shortcuts mirror the list. Anchored to the strip, dismissible.
-- ⬜ **State-gating** — show only phase-valid actions, driven by the strip state machine (parked →
-  Pushback; taxiing → Hold/Continue/Give-way; holding short → Cross; etc.). Greys out or hides the rest.
-- ⬜ **Submenus (`>`) for parameterized commands** — Taxi to…, Hold short…, Cross runway…, Give way to…,
-  Continue taxi, Hold position — pick the target (destination / runway / other aircraft) from a submenu
-  or by clicking the scope.
-- ⬜ **Migrate existing clearance-row actions** (Taxi to, Hold, Cross RWY, Route ▸) into the menu so
-  there's one consistent command surface.
+- ✅ **Command menu on the selected strip** — the selected strip shows a numbered, data-driven action
+  list (`StripCommandMenu`); `1`–`9`/`0` keyboard shortcuts run the matching item. _Next: optional
+  float/popup anchored to the strip like the reference (currently inline)._
+- ✅ **State-gating** — `commandsFor(status, intent)` lists only phase-valid actions (parked → Pushback·Taxi·Route;
+  taxiing → Hold·Give-way; holding → Continue; holding short → Cross). Not-yet-built commands render as
+  disabled `soon` so the flow still reads.
+- ✅ **Submenus (`>`) for parameterized commands** — Taxi to… opens a destination submenu (RWY 27/9, gate).
+  _Next: submenus for Hold short…, Cross runway (multi), Give way to… (pick aircraft on the scope)._
+- ✅ **Migrated existing clearance-row actions** — Taxi to, Hold position, Cross runway, Route via…, and
+  Continue taxi now all live in the menu; the old ad-hoc clearance row is gone (route builder stays for `Route via…`).
 
 ### Commands (menu vocabulary from the reference)
-- 🚧 **Taxi to…** — have named destinations + the via-route builder; fold into the menu.
+- 🚧 **Taxi to…** — named-destination submenu wired; via-route builder via **Route via…**.
 - 💭 **Progressive taxi** — step-by-step "turn here" guidance (see Progressive taxi above).
-- ⬜ **Continue taxi** — resume/clear to the next point after a hold; submenu "continue to…".
+- ✅ **Continue taxi** — wired to `resume` (shown when holding). _Next: "continue to…" submenu._
 - ⬜ **Hold short…** — hold short of a chosen runway/taxiway (generalize runway hold-short to any target).
-- ✅ **Cross runway…** — have `crossRunway`; add a submenu to pick the runway when several apply.
-- 🚧 **Give way to…** — give way to a specific aircraft (see Player-instructed give-way); pick the target.
-- ✅ **Hold position** — have `hold`; place it under the menu.
-- ⬜ **Pushback approved** — approve pushback (see Pushback from gate); gated to parked departures.
+- ✅ **Cross runway** — wired to `crossRunway` (shown when holding short). _Next: submenu to pick the runway._
+- 🚧 **Give way to…** — listed as `soon`; needs the give-way backend (see Player-instructed give-way).
+- ✅ **Hold position** — wired to `hold` (shown when taxiing).
+- ⬜ **Pushback approved** — listed as `soon`; needs the pushback backend (see Pushback from gate).
 - ⬜ **Misc. messages** — catch-all phraseology (say again, expedite, verify heading/altitude, etc.).
-- ⬜ **Contact other frequency** — hand off to Tower / next frequency (see Handoff to/from Tower).
+- ⬜ **Contact other frequency** — listed as `soon` (`Contact tower`); needs Handoff to/from Tower.
 
 ### Supporting systems shown in the reference
 - ⬜ **Communications log** — timestamped readback/clearance transcript in ATC phraseology (ties into
