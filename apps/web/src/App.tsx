@@ -1,5 +1,5 @@
-import { GroundScope } from './ground/GroundScope'
+import { Ground } from './ground/Ground'
 
 export function App() {
-  return <GroundScope />
+  return <Ground />
 }

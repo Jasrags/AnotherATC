@@ -1,5 +1,12 @@
 import type { Point } from '../world/types'
-import type { GroundAircraft, GroundCommand, GroundSim, GroundSnapshot, WakeCategory } from './types'
+import type {
+  GroundAircraft,
+  GroundCommand,
+  GroundSim,
+  GroundSnapshot,
+  GroundStatus,
+  WakeCategory,
+} from './types'
 import type { TaxiGraph } from './taxiGraph'
 import { splitRouteAtRunway, type RunwayGuard } from './runwayGuard'
 
@@ -30,7 +37,8 @@ function normalizeDeg(d: number): number {
   return ((d % 360) + 360) % 360
 }
 
-interface Internal extends GroundAircraft {
+// `status` is derived at snapshot time (see statusOf), so it is not stored here.
+interface Internal extends Omit<GroundAircraft, 'status'> {
   path: readonly Point[]
   leg: number
   targetSpeed: number
@@ -84,6 +92,14 @@ export function createGroundSim(
   })
 
   const find = (id: string): Internal | undefined => fleet.find((a) => a.id === id)
+
+  function statusOf(ac: Internal): GroundStatus {
+    if (ac.holdShort) return 'holdShort'
+    const cleared = ac.groundspeed > 0.5 || (ac.targetSpeed > 0 && ac.leg < ac.path.length - 1)
+    if (cleared) return 'taxi'
+    if (ac.path.length < 2 && ac.held === null) return 'parked'
+    return 'holding'
+  }
 
   function advance(ac: Internal, dt: number): void {
     const atEnd = ac.leg >= ac.path.length - 1
@@ -198,6 +214,7 @@ export function createGroundSim(
           groundspeed: Math.round(ac.groundspeed),
           holding: ac.holding,
           holdShort: ac.holdShort,
+          status: statusOf(ac),
         })),
       }
     },

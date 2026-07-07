@@ -21,6 +21,8 @@ strips, KSAN charts) and `CLAUDE.md` for architecture.
 - ✅ Interaction: click-select, click-to-taxi, right-click hold, Esc deselect, route + selection display
 - ✅ Map labels: taxiway designators, runway 9/27
 - ✅ Hold-short of runway: taxi routes auto-stop at the hold line (amber); "cross runway" (C) clearance releases them
+- ✅ Flight strip bay (ground): status-driven strips, phase-gated actions, scope↔strip selection sync
+- ✅ Sim↔UI bridge: `useSyncExternalStore` store (canvas on rAF, strips re-render only on phase/selection change)
 - ✅ Makefile (auto-routes through fnm Node 22), watch tasks
 
 ---
@@ -33,7 +35,7 @@ The core ground-control loop. Ordered roughly by priority.
 - ⬜ **Named destinations** — "taxi to RWY 27", "to gate 32", "to spot" instead of raw map clicks; resolve names → graph nodes
 - ⬜ **Assigned taxi routes** — clearance as a sequence of taxiways ("via B, C") with readback, not just shortest path
 - ⬜ **Pushback from gate** — request → approve → push into the alley, then taxi
-- ⬜ **Flight strip bay (ground)** — the strip UI beside the scope; actions gated by phase (state machine from `docs/atc-flight-strips.md`)
+- ✅ **Flight strip bay (ground)** — status-driven strips beside the scope, phase-gated actions, selection synced with the scope. _Next: per-strip taxi target, squawk/route fields, drag-reorder/sequence._
 - ⬜ **Spawn / despawn** — departures appear at gates, arrivals roll off the runway; departures exit to the runway, arrivals park
 - ⬜ **HS1 hotspot** — render the KSAN hot spot; incursion-risk awareness
 - ⬜ **Ground conflict / incursion alerts** — two aircraft converging, or one entering an occupied runway
@@ -71,7 +73,7 @@ The game models four positions (see `docs/atc-flight-strips.md`). Ground first, 
 - ⬜ **Flight data model** — one canonical flight object, mode-specific strip projections (per design docs)
 - ⬜ **Flight strip state machine** — shared across modes; phase gates available actions
 - ⬜ **Handoff mechanics** — initiate/accept, frequency change, refusal when overloaded
-- ⬜ **Sim ↔ UI bridge** — external store + `useSyncExternalStore` for strip/HUD state (canvas stays on rAF)
+- ✅ **Sim ↔ UI bridge** — `GroundController` store + `useSyncExternalStore` for strips (canvas stays on rAF; strips re-render only on phase/selection change)
 - ⬜ **Time controls** — pause / 1× / 2× / 4× (fixed timestep already supports it)
 - ⬜ **ATIS / airport config** — active runway, wind, altimeter; runway-change cascade
 - ⬜ **Weather** — wind (affects ops), precipitation shading on scopes

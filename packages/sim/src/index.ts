@@ -23,5 +23,6 @@ export type {
   GroundSnapshot,
   GroundSim,
   GroundCommand,
+  GroundStatus,
   WakeCategory,
 } from './ground/types'

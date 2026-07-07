@@ -1,11 +1,6 @@
 import { useEffect, useRef } from 'react'
-import {
-  KSAN_SURFACE,
-  buildKsanGroundScenario,
-  buildRunwayGuard,
-  buildTaxiGraph,
-  createGroundSim,
-} from '@anotheratc/sim'
+import { KSAN_SURFACE } from '@anotheratc/sim'
+import type { GroundController } from './controller'
 import { fitView, pan, toWorld, zoomAt, type View } from './view'
 import { drawAircraft, drawLabels, drawSelection, drawSurface } from './render'
 
@@ -16,7 +11,7 @@ const HIT_PX = 14
 /** Pointer movement beyond this (px) counts as a pan, not a click. */
 const DRAG_PX = 4
 
-export function GroundScope() {
+export function GroundScope({ controller }: { controller: GroundController }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const statusRef = useRef<HTMLDivElement>(null)
   const hintRef = useRef<HTMLDivElement>(null)
@@ -27,10 +22,7 @@ export function GroundScope() {
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
-    const graph = buildTaxiGraph(KSAN_SURFACE)
-    const guard = buildRunwayGuard(KSAN_SURFACE)
-    const sim = createGroundSim(buildKsanGroundScenario(1), graph, guard)
-    let selectedId: string | null = null
+    const sim = controller.sim
 
     let width = 0
     let height = 0
@@ -50,7 +42,6 @@ export function GroundScope() {
     const observer = new ResizeObserver(resize)
     observer.observe(canvas)
 
-    // pan / zoom / click
     let dragging = false
     let moved = false
     let lastX = 0
@@ -65,7 +56,7 @@ export function GroundScope() {
       view = zoomAt(view, Math.exp(-e.deltaY * 0.0015), e.clientX - rect.left, e.clientY - rect.top)
     }
     const onDown = (e: PointerEvent) => {
-      if (e.button !== 0) return // primary button only; right-click is handled separately
+      if (e.button !== 0) return
       dragging = true
       moved = false
       lastX = e.clientX
@@ -91,13 +82,20 @@ export function GroundScope() {
     }
     const onContextMenu = (e: MouseEvent) => {
       e.preventDefault()
-      if (selectedId) sim.dispatch({ type: 'hold', aircraftId: selectedId })
+      const id = controller.selectedId()
+      if (id) controller.dispatch({ type: 'hold', aircraftId: id })
     }
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') selectedId = null
-      else if ((e.key === 'c' || e.key === 'C') && selectedId) {
-        sim.dispatch({ type: 'crossRunway', aircraftId: selectedId })
+      const id = controller.selectedId()
+      if (e.key === 'Escape') controller.select(null)
+      else if ((e.key === 'c' || e.key === 'C') && id) {
+        controller.dispatch({ type: 'crossRunway', aircraftId: id })
       }
+    }
+
+    const toScreenSafe = (x: number, y: number): [number, number] => {
+      if (!view) return [-1e6, -1e6]
+      return [x * view.scale + view.offX, -y * view.scale + view.offY]
     }
 
     function handleClick(sx: number, sy: number): void {
@@ -113,20 +111,15 @@ export function GroundScope() {
           hit = a.id
         }
       }
+      const selectedId = controller.selectedId()
       if (hit) {
-        selectedId = hit
+        controller.select(hit)
       } else if (selectedId) {
         const [wx, wy] = toWorld(view, sx, sy)
-        sim.dispatch({ type: 'taxiTo', aircraftId: selectedId, dest: [wx, wy] })
+        controller.dispatch({ type: 'taxiTo', aircraftId: selectedId, dest: [wx, wy] })
       } else {
-        selectedId = null
+        controller.select(null)
       }
-    }
-
-    // toScreen needs the current view; small local helper to avoid null checks inline
-    const toScreenSafe = (x: number, y: number): [number, number] => {
-      if (!view) return [-1e6, -1e6]
-      return [x * view.scale + view.offX, -y * view.scale + view.offY]
     }
 
     canvas.addEventListener('wheel', onWheel, { passive: false })
@@ -156,11 +149,13 @@ export function GroundScope() {
         acc -= FIXED_DT
         steps += 1
       }
+      controller.publish()
 
       if (view) {
         ctx.save()
         ctx.scale(dpr, dpr)
         const snap = sim.snapshot()
+        const selectedId = controller.selectedId()
         drawSurface(ctx, view, KSAN_SURFACE, width, height)
         drawLabels(ctx, view, KSAN_SURFACE)
         drawAircraft(ctx, view, snap.aircraft)
@@ -180,7 +175,7 @@ export function GroundScope() {
           } else if (selected) {
             hintRef.current.textContent = `${selected.callsign} selected — click a point to assign taxi · right-click to hold · Esc to deselect`
           } else {
-            hintRef.current.textContent = 'click an aircraft to select · drag to pan · scroll to zoom'
+            hintRef.current.textContent = 'click an aircraft (scope or strip) to select · drag to pan · scroll to zoom'
           }
         }
       }
@@ -198,7 +193,7 @@ export function GroundScope() {
       canvas.removeEventListener('contextmenu', onContextMenu)
       window.removeEventListener('keydown', onKey)
     }
-  }, [])
+  }, [controller])
 
   return (
     <div className="scope">
