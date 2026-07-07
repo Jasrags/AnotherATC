@@ -26,5 +26,6 @@ export type {
   GroundCommand,
   GroundStatus,
   GroundIntent,
+  NamedDestination,
   WakeCategory,
 } from './ground/types'

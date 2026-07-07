@@ -209,10 +209,12 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     if (!ac) return
     switch (command.type) {
       case 'taxiTo':
-        routeTo(ac, command.dest, false)
+        routeTo(ac, command.dest, command.exact ?? false)
         break
       case 'taxiToGoal':
-        if (ac.goalPoint) routeTo(ac, ac.goalPoint, ac.intent === 'arrival')
+        // Append the exact goal so departures hold short at the runway and
+        // arrivals park at the stand (rather than stopping at the nearest node).
+        if (ac.goalPoint) routeTo(ac, ac.goalPoint, true)
         break
       case 'hold':
         ac.targetSpeed = 0

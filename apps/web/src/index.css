@@ -238,6 +238,23 @@ body {
   border-color: #245c43;
 }
 
+.clearance {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #16242f;
+}
+
+.clearance-label {
+  width: 100%;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  color: #5f8977;
+}
+
 .strip-btn {
   padding: 2px 8px;
   font-family: inherit;

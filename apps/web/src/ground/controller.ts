@@ -10,6 +10,7 @@ import type {
   GroundIntent,
   GroundSim,
   GroundStatus,
+  NamedDestination,
   Point,
   WakeCategory,
 } from '@anotheratc/sim'
@@ -40,6 +41,7 @@ export interface StripSnapshot {
  */
 export interface GroundController {
   readonly sim: GroundSim
+  readonly destinations: NamedDestination[]
   selectedId(): string | null
   select(id: string | null): void
   dispatch(cmd: GroundCommand): void
@@ -52,7 +54,7 @@ export interface GroundController {
 export function createGroundController(): GroundController {
   const graph = buildTaxiGraph(KSAN_SURFACE)
   const guard = buildRunwayGuard(KSAN_SURFACE)
-  const { inits, spawn } = buildKsanGroundGame(1)
+  const { inits, spawn, destinations } = buildKsanGroundGame(1)
   const sim = createGroundSim(inits, { graph, guard, spawn })
 
   let selected: string | null = null
@@ -85,6 +87,7 @@ export function createGroundController(): GroundController {
 
   return {
     sim,
+    destinations,
     selectedId: () => selected,
     select: (id) => {
       selected = id

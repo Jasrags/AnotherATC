@@ -9,37 +9,53 @@ const STATUS_LABEL: Record<GroundStatus, string> = {
   holdShort: 'HOLD SHORT',
 }
 
-/** Phase- and intent-gated action for a strip — mirrors the strip state machine. */
-function StripAction({ controller, item }: { controller: GroundController; item: StripItem }) {
-  const act = (cmd: Parameters<GroundController['dispatch']>[0]) => (e: React.MouseEvent) => {
+function intentLabel(intent: GroundIntent): string {
+  return intent === 'departure' ? 'DEP' : 'ARR'
+}
+
+/** The clearance vocabulary for the selected aircraft — named destinations plus
+ *  phase-gated actions. Mirrors the strip state machine. */
+function ClearanceRow({ controller, item }: { controller: GroundController; item: StripItem }) {
+  const send = (cmd: Parameters<GroundController['dispatch']>[0]) => (e: React.MouseEvent) => {
     e.stopPropagation()
     controller.dispatch(cmd)
   }
+
   if (item.status === 'holdShort') {
     return (
-      <button className="strip-btn btn-cross" onClick={act({ type: 'crossRunway', aircraftId: item.id })}>
-        Cross RWY
-      </button>
+      <div className="clearance">
+        <span className="clearance-label">HOLDING SHORT</span>
+        <button className="strip-btn btn-cross" onClick={send({ type: 'crossRunway', aircraftId: item.id })}>
+          Cross RWY
+        </button>
+      </div>
     )
   }
-  if (item.status === 'taxi') {
-    return (
-      <button className="strip-btn" onClick={act({ type: 'hold', aircraftId: item.id })}>
-        Hold
-      </button>
-    )
-  }
-  // parked or holding — send it to its goal
-  const label = item.intent === 'departure' ? 'Taxi ▸ RWY' : 'Taxi ▸ Gate'
-  return (
-    <button className="strip-btn btn-taxi" onClick={act({ type: 'taxiToGoal', aircraftId: item.id })}>
-      {label}
-    </button>
-  )
-}
 
-function intentLabel(intent: GroundIntent): string {
-  return intent === 'departure' ? 'DEP' : 'ARR'
+  return (
+    <div className="clearance">
+      <span className="clearance-label">TAXI TO</span>
+      {controller.destinations.map((d) => (
+        <button
+          key={d.id}
+          className="strip-btn btn-taxi"
+          onClick={send({ type: 'taxiTo', aircraftId: item.id, dest: d.point, exact: true })}
+        >
+          {d.label}
+        </button>
+      ))}
+      {item.intent === 'arrival' && item.gate && (
+        <button className="strip-btn btn-taxi" onClick={send({ type: 'taxiToGoal', aircraftId: item.id })}>
+          Gate {item.gate}
+        </button>
+      )}
+      {item.status === 'taxi' && (
+        <button className="strip-btn" onClick={send({ type: 'hold', aircraftId: item.id })}>
+          Hold
+        </button>
+      )}
+    </div>
+  )
 }
 
 export function StripBay({ controller }: { controller: GroundController }) {
@@ -72,8 +88,8 @@ export function StripBay({ controller }: { controller: GroundController }) {
                   {a.type}
                   {a.gate ? ` · ${a.gate}` : ''}
                 </span>
-                <StripAction controller={controller} item={a} />
               </div>
+              {selected && <ClearanceRow controller={controller} item={a} />}
             </div>
           )
         })}

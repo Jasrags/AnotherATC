@@ -11,11 +11,19 @@ export type GroundIntent = 'departure' | 'arrival'
 
 /** A controller instruction to the surface simulation. */
 export type GroundCommand =
-  | { type: 'taxiTo'; aircraftId: string; dest: Point }
+  | { type: 'taxiTo'; aircraftId: string; dest: Point; exact?: boolean }
   | { type: 'taxiToGoal'; aircraftId: string }
   | { type: 'hold'; aircraftId: string }
   | { type: 'resume'; aircraftId: string }
   | { type: 'crossRunway'; aircraftId: string }
+
+/** A pickable, named place a controller can clear an aircraft to. */
+export interface NamedDestination {
+  id: string
+  label: string
+  kind: 'runway' | 'gate' | 'spot'
+  point: Point
+}
 
 /** An aircraft on the airport surface, as seen by a consumer (immutable snapshot). */
 export interface GroundAircraft {

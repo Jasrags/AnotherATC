@@ -2,7 +2,7 @@ import { KSAN_SURFACE } from '../world/ksan'
 import { createRng, type Rng } from '../random'
 import type { Point } from '../world/types'
 import type { AircraftInit, GateSlot, SpawnConfig } from './sim'
-import type { WakeCategory } from './types'
+import type { NamedDestination, WakeCategory } from './types'
 
 const AIRLINES = ['AAL', 'UAL', 'DAL', 'SWA', 'ASA', 'NKS', 'JBU', 'SKW']
 const TYPES: readonly [string, WakeCategory][] = [
@@ -80,11 +80,20 @@ function nearestTaxiwayVertex(target: Point): Point {
  * departures (at gates, heading to RWY 27) and arrivals (off RWY 9, heading to a
  * gate). Deterministic for a given seed.
  */
-export function buildKsanGroundGame(seed = 1): { inits: AircraftInit[]; spawn: SpawnConfig } {
+export function buildKsanGroundGame(seed = 1): {
+  inits: AircraftInit[]
+  spawn: SpawnConfig
+  destinations: NamedDestination[]
+} {
   const slots = gates()
   const { west, east } = runwayEnds()
   const departureTarget = east // RWY 27 threshold
   const arrivalSpawn = nearestTaxiwayVertex(west) // rolled out at the RWY 9 end
+
+  const destinations: NamedDestination[] = [
+    { id: 'rwy27', label: 'RWY 27', kind: 'runway', point: east },
+    { id: 'rwy09', label: 'RWY 9', kind: 'runway', point: west },
+  ]
 
   const spawn: SpawnConfig = {
     gates: slots,
@@ -115,5 +124,5 @@ export function buildKsanGroundGame(seed = 1): { inits: AircraftInit[]; spawn: S
     })
   })
 
-  return { inits, spawn }
+  return { inits, spawn, destinations }
 }
