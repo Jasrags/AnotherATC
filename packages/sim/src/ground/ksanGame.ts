@@ -1,6 +1,6 @@
 import { KSAN_SURFACE } from '../world/ksan'
 import { createRng, type Rng } from '../random'
-import type { Point } from '../world/types'
+import type { Point, SurfaceFeature } from '../world/types'
 import type { AircraftInit, GateSlot, SpawnConfig } from './sim'
 import type { NamedDestination, WakeCategory } from './types'
 
@@ -22,12 +22,31 @@ function identity(rng: Rng): { callsign: string; type: string; wake: WakeCategor
   return { callsign: `${airline}${rng.int(100, 1899)}`, type, wake }
 }
 
-function midpoint(points: readonly Point[]): Point {
-  return points[Math.floor(points.length / 2)] ?? points[0] ?? [0, 0]
+function minSqDistToTaxi(p: Point, taxi: readonly Point[]): number {
+  let m = Infinity
+  for (const q of taxi) {
+    const d = (q[0] - p[0]) ** 2 + (q[1] - p[1]) ** 2
+    if (d < m) m = d
+  }
+  return m
 }
 
-/** Gates from parking positions, de-duplicated by ref. */
+/** A stand's stop position: the endpoint farthest from the taxiway (deepest into the ramp),
+ *  i.e. where an aircraft actually parks — not a mid-line vertex. */
+function standStop(f: SurfaceFeature, taxi: readonly Point[]): Point {
+  const a = f.points[0]
+  const b = f.points[f.points.length - 1]
+  if (!a) return [0, 0]
+  if (!b) return a
+  return minSqDistToTaxi(a, taxi) >= minSqDistToTaxi(b, taxi) ? a : b
+}
+
+/** Gates from parking positions, parked at their stop position, de-duplicated by ref. */
 function gates(): GateSlot[] {
+  const taxi: Point[] = []
+  for (const f of KSAN_SURFACE.features) {
+    if (f.kind === 'taxiway' || f.kind === 'taxilane') for (const p of f.points) if (p) taxi.push(p)
+  }
   const slots: GateSlot[] = []
   const seen = new Set<string>()
   let n = 0
@@ -36,7 +55,7 @@ function gates(): GateSlot[] {
     const ref = f.ref ?? `G${n}`
     if (seen.has(ref)) continue
     seen.add(ref)
-    slots.push({ ref, point: midpoint(f.points) })
+    slots.push({ ref, point: standStop(f, taxi) })
     n += 1
   }
   return slots
