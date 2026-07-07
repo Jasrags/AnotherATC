@@ -46,7 +46,7 @@ The core ground-control loop. Ordered roughly by priority.
 - ⬜ **Auto-route + tap-to-edit** (assigned-routes UX enhancement) — instead of building a via-sequence from scratch, show the auto shortest-path as editable "VIA" chips; tapping a taxiway in the sequence offers alternatives to swap/insert, and the rest re-derives. Lower-friction path assignment; complements the scope-click builder.
 - ⬜ **Clearance Delivery** — the "Clearance" half of the position, currently unmodeled. Issue the pre-departure IFR clearance to a parked departure: route/SID, initial altitude, **squawk**, departure frequency, special instructions; pilot read-back → controller verifies → approval unlocks pushback/taxi. _Gate-phase entry point; pairs with the read-back and squawk mechanics below and slot/EDCT time later._
 - ⬜ **Ground servicing → pushback readiness** — parallel-service countdown (fuel/catering/lav/water/cargo/clean/GPU, fueling as the long pole) that gates when pushback becomes available. Model as a few parallel timer bars, not per-service micromanagement (abstracts boarding/loadsheet too). Adds realistic pre-push pressure.
-- ⬜ **Pushback from gate** — request → approve → push into the alley (engine start), then taxi; coordinate with adjacent-gate traffic. Gated by servicing readiness above.
+- 🚧 **Pushback from gate** — **shipped:** "Pushback approved" (menu) eases a parked gate departure off the stand onto the nearest taxilane node at creep speed (nose trailing), new `pushback` phase; ~35 s at KSAN gate 39, then it's `holding` (ready) and Taxi/Route unlock. A parked departure now must push back before it can taxi. _Next: gate by servicing readiness; adjacent-gate/alley-traffic coordination; pick a push direction/left-right when the alley has two exits._
 - ✅ **Flight strip bay (ground)** — status-driven strips beside the scope, phase-gated actions, selection synced with the scope. _Next: squawk/route fields, drag-reorder/sequence._
 - ⬜ **HS1 hotspot** — render the KSAN hot spot; incursion-risk awareness
 - ⬜ **Ground conflict / incursion alerts** — two aircraft converging, or one entering an occupied runway
@@ -84,7 +84,7 @@ individual command features below plug into; it generalizes across controller mo
 - ✅ **Cross runway** — wired to `crossRunway` (shown when holding short). _Next: submenu to pick the runway._
 - 🚧 **Give way to…** — listed as `soon`; needs the give-way backend (see Player-instructed give-way).
 - ✅ **Hold position** — wired to `hold` (shown when taxiing).
-- ⬜ **Pushback approved** — listed as `soon`; needs the pushback backend (see Pushback from gate).
+- ✅ **Pushback approved** — wired: shown for a parked gate departure; runs the `pushback` phase, after which Taxi/Route unlock (see Pushback from gate).
 - ⬜ **Misc. messages** — catch-all phraseology (say again, expedite, verify heading/altitude, etc.).
 - ⬜ **Contact other frequency** — listed as `soon` (`Contact tower`); needs Handoff to/from Tower.
 

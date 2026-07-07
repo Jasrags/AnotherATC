@@ -55,6 +55,8 @@ export interface GroundSimOptions {
 
 const TAXI_ACCEL = 4
 const TAXI_SPEED_KT = 15
+/** Pushback creep speed (kt) — a tug easing the aircraft off the stand. */
+const PUSHBACK_SPEED_KT = 5
 /** How close (nm) counts as reaching a gate. */
 const GATE_EPS = 0.02
 /** Seconds an arrival dwells at the gate before it clears the stand. */
@@ -121,6 +123,8 @@ interface Internal extends Omit<GroundAircraft, 'status'> {
   dwell: number
   /** Route beyond a hold-short line, released by a crossRunway clearance. */
   held: Point[] | null
+  /** Backing off the stand onto the taxilane (nose trailing) until it reaches the alley. */
+  pushingBack: boolean
 }
 
 /**
@@ -169,6 +173,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       goalPoint: init.goalPoint ?? null,
       dwell: -1,
       held,
+      pushingBack: false,
     }
   }
 
@@ -176,6 +181,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
   const find = (id: string): Internal | undefined => fleet.find((a) => a.id === id)
 
   function statusOf(ac: Internal): GroundStatus {
+    if (ac.pushingBack) return 'pushback'
     if (ac.holdShort) return 'holdShort'
     if (ac.dwell >= 0) return 'parked'
     const cleared = ac.groundspeed > 0.5 || (ac.targetSpeed > 0 && ac.leg < ac.path.length - 1)
@@ -332,6 +338,13 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     ac.holdShort = stopped && atEnd && ac.held !== null
     if (stopped) {
       ac.groundspeed = 0
+      // Pushback finished on the taxilane — turn to face the alley, ready to taxi.
+      if (ac.pushingBack && atEnd) {
+        ac.pushingBack = false
+        const from = ac.path[0]
+        const to = ac.path[ac.path.length - 1]
+        if (from && to) ac.heading = normalizeDeg(bearing(from[0], from[1], to[0], to[1]))
+      }
       return
     }
 
@@ -358,6 +371,8 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         remaining = 0
       }
     }
+    // During pushback the nose trails: point it opposite the direction of travel.
+    if (ac.pushingBack) ac.heading = normalizeDeg(ac.heading + 180)
   }
 
   /** Assign a freshly computed graph route (node points) to an aircraft. */
@@ -412,6 +427,25 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       case 'taxiViaGoal':
         if (ac.goalPoint) routeVia(ac, command.taxiways, ac.goalPoint, true)
         break
+      case 'pushback': {
+        // Ease the aircraft off the stand onto the nearest taxilane node (the alley),
+        // then it's ready to taxi. Departures only, only from a stationary aircraft that
+        // is still at its gate (a single-point route) — ignored once routed or moving.
+        if (!graph || ac.intent !== 'departure' || ac.pushingBack || ac.groundspeed > 0.1 || ac.path.length > 1)
+          break
+        const alleyKey = graph.nearestNode([ac.x, ac.y])
+        const alley = alleyKey ? graph.nodePoint(alleyKey) : undefined
+        if (!alley || dist([ac.x, ac.y], alley) < GATE_EPS) break
+        ac.path = [[ac.x, ac.y], alley]
+        ac.leg = 0
+        ac.held = null
+        ac.dwell = -1
+        ac.pushingBack = true
+        ac.targetSpeed = PUSHBACK_SPEED_KT
+        ac.holding = false
+        ac.holdShort = false
+        break
+      }
       case 'hold':
         ac.targetSpeed = 0
         break

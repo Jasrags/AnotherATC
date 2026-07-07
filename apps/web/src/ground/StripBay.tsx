@@ -5,6 +5,7 @@ import { StripCommandMenu } from './StripCommandMenu'
 
 const STATUS_LABEL: Record<GroundStatus, string> = {
   parked: 'PARKED',
+  pushback: 'PUSHBACK',
   taxi: 'TAXI',
   holding: 'HOLD',
   holdShort: 'HOLD SHORT',

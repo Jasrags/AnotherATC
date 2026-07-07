@@ -4,7 +4,7 @@ import type { Point } from '../world/types'
 export type WakeCategory = 'L' | 'M' | 'H' | 'J'
 
 /** Ground phase — drives the flight-strip state machine and available actions. */
-export type GroundStatus = 'parked' | 'taxi' | 'holding' | 'holdShort'
+export type GroundStatus = 'parked' | 'pushback' | 'taxi' | 'holding' | 'holdShort'
 
 /** Why the aircraft is on the surface: leaving (to the runway) or arriving (to a gate). */
 export type GroundIntent = 'departure' | 'arrival'
@@ -15,6 +15,7 @@ export type GroundCommand =
   | { type: 'taxiToGoal'; aircraftId: string }
   | { type: 'taxiVia'; aircraftId: string; taxiways: string[]; dest: Point; exact?: boolean }
   | { type: 'taxiViaGoal'; aircraftId: string; taxiways: string[] }
+  | { type: 'pushback'; aircraftId: string }
   | { type: 'hold'; aircraftId: string }
   | { type: 'resume'; aircraftId: string }
   | { type: 'crossRunway'; aircraftId: string }

@@ -36,6 +36,17 @@ function commandsFor(controller: GroundController, item: StripItem): MenuCommand
     ]
   }
 
+  // A departure at the gate must push back before it can taxi.
+  if (item.status === 'parked' && item.intent === 'departure') {
+    return [
+      { label: 'Pushback approved', action: { kind: 'run', run: () => send({ type: 'pushback', aircraftId: id }) } },
+      { label: 'Contact tower', action: { kind: 'soon' } },
+    ]
+  }
+  if (item.status === 'pushback') {
+    return [{ label: 'Contact tower', action: { kind: 'soon' } }]
+  }
+
   const dests: MenuLeaf[] = controller.destinations.map((d) => ({
     label: d.label,
     run: () => send({ type: 'taxiTo', aircraftId: id, dest: d.point, exact: true }),
@@ -45,9 +56,6 @@ function commandsFor(controller: GroundController, item: StripItem): MenuCommand
   }
 
   const cmds: MenuCommand[] = []
-  if (item.status === 'parked' && item.intent === 'departure') {
-    cmds.push({ label: 'Pushback approved', action: { kind: 'soon' } })
-  }
   cmds.push({ label: 'Taxi to…', action: { kind: 'submenu', items: dests } })
   cmds.push({ label: 'Route via…', action: { kind: 'run', run: () => controller.beginRoute(id) } })
   if (item.status === 'taxi') {
