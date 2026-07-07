@@ -43,7 +43,9 @@ The core ground-control loop. Ordered roughly by priority.
 - 🚧 **Assigned taxi routes** — clearance as a sequence of named taxiways ("via B, C"). **Shipped:** graph edges carry designators; `routeVia` follows an ordered taxiway sequence (falls back to shortest path); `taxiVia`/`taxiViaGoal` commands; strips display "VIA A · B · C" for every route. **Scope builder:** select an aircraft → "Route ▸" → click taxiways in order (highlighted, chips in the strip) → pick a destination to issue; Esc/Cancel to abandon. Re-issuing on a taxiing aircraft = reroute. _Next: readback confirmation; feedback when a via can't reach the goal (currently silently falls back to shortest path)._
 - 🚧 **Player-instructed give-way / reroute** — **reroute** now works (Route ▸ on a taxiing aircraft rebuilds its clearance). _Remaining: "give way to traffic" instruction (hold for a specific conflicting aircraft, then continue) layered over the automatic reservation floor._
 - ⬜ **Auto-route + tap-to-edit** (assigned-routes UX enhancement) — instead of building a via-sequence from scratch, show the auto shortest-path as editable "VIA" chips; tapping a taxiway in the sequence offers alternatives to swap/insert, and the rest re-derives. Lower-friction path assignment; complements the scope-click builder.
-- ⬜ **Pushback from gate** — request → approve → push into the alley, then taxi
+- ⬜ **Clearance Delivery** — the "Clearance" half of the position, currently unmodeled. Issue the pre-departure IFR clearance to a parked departure: route/SID, initial altitude, **squawk**, departure frequency, special instructions; pilot read-back → controller verifies → approval unlocks pushback/taxi. _Gate-phase entry point; pairs with the read-back and squawk mechanics below and slot/EDCT time later._
+- ⬜ **Ground servicing → pushback readiness** — parallel-service countdown (fuel/catering/lav/water/cargo/clean/GPU, fueling as the long pole) that gates when pushback becomes available. Model as a few parallel timer bars, not per-service micromanagement (abstracts boarding/loadsheet too). Adds realistic pre-push pressure.
+- ⬜ **Pushback from gate** — request → approve → push into the alley (engine start), then taxi; coordinate with adjacent-gate traffic. Gated by servicing readiness above.
 - ✅ **Flight strip bay (ground)** — status-driven strips beside the scope, phase-gated actions, selection synced with the scope. _Next: squawk/route fields, drag-reorder/sequence._
 - ⬜ **HS1 hotspot** — render the KSAN hot spot; incursion-risk awareness
 - ⬜ **Ground conflict / incursion alerts** — two aircraft converging, or one entering an occupied runway
@@ -81,6 +83,9 @@ The game models four positions (see `docs/atc-flight-strips.md`). Ground first, 
 - ⬜ **Flight data model** — one canonical flight object, mode-specific strip projections (per design docs)
 - ⬜ **Flight strip state machine** — shared across modes; phase gates available actions
 - ⬜ **Handoff mechanics** — initiate/accept, frequency change, refusal when overloaded
+- ⬜ **Read-back verification** — clearance & taxi read-backs the controller must confirm (or catch an error) before the clearance takes effect; the accuracy check is the gameplay, distinct from TTS voice (see 💭 Voice/phraseology). Used by Clearance Delivery and Assigned taxi routes.
+- ⬜ **Squawk / transponder codes** — assign a beacon code at clearance delivery; links the strip to a radar target once airborne (feeds TRACON radar contact). Surfaces on the strip.
+- ⬜ **Turnaround & gate conflict** — an arrival feeds directly into the same aircraft's next departure cycle; short-turn timer; **gate conflict** when an arrival's gate is still occupied by a late departure. High-tension Ground/Ramp mechanic called out in the design docs.
 - ✅ **Sim ↔ UI bridge** — `GroundController` store + `useSyncExternalStore` for strips (canvas stays on rAF; strips re-render only on phase/selection change)
 - ⬜ **Time controls** — pause / 1× / 2× / 4× (fixed timestep already supports it)
 - ⬜ **ATIS / airport config** — active runway, wind, altimeter; runway-change cascade
@@ -103,6 +108,7 @@ The game models four positions (see `docs/atc-flight-strips.md`). Ground first, 
 - ⬜ Label density control (show major spines when zoomed out, exits when zoomed in) + collision avoidance
 - ⬜ Scale bar / range rings; recenter + zoom-to-fit control
 - ⬜ Pan/zoom clamping (don't lose the airport off-screen)
+- ⬜ Gate docking guidance on arrival (AGNIS/PAPA-style stop/center cue), park on the painted stop mark
 - ⬜ Aircraft symbology by category/phase; selected-target emphasis
 - ⬜ Data-block declutter (leader-line direction, overlap avoidance)
 - ⬜ Theme polish; light/dark intentional (currently dark-only, correct for a scope)
