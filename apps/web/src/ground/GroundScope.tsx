@@ -1,5 +1,11 @@
 import { useEffect, useRef } from 'react'
-import { KSAN_SURFACE, buildKsanGroundScenario, buildTaxiGraph, createGroundSim } from '@anotheratc/sim'
+import {
+  KSAN_SURFACE,
+  buildKsanGroundScenario,
+  buildRunwayGuard,
+  buildTaxiGraph,
+  createGroundSim,
+} from '@anotheratc/sim'
 import { fitView, pan, toWorld, zoomAt, type View } from './view'
 import { drawAircraft, drawLabels, drawSelection, drawSurface } from './render'
 
@@ -22,7 +28,8 @@ export function GroundScope() {
     if (!ctx) return
 
     const graph = buildTaxiGraph(KSAN_SURFACE)
-    const sim = createGroundSim(buildKsanGroundScenario(1), graph)
+    const guard = buildRunwayGuard(KSAN_SURFACE)
+    const sim = createGroundSim(buildKsanGroundScenario(1), graph, guard)
     let selectedId: string | null = null
 
     let width = 0
@@ -88,6 +95,9 @@ export function GroundScope() {
     }
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') selectedId = null
+      else if ((e.key === 'c' || e.key === 'C') && selectedId) {
+        sim.dispatch({ type: 'crossRunway', aircraftId: selectedId })
+      }
     }
 
     function handleClick(sx: number, sy: number): void {
@@ -165,9 +175,13 @@ export function GroundScope() {
           statusRef.current.textContent = `${moving} taxiing · ${snap.aircraft.length} on surface · T+${mm}:${ss}`
         }
         if (hintRef.current) {
-          hintRef.current.textContent = selected
-            ? `${selected.callsign} selected — click a taxiway point to assign taxi · right-click to hold · Esc to deselect`
-            : 'click an aircraft to select · drag to pan · scroll to zoom'
+          if (selected?.holdShort) {
+            hintRef.current.textContent = `${selected.callsign} holding short of the runway — press C to clear across · Esc to deselect`
+          } else if (selected) {
+            hintRef.current.textContent = `${selected.callsign} selected — click a point to assign taxi · right-click to hold · Esc to deselect`
+          } else {
+            hintRef.current.textContent = 'click an aircraft to select · drag to pan · scroll to zoom'
+          }
         }
       }
       raf = requestAnimationFrame(frame)

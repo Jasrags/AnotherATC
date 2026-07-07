@@ -218,14 +218,17 @@ export function drawAircraft(ctx: Ctx, v: View, aircraft: GroundAircraft[]): voi
       ctx.stroke()
     }
 
-    // target blip
+    // target blip — amber when holding short of a runway
     const r = DIMS.targetR
     ctx.save()
     if (!ac.holding) {
       ctx.shadowColor = COLORS.targetHalo
       ctx.shadowBlur = 7
+    } else if (ac.holdShort) {
+      ctx.shadowColor = COLORS.holdShortTarget
+      ctx.shadowBlur = 8
     }
-    ctx.fillStyle = ac.holding ? COLORS.targetHold : COLORS.target
+    ctx.fillStyle = ac.holdShort ? COLORS.holdShortTarget : ac.holding ? COLORS.targetHold : COLORS.target
     ctx.beginPath()
     ctx.rect(sx - r, sy - r, r * 2, r * 2)
     ctx.fill()
@@ -244,8 +247,13 @@ export function drawAircraft(ctx: Ctx, v: View, aircraft: GroundAircraft[]): voi
     const wake = ac.wake === 'H' ? ' H' : ac.wake === 'J' ? ' J' : ''
     ctx.fillStyle = COLORS.block1
     ctx.fillText(`${ac.callsign}${wake}`, bx, by)
-    const speed = ac.holding ? '--' : String(ac.groundspeed).padStart(2, '0')
-    ctx.fillStyle = COLORS.block2
-    ctx.fillText(`${ac.type}  ${speed}`, bx, by + DIMS.blockFont + 1)
+    if (ac.holdShort) {
+      ctx.fillStyle = COLORS.holdShortTarget
+      ctx.fillText('HOLD SHORT', bx, by + DIMS.blockFont + 1)
+    } else {
+      const speed = ac.holding ? '--' : String(ac.groundspeed).padStart(2, '0')
+      ctx.fillStyle = COLORS.block2
+      ctx.fillText(`${ac.type}  ${speed}`, bx, by + DIMS.blockFont + 1)
+    }
   }
 }

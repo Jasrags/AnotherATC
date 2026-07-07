@@ -20,6 +20,7 @@ export const COLORS = {
   block1: '#8ef0b4',
   block2: '#54b487',
   connector: '#2b4a5b',
+  holdShortTarget: '#f4b64e',
   selection: '#ffd24a',
   route: '#49d3ff',
   routeDest: '#8becff',

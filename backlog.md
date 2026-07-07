@@ -20,6 +20,7 @@ strips, KSAN charts) and `CLAUDE.md` for architecture.
 - ✅ Command/dispatch (reducer pattern): `taxiTo`, `hold`, `resume`
 - ✅ Interaction: click-select, click-to-taxi, right-click hold, Esc deselect, route + selection display
 - ✅ Map labels: taxiway designators, runway 9/27
+- ✅ Hold-short of runway: taxi routes auto-stop at the hold line (amber); "cross runway" (C) clearance releases them
 - ✅ Makefile (auto-routes through fnm Node 22), watch tasks
 
 ---
@@ -28,7 +29,7 @@ strips, KSAN charts) and `CLAUDE.md` for architecture.
 
 The core ground-control loop. Ordered roughly by priority.
 
-- ⬜ **Hold-short of runway / runway-crossing clearances** — aircraft must stop at hold lines (OSM `holding_position`); crossing requires explicit clearance. Highest-value safety mechanic.
+- ✅ **Hold-short of runway / runway-crossing clearances** — routes stop at the runway; press C to clear across. _Next: snap the stop to the exact `holding_position` line; require Tower coordination._
 - ⬜ **Named destinations** — "taxi to RWY 27", "to gate 32", "to spot" instead of raw map clicks; resolve names → graph nodes
 - ⬜ **Assigned taxi routes** — clearance as a sequence of taxiways ("via B, C") with readback, not just shortest path
 - ⬜ **Pushback from gate** — request → approve → push into the alley, then taxi
@@ -98,7 +99,7 @@ The game models four positions (see `docs/atc-flight-strips.md`). Ground first, 
 ## Tech debt / known limitations
 
 - ⬜ Destinations are raw clicks snapped to nearest node (see named destinations)
-- ⬜ No hold-short logic — aircraft route across the runway freely
+- ⬜ Hold-short stops at the last taxi vertex before the runway zone, not the exact painted hold line (`holding_position`)
 - ⬜ Taxi routes are shortest-path, not operationally realistic assigned routes
 - ⬜ Surface redrawn every frame; consider offscreen-canvas caching if perf needs it
 - ⬜ Scenario stitches arbitrary long taxiways for demo traffic — replace with real gate→runway flows

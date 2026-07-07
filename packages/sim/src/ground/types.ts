@@ -8,6 +8,7 @@ export type GroundCommand =
   | { type: 'taxiTo'; aircraftId: string; dest: Point }
   | { type: 'hold'; aircraftId: string }
   | { type: 'resume'; aircraftId: string }
+  | { type: 'crossRunway'; aircraftId: string }
 
 /** An aircraft on the airport surface, as seen by a consumer (immutable snapshot). */
 export interface GroundAircraft {
@@ -25,6 +26,8 @@ export interface GroundAircraft {
   groundspeed: number
   /** True once the aircraft has reached the end of its route and stopped. */
   holding: boolean
+  /** Stopped at a runway hold-short line, awaiting a crossing clearance. */
+  holdShort: boolean
 }
 
 export interface GroundSnapshot {

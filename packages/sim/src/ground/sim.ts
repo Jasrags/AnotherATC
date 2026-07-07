@@ -1,6 +1,7 @@
 import type { Point } from '../world/types'
 import type { GroundAircraft, GroundCommand, GroundSim, GroundSnapshot, WakeCategory } from './types'
 import type { TaxiGraph } from './taxiGraph'
+import { splitRouteAtRunway, type RunwayGuard } from './runwayGuard'
 
 /** Initial definition of one aircraft: a route (nm waypoints) taxied at a target speed. */
 export interface AircraftInit {
@@ -33,20 +34,35 @@ interface Internal extends GroundAircraft {
   path: readonly Point[]
   leg: number
   targetSpeed: number
+  /** Route beyond a hold-short line, released by a crossRunway clearance. */
+  held: Point[] | null
 }
 
 /**
  * A deterministic surface-movement simulation. Aircraft follow their route at a
- * performance-limited speed; heading tracks the current segment. A {@link TaxiGraph}
- * (optional) enables `taxiTo` routing. Internal state is mutated in place each tick;
+ * performance-limited speed and stop at runway hold-short lines until cleared to
+ * cross. A {@link TaxiGraph} enables `taxiTo` routing; a {@link RunwayGuard}
+ * enables hold-short behaviour. Internal state is mutated in place each tick;
  * {@link GroundSim.snapshot} hands consumers fresh immutable objects.
  */
-export function createGroundSim(inits: readonly AircraftInit[], graph?: TaxiGraph): GroundSim {
+export function createGroundSim(
+  inits: readonly AircraftInit[],
+  graph?: TaxiGraph,
+  runwayGuard?: RunwayGuard,
+): GroundSim {
   let time = 0
 
+  // Split a full route at the first runway crossing (if a guard is present).
+  const plan = (route: readonly Point[]): { path: Point[]; held: Point[] | null } => {
+    if (!runwayGuard || route.length < 2) return { path: [...route], held: null }
+    const { drive, held } = splitRouteAtRunway(route, runwayGuard)
+    return { path: drive, held }
+  }
+
   const fleet: Internal[] = inits.map((init) => {
-    const start = init.path[0] ?? ([0, 0] as Point)
-    const next = init.path[1]
+    const { path, held } = plan(init.path)
+    const start = path[0] ?? ([0, 0] as Point)
+    const next = path[1]
     const heading =
       init.heading ?? (next ? bearing(start[0], start[1], next[0], next[1]) : 0)
     return {
@@ -58,10 +74,12 @@ export function createGroundSim(inits: readonly AircraftInit[], graph?: TaxiGrap
       y: start[1],
       heading: normalizeDeg(heading),
       groundspeed: 0,
-      holding: init.path.length < 2,
-      path: init.path,
+      holding: path.length < 2,
+      holdShort: path.length < 2 && held !== null,
+      path,
       leg: 0,
       targetSpeed: init.targetSpeed,
+      held,
     }
   })
 
@@ -77,8 +95,10 @@ export function createGroundSim(inits: readonly AircraftInit[], graph?: TaxiGrap
       ac.groundspeed = Math.max(target, ac.groundspeed - TAXI_ACCEL * dt)
     }
 
-    ac.holding = target === 0 && ac.groundspeed <= 0.01
-    if (ac.groundspeed <= 0.01 && target === 0) {
+    const stopped = ac.groundspeed <= 0.01 && target === 0
+    ac.holding = stopped
+    ac.holdShort = stopped && atEnd && ac.held !== null
+    if (stopped) {
       ac.groundspeed = 0
       return
     }
@@ -119,11 +139,13 @@ export function createGroundSim(inits: readonly AircraftInit[], graph?: TaxiGrap
         if (!startKey || !goalKey) return
         const routePoints = graph.route(startKey, goalKey)
         if (routePoints.length === 0) return
-        // Prepend the exact current position so it drives smoothly onto the graph.
-        ac.path = [[ac.x, ac.y], ...routePoints]
+        const { path, held } = plan([[ac.x, ac.y], ...routePoints])
+        ac.path = path
         ac.leg = 0
+        ac.held = held
         ac.targetSpeed = TAXI_SPEED_KT
         ac.holding = false
+        ac.holdShort = false
         break
       }
       case 'hold':
@@ -135,14 +157,26 @@ export function createGroundSim(inits: readonly AircraftInit[], graph?: TaxiGrap
           ac.holding = false
         }
         break
+      case 'crossRunway':
+        // Only meaningful when holding short; release the route across the runway.
+        if (ac.held && ac.held.length >= 2) {
+          ac.path = ac.held
+          ac.leg = 0
+          ac.held = null
+          ac.targetSpeed = TAXI_SPEED_KT
+          ac.holding = false
+          ac.holdShort = false
+        }
+        break
     }
   }
 
   function routeOf(aircraftId: string): Point[] {
     const ac = find(aircraftId)
-    if (!ac || ac.leg >= ac.path.length - 1) return []
-    const ahead = ac.path.slice(ac.leg + 1)
-    return [[ac.x, ac.y], ...ahead]
+    if (!ac) return []
+    if (ac.leg < ac.path.length - 1) return [[ac.x, ac.y], ...ac.path.slice(ac.leg + 1)]
+    if (ac.held && ac.held.length >= 2) return [[ac.x, ac.y], ...ac.held.slice(1)]
+    return []
   }
 
   return {
@@ -163,6 +197,7 @@ export function createGroundSim(inits: readonly AircraftInit[], graph?: TaxiGrap
           heading: ac.heading,
           groundspeed: Math.round(ac.groundspeed),
           holding: ac.holding,
+          holdShort: ac.holdShort,
         })),
       }
     },
