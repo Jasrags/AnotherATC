@@ -25,6 +25,7 @@ strips, KSAN charts) and `CLAUDE.md` for architecture.
 - ✅ Sim↔UI bridge: `useSyncExternalStore` store (canvas on rAF, strips re-render only on phase/selection change)
 - ✅ Traffic flow: intent (departure/arrival), deterministic spawner, goal completion + despawn, dep/arr score; "Taxi ▸ RWY/Gate" from strips
 - ✅ Named destinations: per-strip clearance row (RWY 27/9, gate, hold, cross); named runway taxis auto hold-short
+- ✅ Map labels polish: signage-yellow taxiway IDs with halos, kept off the runway; taxiway A + A1–A7 added (OSM lacked them, patched by way-id in ingest)
 - ✅ Makefile (auto-routes through fnm Node 22), watch tasks
 
 ---
@@ -91,7 +92,9 @@ The game models four positions (see `docs/atc-flight-strips.md`). Ground first, 
 
 ## Polish / UX
 
-- ⬜ Ramp / terminal / gate labels; apron names
+- ⬜ Ramp / terminal / gate labels; apron names (Terminal 1/2, North/Air Cargo Ramp, GA parking)
+- ⬜ HS1 hotspot marker (from the airport diagram)
+- ⬜ Label density control (show major spines when zoomed out, exits when zoomed in) + collision avoidance
 - ⬜ Scale bar / range rings; recenter + zoom-to-fit control
 - ⬜ Pan/zoom clamping (don't lose the airport off-screen)
 - ⬜ Aircraft symbology by category/phase; selected-target emphasis
