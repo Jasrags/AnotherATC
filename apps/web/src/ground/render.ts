@@ -90,33 +90,29 @@ function strokeFeatures(ctx: Ctx, v: View, feats: SurfaceFeature[], color: strin
   }
 }
 
-export function drawSurface(ctx: Ctx, v: View, surface: AirportSurface, w: number, h: number): void {
+export function drawSurface(ctx: Ctx, v: View, prep: PreparedSurface, w: number, h: number): void {
   ctx.fillStyle = COLORS.bg
   ctx.fillRect(0, 0, w, h)
 
-  fillPolys(ctx, v, byKind(surface, 'apron'), COLORS.apronFill, COLORS.apronEdge)
-  fillPolys(ctx, v, byKind(surface, 'terminal', 'hangar'), COLORS.buildingFill, COLORS.buildingEdge)
+  fillPolys(ctx, v, prep.apron, COLORS.apronFill, COLORS.apronEdge)
+  fillPolys(ctx, v, prep.buildings, COLORS.buildingFill, COLORS.buildingEdge)
 
   // gate stands are drawn as markers in drawGates (cleaner than the tangle of
   // OSM parking guidance lines).
 
   // taxiways: pavement then a thin centerline
-  const taxi = byKind(surface, 'taxiway', 'taxilane')
-  strokeFeatures(ctx, v, taxi, COLORS.taxiway, { nm: DIMS.taxiwayNm, minPx: 1.5 })
-  strokeFeatures(ctx, v, taxi, COLORS.taxiwayCenter, { px: 0.8 })
+  strokeFeatures(ctx, v, prep.taxiways, COLORS.taxiway, { nm: DIMS.taxiwayNm, minPx: 1.5 })
+  strokeFeatures(ctx, v, prep.taxiways, COLORS.taxiwayCenter, { px: 0.8 })
 
   // runway: edge outline, pavement, dashed centerline
-  const rwy = byKind(surface, 'runway', 'stopway')
-  strokeFeatures(ctx, v, rwy, COLORS.runwayEdge, { nm: DIMS.runwayNm + 0.003, minPx: 4 })
-  strokeFeatures(ctx, v, rwy, COLORS.runway, { nm: DIMS.runwayNm, minPx: 3 })
-  strokeFeatures(ctx, v, byKind(surface, 'runway'), COLORS.runwayCenter, { px: 1.2, dash: [11, 9] })
+  strokeFeatures(ctx, v, prep.runwayPavement, COLORS.runwayEdge, { nm: DIMS.runwayNm + 0.003, minPx: 4 })
+  strokeFeatures(ctx, v, prep.runwayPavement, COLORS.runway, { nm: DIMS.runwayNm, minPx: 3 })
+  strokeFeatures(ctx, v, prep.runwayCenterlines, COLORS.runwayCenter, { px: 1.2, dash: [11, 9] })
   ctx.setLineDash([])
 
   // hold-short markers (nodes)
   ctx.fillStyle = COLORS.holdShort
-  for (const f of byKind(surface, 'holding_position')) {
-    const p = f.points[0]
-    if (!p) continue
+  for (const p of prep.holdShort) {
     const [sx, sy] = toScreen(v, p[0], p[1])
     ctx.beginPath()
     ctx.rect(sx - 1.6, sy - 1.6, 3.2, 3.2)
@@ -175,35 +171,14 @@ const AREA_OFFSET_NM: Record<string, Point> = {
 }
 
 /** Ramp / terminal / apron area names, centered on each named area. */
-export function drawAreaLabels(ctx: Ctx, v: View, surface: AirportSurface): void {
-  const groups = new Map<string, { x: number; y: number; n: number }>()
-  for (const f of surface.features) {
-    if ((f.kind !== 'terminal' && f.kind !== 'apron') || !f.ref) continue
-    let cx = 0
-    let cy = 0
-    let n = 0
-    for (const p of f.points) {
-      if (!p) continue
-      cx += p[0]
-      cy += p[1]
-      n += 1
-    }
-    if (n === 0) continue
-    const g = groups.get(f.ref) ?? { x: 0, y: 0, n: 0 }
-    g.x += cx / n
-    g.y += cy / n
-    g.n += 1
-    groups.set(f.ref, g)
-  }
-
+export function drawAreaLabels(ctx: Ctx, v: View, prep: PreparedSurface): void {
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
   ctx.lineJoin = 'round'
   ctx.font = '500 11px ui-sans-serif, system-ui, sans-serif'
-  for (const [name, g] of groups) {
-    const off = AREA_OFFSET_NM[name] ?? [0, 0]
-    const [sx, sy] = toScreen(v, g.x / g.n + off[0], g.y / g.n + off[1])
-    label(ctx, name.toUpperCase(), sx, sy, COLORS.labelArea)
+  for (const { text, at } of prep.areaLabels) {
+    const [sx, sy] = toScreen(v, at[0], at[1])
+    label(ctx, text, sx, sy, COLORS.labelArea)
   }
   ctx.textAlign = 'left'
 }
@@ -239,11 +214,141 @@ function collectStands(surface: AirportSurface): Stand[] {
   return stands
 }
 
-export function drawGates(ctx: Ctx, v: View, surface: AirportSurface): void {
-  const stands = collectStands(surface)
+interface LabelAnchor {
+  text: string
+  /** World-space (nm) anchor; the frame loop applies the current view transform. */
+  at: Point
+}
 
+/** A runway number plus the pixel offset that nudges it clear of the threshold. */
+interface RunwayNumber extends LabelAnchor {
+  dx: number
+}
+
+/**
+ * All surface-derived draw data — feature buckets and world-space label anchors — computed
+ * once per surface. The surface is static, so only the view transform and the aircraft change
+ * per frame; the frame loop reuses this instead of re-filtering features and rebuilding Maps
+ * ~60×/sec (WEB-1). Build it once (e.g. `useMemo`) and pass it to the static draw calls.
+ */
+export interface PreparedSurface {
+  apron: SurfaceFeature[]
+  buildings: SurfaceFeature[]
+  taxiways: SurfaceFeature[]
+  runwayPavement: SurfaceFeature[]
+  runwayCenterlines: SurfaceFeature[]
+  holdShort: Point[]
+  areaLabels: LabelAnchor[]
+  stands: Stand[]
+  taxiLabels: LabelAnchor[]
+  runwayNumbers: RunwayNumber[]
+}
+
+export function prepareSurface(surface: AirportSurface): PreparedSurface {
+  const runways = surface.features.filter((f) => f.kind === 'runway')
+
+  const holdShort: Point[] = []
+  for (const f of byKind(surface, 'holding_position')) {
+    const p = f.points[0]
+    if (p) holdShort.push(p)
+  }
+
+  // Ramp / terminal / apron area names, centered on each named area.
+  const groups = new Map<string, { x: number; y: number; n: number }>()
+  for (const f of surface.features) {
+    if ((f.kind !== 'terminal' && f.kind !== 'apron') || !f.ref) continue
+    let cx = 0
+    let cy = 0
+    let n = 0
+    for (const p of f.points) {
+      if (!p) continue
+      cx += p[0]
+      cy += p[1]
+      n += 1
+    }
+    if (n === 0) continue
+    const g = groups.get(f.ref) ?? { x: 0, y: 0, n: 0 }
+    g.x += cx / n
+    g.y += cy / n
+    g.n += 1
+    groups.set(f.ref, g)
+  }
+  const areaLabels: LabelAnchor[] = []
+  for (const [name, g] of groups) {
+    const off = AREA_OFFSET_NM[name] ?? [0, 0]
+    areaLabels.push({ text: name.toUpperCase(), at: [g.x / g.n + off[0], g.y / g.n + off[1]] })
+  }
+
+  // nm distance from a point to the nearest runway centerline — used to keep labels off the runway
+  const nearRunway = (p: Point): boolean => {
+    for (const f of runways) {
+      for (let i = 1; i < f.points.length; i += 1) {
+        const a = f.points[i - 1]
+        const b = f.points[i]
+        if (a && b && distToSeg(p[0], p[1], a[0], a[1], b[0], b[1]) < 0.03) return true
+      }
+    }
+    return false
+  }
+
+  // One anchor per taxiway ref: prefer a midpoint off the runway, then the longest segment.
+  const best = new Map<string, { score: number; mid: Point }>()
+  for (const f of surface.features) {
+    if ((f.kind !== 'taxiway' && f.kind !== 'taxilane') || !f.ref) continue
+    const mid = f.points[Math.floor(f.points.length / 2)]
+    if (!mid) continue
+    const score = (nearRunway(mid) ? 0 : 1e6) + polylineLength(f.points)
+    const cur = best.get(f.ref)
+    if (!cur || score > cur.score) best.set(f.ref, { score, mid })
+  }
+  const taxiLabels: LabelAnchor[] = []
+  for (const [ref, { mid }] of best) {
+    // If the anchor sits on/near the runway, nudge it clear of the pavement so
+    // runway connectors (C1, C6, …) stay labeled and readable.
+    let anchor = mid
+    const np = nearestRunwayPoint(mid, runways)
+    if (np) {
+      const d = Math.hypot(mid[0] - np[0], mid[1] - np[1])
+      if (d < 0.045) {
+        const ux = d > 1e-6 ? (mid[0] - np[0]) / d : 0
+        const uy = d > 1e-6 ? (mid[1] - np[1]) / d : 1
+        anchor = [np[0] + ux * 0.06, np[1] + uy * 0.06]
+      }
+    }
+    taxiLabels.push({ text: ref, at: anchor })
+  }
+
+  // runway numbers at the two thresholds (9 = west end, 27 = east end)
+  let west: Point | null = null
+  let east: Point | null = null
+  for (const f of runways) {
+    for (const p of f.points) {
+      if (!p) continue
+      if (!west || p[0] < west[0]) west = p
+      if (!east || p[0] > east[0]) east = p
+    }
+  }
+  const runwayNumbers: RunwayNumber[] = []
+  if (west) runwayNumbers.push({ text: '9', at: west, dx: -12 })
+  if (east) runwayNumbers.push({ text: '27', at: east, dx: 14 })
+
+  return {
+    apron: byKind(surface, 'apron'),
+    buildings: byKind(surface, 'terminal', 'hangar'),
+    taxiways: byKind(surface, 'taxiway', 'taxilane'),
+    runwayPavement: byKind(surface, 'runway', 'stopway'),
+    runwayCenterlines: runways,
+    holdShort,
+    areaLabels,
+    stands: collectStands(surface),
+    taxiLabels,
+    runwayNumbers,
+  }
+}
+
+export function drawGates(ctx: Ctx, v: View, prep: PreparedSurface): void {
   ctx.fillStyle = COLORS.gateNode
-  for (const s of stands) {
+  for (const s of prep.stands) {
     const [sx, sy] = toScreen(v, s.point[0], s.point[1])
     ctx.fillRect(sx - 1.5, sy - 1.5, 3, 3)
   }
@@ -253,7 +358,7 @@ export function drawGates(ctx: Ctx, v: View, surface: AirportSurface): void {
   ctx.textBaseline = 'middle'
   ctx.lineJoin = 'round'
   ctx.font = '600 9px ui-monospace, "SF Mono", Menlo, monospace'
-  for (const s of stands) {
+  for (const s of prep.stands) {
     const [sx, sy] = toScreen(v, s.point[0], s.point[1])
     label(ctx, s.ref.toUpperCase(), sx, sy - 7, COLORS.gateLabel)
   }
@@ -282,70 +387,20 @@ export function drawHotspots(ctx: Ctx, v: View, surface: AirportSurface): void {
 }
 
 /** Taxiway designator (kept off the runway) + runway numbers, with halos. */
-export function drawLabels(ctx: Ctx, v: View, surface: AirportSurface): void {
-  // nm distance from a point to the nearest runway centerline — used to keep labels off the runway
-  const runways = surface.features.filter((f) => f.kind === 'runway')
-  const nearRunway = (p: Point): boolean => {
-    for (const f of runways) {
-      for (let i = 1; i < f.points.length; i += 1) {
-        const a = f.points[i - 1]
-        const b = f.points[i]
-        if (a && b && distToSeg(p[0], p[1], a[0], a[1], b[0], b[1]) < 0.03) return true
-      }
-    }
-    return false
-  }
-
-  // One anchor per taxiway ref: prefer a midpoint off the runway, then the longest segment.
-  const best = new Map<string, { score: number; mid: Point }>()
-  for (const f of surface.features) {
-    if ((f.kind !== 'taxiway' && f.kind !== 'taxilane') || !f.ref) continue
-    const mid = f.points[Math.floor(f.points.length / 2)]
-    if (!mid) continue
-    const score = (nearRunway(mid) ? 0 : 1e6) + polylineLength(f.points)
-    const cur = best.get(f.ref)
-    if (!cur || score > cur.score) best.set(f.ref, { score, mid })
-  }
-
+export function drawLabels(ctx: Ctx, v: View, prep: PreparedSurface): void {
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
   ctx.lineJoin = 'round'
   ctx.font = '600 10px ui-monospace, "SF Mono", Menlo, monospace'
-  for (const [ref, { mid }] of best) {
-    // If the anchor sits on/near the runway, nudge it clear of the pavement so
-    // runway connectors (C1, C6, …) stay labeled and readable.
-    let anchor = mid
-    const np = nearestRunwayPoint(mid, runways)
-    if (np) {
-      const d = Math.hypot(mid[0] - np[0], mid[1] - np[1])
-      if (d < 0.045) {
-        const ux = d > 1e-6 ? (mid[0] - np[0]) / d : 0
-        const uy = d > 1e-6 ? (mid[1] - np[1]) / d : 1
-        anchor = [np[0] + ux * 0.06, np[1] + uy * 0.06]
-      }
-    }
-    const [sx, sy] = toScreen(v, anchor[0], anchor[1])
-    label(ctx, ref, sx, sy, COLORS.labelTaxi)
+  for (const { text, at } of prep.taxiLabels) {
+    const [sx, sy] = toScreen(v, at[0], at[1])
+    label(ctx, text, sx, sy, COLORS.labelTaxi)
   }
 
-  // runway numbers at the two thresholds (9 = west end, 27 = east end)
-  let west: Point | null = null
-  let east: Point | null = null
-  for (const f of runways) {
-    for (const p of f.points) {
-      if (!p) continue
-      if (!west || p[0] < west[0]) west = p
-      if (!east || p[0] > east[0]) east = p
-    }
-  }
   ctx.font = '700 13px ui-monospace, "SF Mono", Menlo, monospace'
-  if (west) {
-    const [sx, sy] = toScreen(v, west[0], west[1])
-    label(ctx, '9', sx - 12, sy, COLORS.labelRwy)
-  }
-  if (east) {
-    const [sx, sy] = toScreen(v, east[0], east[1])
-    label(ctx, '27', sx + 14, sy, COLORS.labelRwy)
+  for (const { text, at, dx } of prep.runwayNumbers) {
+    const [sx, sy] = toScreen(v, at[0], at[1])
+    label(ctx, text, sx + dx, sy, COLORS.labelRwy)
   }
 
   ctx.textAlign = 'left'

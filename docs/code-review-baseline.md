@@ -24,7 +24,7 @@ This is a solo early-dev game, so correctness and data integrity outrank a11y po
    - ~~`SIM-1` — status/holding contradiction~~ ✅ fixed.
    - ~~`SIM-6` — `goalNodeFor` centerline degeneracy~~ ✅ fixed.
    - ~~`ING-1` / `ING-2` / `ING-3` + `SIM-4`~~ ✅ fixed (validation theme T2).
-2. **Next batch (robustness / UX):** ~~`WEB-6`+`SIM-5` (dispatch feedback), `WEB-2` (resize), `WEB-7` (zoom clamp)~~ ✅ done. Remaining: `WEB-1` (per-frame recompute of static geometry).
+2. **Next batch (robustness / UX):** ~~`WEB-6`+`SIM-5` (dispatch feedback), `WEB-2` (resize), `WEB-7` (zoom clamp), `WEB-1` (per-frame recompute of static geometry)~~ ✅ done.
 3. ~~**Accessibility batch:** `WEB-3`, `WEB-4`, `WEB-5`, `WEB-10`~~ ✅ done (theme T3) — strips are focusable buttons, canvas is labeled with a Tab-to-strip path, submenus expose ARIA state, conflict alert announces.
 4. **Design debt (schedule deliberately):** ~~`SIM-2` — wake-turbulence spacing~~ ✅ done (design note + departure gate).
 5. **Test coverage:** stand up a Vitest setup for `apps/web` and backfill the sim gaps below. See "Test coverage" section.
@@ -71,8 +71,7 @@ No Critical findings. Effect cleanup (rAF, listeners, `ResizeObserver`) is corre
 
 ### HIGH
 
-**WEB-1 — Static surface geometry is recomputed from scratch every animation frame.** `ground/render.ts:93-352`, driven from `GroundScope.tsx:231-243`.
-`drawSurface`/`drawAreaLabels`/`drawGates`/`drawLabels` re-filter features and rebuild Maps/Sets over static `KSAN_SURFACE` up to 60×/sec. Pure GC churn; scales badly as airports grow. **Fix:** precompute buckets/anchors once (module scope or `useMemo`); only recompute per-frame data (aircraft, selection, hover, route draft).
+**WEB-1 — Static surface geometry is recomputed from scratch every animation frame.** ✅ **FIXED** (2026-07-07) — new `prepareSurface(surface)` computes all surface-derived draw data once (feature buckets + world-space label anchors: taxi labels, area labels, stands, runway numbers, hold-short points); `GroundScope` builds it via `useMemo` and passes the `PreparedSurface` to `drawSurface`/`drawAreaLabels`/`drawGates`/`drawLabels`. The per-frame work is now just the view transform + aircraft/selection/hover/route draft — no more re-filtering features or rebuilding Maps ~60×/sec. `prepareSurface` is pure and unit-tested (`render.test.ts`). `render.ts`, `GroundScope.tsx`.
 
 **WEB-2 — `ResizeObserver` handler discards the user's pan/zoom on every reflow.** ✅ **FIXED** (2026-07-07) — first layout fits to bounds; subsequent resizes call the new `reframe()` (preserves zoom, holds the world point at screen center). Tested in `view.test.ts`. `GroundScope.tsx:47-58`.
 `resize()` always calls `fitView(...)`, so any window resize / layout reflow silently recenters a controller who panned into a runway. **Fix:** preserve current scale/center on resize; only `fitView` on first mount.

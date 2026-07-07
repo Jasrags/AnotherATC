@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { KSAN_SURFACE } from '@anotheratc/sim'
 import type { GroundController } from './controller'
 import { fitView, pan, reframe, toWorld, zoomAt, type View } from './view'
@@ -13,6 +13,7 @@ import {
   drawSelection,
   drawSurface,
   nearestTaxiwayRef,
+  prepareSurface,
 } from './render'
 import { isTypingTarget } from './keyboard'
 
@@ -36,6 +37,10 @@ export function GroundScope({ controller }: { controller: GroundController }) {
   const statusRef = useRef<HTMLDivElement>(null)
   const hintRef = useRef<HTMLDivElement>(null)
   const alertRef = useRef<HTMLDivElement>(null)
+
+  // Surface-derived draw data (feature buckets, label anchors) is static — compute it once,
+  // not every animation frame (WEB-1). KSAN_SURFACE is a constant, so this never recomputes.
+  const prep = useMemo(() => prepareSurface(KSAN_SURFACE), [])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -239,9 +244,9 @@ export function GroundScope({ controller }: { controller: GroundController }) {
         const snap = sim.snapshot()
         const selectedId = controller.selectedId()
         const draft = controller.routeDraft()
-        drawSurface(ctx, view, KSAN_SURFACE, width, height)
-        drawAreaLabels(ctx, view, KSAN_SURFACE)
-        drawGates(ctx, view, KSAN_SURFACE)
+        drawSurface(ctx, view, prep, width, height)
+        drawAreaLabels(ctx, view, prep)
+        drawGates(ctx, view, prep)
         drawHotspots(ctx, view, KSAN_SURFACE)
         if (draft) {
           drawRouteDraft(ctx, view, KSAN_SURFACE, draft.via)
@@ -251,7 +256,7 @@ export function GroundScope({ controller }: { controller: GroundController }) {
             if (ref && !draft.via.includes(ref)) drawRouteHover(ctx, view, KSAN_SURFACE, ref)
           }
         }
-        drawLabels(ctx, view, KSAN_SURFACE)
+        drawLabels(ctx, view, prep)
         drawAircraft(ctx, view, snap.aircraft)
         const selected = selectedId ? snap.aircraft.find((a) => a.id === selectedId) : undefined
         drawSelection(ctx, view, selected, selectedId ? sim.routeOf(selectedId) : [])
@@ -306,7 +311,7 @@ export function GroundScope({ controller }: { controller: GroundController }) {
       canvas.removeEventListener('contextmenu', onContextMenu)
       window.removeEventListener('keydown', onKey)
     }
-  }, [controller])
+  }, [controller, prep])
 
   return (
     <div className="scope">
