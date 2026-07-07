@@ -362,7 +362,14 @@ function distToSegment(px: number, py: number, ax: number, ay: number, bx: numbe
   return Math.hypot(px - (ax + dx * t), py - (ay + dy * t))
 }
 
-/** The designator of the named taxiway nearest a world point, within `maxNm`; null if none. */
+/** Distances within this (nm) count as a tie — resolved in favor of the longer taxiway. */
+const TAXI_TIE_NM = 0.005
+
+/**
+ * The designator of the named taxiway nearest a world point, within `maxNm`; null if none.
+ * On a near-tie (a junction where two legs are ~equidistant) the longer taxiway wins, so
+ * clicking an intersection deterministically picks the through-taxiway over a stub.
+ */
 export function nearestTaxiwayRef(
   surface: AirportSurface,
   wx: number,
@@ -371,32 +378,44 @@ export function nearestTaxiwayRef(
 ): string | null {
   let best: string | null = null
   let bestD = maxNm
+  let bestLen = 0
   for (const f of surface.features) {
     if ((f.kind !== 'taxiway' && f.kind !== 'taxilane') || !f.ref) continue
+    let d = Infinity
     for (let i = 1; i < f.points.length; i += 1) {
       const a = f.points[i - 1]
       const b = f.points[i]
-      if (!a || !b) continue
-      const d = distToSegment(wx, wy, a[0], a[1], b[0], b[1])
-      if (d < bestD) {
-        bestD = d
-        best = f.ref
-      }
+      if (a && b) d = Math.min(d, distToSegment(wx, wy, a[0], a[1], b[0], b[1]))
+    }
+    if (d > maxNm) continue
+    const len = polylineLength(f.points)
+    // Clearly nearer wins; within a tie window the longer leg wins.
+    if (best === null || d < bestD - TAXI_TIE_NM || (d <= bestD + TAXI_TIE_NM && len > bestLen)) {
+      best = f.ref
+      bestD = Math.min(bestD, d)
+      bestLen = len
     }
   }
   return best
 }
 
-/** Highlight every segment of the taxiways in `via` — the route being assembled by clicks. */
-export function drawRouteDraft(ctx: Ctx, v: View, surface: AirportSurface, via: string[]): void {
-  if (via.length === 0) return
-  const set = new Set(via)
-  ctx.strokeStyle = COLORS.routeVia
-  ctx.lineWidth = 3
+/** Stroke every segment of the taxiways in `set` in one style. */
+function strokeTaxiways(
+  ctx: Ctx,
+  v: View,
+  surface: AirportSurface,
+  set: Set<string>,
+  color: string,
+  width: number,
+  alpha: number,
+  dash: number[] = [],
+): void {
+  ctx.strokeStyle = color
+  ctx.lineWidth = width
   ctx.lineCap = 'round'
   ctx.lineJoin = 'round'
-  ctx.setLineDash([])
-  ctx.globalAlpha = 0.85
+  ctx.setLineDash(dash)
+  ctx.globalAlpha = alpha
   for (const f of surface.features) {
     if ((f.kind !== 'taxiway' && f.kind !== 'taxilane') || !f.ref || !set.has(f.ref)) continue
     ctx.beginPath()
@@ -404,6 +423,18 @@ export function drawRouteDraft(ctx: Ctx, v: View, surface: AirportSurface, via: 
     ctx.stroke()
   }
   ctx.globalAlpha = 1
+  ctx.setLineDash([])
+}
+
+/** Highlight every segment of the taxiways in `via` — the route being assembled by clicks. */
+export function drawRouteDraft(ctx: Ctx, v: View, surface: AirportSurface, via: string[]): void {
+  if (via.length === 0) return
+  strokeTaxiways(ctx, v, surface, new Set(via), COLORS.routeVia, 3, 0.85)
+}
+
+/** Faint preview of the taxiway a click would pick right now (hover feedback in route mode). */
+export function drawRouteHover(ctx: Ctx, v: View, surface: AirportSurface, ref: string): void {
+  strokeTaxiways(ctx, v, surface, new Set([ref]), COLORS.routeVia, 2.5, 0.4, [4, 5])
 }
 
 export function drawSelection(

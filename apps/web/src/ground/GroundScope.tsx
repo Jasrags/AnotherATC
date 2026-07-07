@@ -9,6 +9,7 @@ import {
   drawHotspots,
   drawLabels,
   drawRouteDraft,
+  drawRouteHover,
   drawSelection,
   drawSurface,
   nearestTaxiwayRef,
@@ -18,8 +19,9 @@ import {
 const FIXED_DT = 0.05
 /** Click must land within this many px of a target to select it. */
 const HIT_PX = 14
-/** Click must land within this many px of a taxiway to add it to a route. */
-const TAXI_HIT_PX = 16
+/** Click within this many px of a taxiway snaps to it (generous — the hover preview
+ *  shows exactly which taxiway will be picked, so a wide radius is safe). */
+const TAXI_HIT_PX = 26
 /** Pointer movement beyond this (px) counts as a pan, not a click. */
 const DRAG_PX = 4
 
@@ -63,6 +65,10 @@ export function GroundScope({ controller }: { controller: GroundController }) {
     let pinchDist = 0
     let pinchCx = 0
     let pinchCy = 0
+    // Mouse hover, for the route-mode preview of the taxiway a click would pick.
+    let hoverX = -1
+    let hoverY = -1
+    let hovering = false
 
     const rectPt = (e: PointerEvent): { x: number; y: number } => {
       const r = canvas.getBoundingClientRect()
@@ -98,9 +104,14 @@ export function GroundScope({ controller }: { controller: GroundController }) {
       }
     }
     const onMove = (e: PointerEvent) => {
+      const p = rectPt(e)
+      if (e.pointerType === 'mouse') {
+        hoverX = p.x
+        hoverY = p.y
+        hovering = true
+      }
       const prev = pointers.get(e.pointerId)
       if (!prev || !view) return
-      const p = rectPt(e)
       pointers.set(e.pointerId, p)
       if (pointers.size >= 2) {
         const s = pinchState()
@@ -122,6 +133,9 @@ export function GroundScope({ controller }: { controller: GroundController }) {
       if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId)
       if (pointers.size < 2) pinchDist = 0
       if (had && pointers.size === 0 && !moved && view) handleClick(downX, downY)
+    }
+    const onLeave = () => {
+      hovering = false
     }
     const onContextMenu = (e: MouseEvent) => {
       e.preventDefault()
@@ -178,6 +192,7 @@ export function GroundScope({ controller }: { controller: GroundController }) {
     canvas.addEventListener('pointermove', onMove)
     canvas.addEventListener('pointerup', endPointer)
     canvas.addEventListener('pointercancel', endPointer)
+    canvas.addEventListener('pointerleave', onLeave)
     canvas.addEventListener('contextmenu', onContextMenu)
     window.addEventListener('keydown', onKey)
 
@@ -213,7 +228,14 @@ export function GroundScope({ controller }: { controller: GroundController }) {
         drawAreaLabels(ctx, view, KSAN_SURFACE)
         drawGates(ctx, view, KSAN_SURFACE)
         drawHotspots(ctx, view, KSAN_SURFACE)
-        if (draft) drawRouteDraft(ctx, view, KSAN_SURFACE, draft.via)
+        if (draft) {
+          drawRouteDraft(ctx, view, KSAN_SURFACE, draft.via)
+          if (hovering) {
+            const [wx, wy] = toWorld(view, hoverX, hoverY)
+            const ref = nearestTaxiwayRef(KSAN_SURFACE, wx, wy, TAXI_HIT_PX / view.scale)
+            if (ref && !draft.via.includes(ref)) drawRouteHover(ctx, view, KSAN_SURFACE, ref)
+          }
+        }
         drawLabels(ctx, view, KSAN_SURFACE)
         drawAircraft(ctx, view, snap.aircraft)
         const selected = selectedId ? snap.aircraft.find((a) => a.id === selectedId) : undefined
@@ -255,6 +277,7 @@ export function GroundScope({ controller }: { controller: GroundController }) {
       canvas.removeEventListener('pointermove', onMove)
       canvas.removeEventListener('pointerup', endPointer)
       canvas.removeEventListener('pointercancel', endPointer)
+      canvas.removeEventListener('pointerleave', onLeave)
       canvas.removeEventListener('contextmenu', onContextMenu)
       window.removeEventListener('keydown', onKey)
     }
