@@ -50,7 +50,7 @@ The core ground-control loop. Ordered roughly by priority.
 - ✅ **Flight strip bay (ground)** — status-driven strips beside the scope, phase-gated actions, selection synced with the scope. _Next: squawk/route fields, drag-reorder/sequence._
 - ⬜ **HS1 hotspot** — render the KSAN hot spot; incursion-risk awareness
 - ⬜ **Ground conflict / incursion alerts** — two aircraft converging, or one entering an occupied runway
-- ⬜ **Handoff to/from Tower** — ground ↔ tower frequency changes at the runway
+- 🚧 **Handoff to/from Tower** — **Contact tower** hands off a departure holding short of its runway: released onto the runway (tower's takeoff), completes its ground segment (counted as `departed`) and leaves the ground scope. The proper departure completion (Cross runway is now only for transiting traffic). _Next: real Tower mode (line up & wait, takeoff clearance, wake spacing); Tower→Ground handoff on arrival runway-exit; refuse when Tower is overloaded._
 - 💭 Multiple ground frequencies (N/S) — not needed at KSAN's scale
 - 💭 Progressive taxi / follow-the-greens visualization
 
@@ -86,7 +86,7 @@ individual command features below plug into; it generalizes across controller mo
 - ✅ **Hold position** — wired to `hold` (shown when taxiing).
 - ✅ **Pushback approved** — wired: shown for a parked gate departure; runs the `pushback` phase, after which Taxi/Route unlock (see Pushback from gate).
 - ⬜ **Misc. messages** — catch-all phraseology (say again, expedite, verify heading/altitude, etc.).
-- ⬜ **Contact other frequency** — listed as `soon` (`Contact tower`); needs Handoff to/from Tower.
+- ✅ **Contact other frequency** — `Contact tower` wired for a departure holding short (Ground→Tower handoff, completes the departure); stays `soon` in other states until more frequencies/modes exist.
 
 ### Supporting systems shown in the reference
 - ⬜ **Communications log** — timestamped readback/clearance transcript in ATC phraseology (ties into

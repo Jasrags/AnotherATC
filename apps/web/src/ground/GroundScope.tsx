@@ -261,7 +261,10 @@ export function GroundScope({ controller }: { controller: GroundController }) {
             const via = draft.via.length ? `via ${draft.via.join(' · ')}` : '(none yet)'
             hintRef.current.textContent = `Routing ${selected.callsign} ${via} — click taxiways to add · tap a chip or Backspace to remove · pick a destination to issue · Esc to cancel`
           } else if (selected?.holdShort) {
-            hintRef.current.textContent = `${selected.callsign} holding short of the runway — press C to clear across · Esc to deselect`
+            hintRef.current.textContent =
+              selected.intent === 'departure'
+                ? `${selected.callsign} holding short — use the strip's Contact tower (or C) to release for departure · Esc to deselect`
+                : `${selected.callsign} holding short of the runway — press C to clear across · Esc to deselect`
           } else if (selected) {
             hintRef.current.textContent = `${selected.callsign} selected — click a point to assign taxi · right-click to hold · Esc to deselect`
           } else {

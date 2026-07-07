@@ -20,6 +20,7 @@ export type GroundCommand =
   | { type: 'resume'; aircraftId: string }
   | { type: 'crossRunway'; aircraftId: string }
   | { type: 'giveWay'; aircraftId: string; toId: string }
+  | { type: 'contactTower'; aircraftId: string }
 
 /** A pickable, named place a controller can clear an aircraft to. */
 export interface NamedDestination {

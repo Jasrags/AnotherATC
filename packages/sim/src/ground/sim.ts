@@ -510,6 +510,20 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
           ac.holdShort = false
         }
         break
+      case 'contactTower':
+        // Ground → Tower handoff: a departure holding short of its runway is released
+        // onto it (tower's takeoff), completing its ground segment via the runway goal.
+        // Requires a clear runway, same as a crossing.
+        if (ac.intent === 'departure' && ac.held && ac.held.length >= 2) {
+          if (guard && fleet.some((o) => o !== ac && onRunway([o.x, o.y], guard))) break
+          ac.path = ac.held
+          ac.leg = 0
+          ac.held = null
+          ac.targetSpeed = TAXI_SPEED_KT
+          ac.holding = false
+          ac.holdShort = false
+        }
+        break
     }
   }
 
