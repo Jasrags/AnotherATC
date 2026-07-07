@@ -104,47 +104,78 @@ export function drawSurface(ctx: Ctx, v: View, surface: AirportSurface, w: numbe
   }
 }
 
-/** One label per taxiway designator (at its longest segment) + runway numbers. */
+function distToSeg(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
+  const vx = bx - ax
+  const vy = by - ay
+  const l2 = vx * vx + vy * vy
+  let t = l2 > 0 ? ((px - ax) * vx + (py - ay) * vy) / l2 : 0
+  t = t < 0 ? 0 : t > 1 ? 1 : t
+  return Math.hypot(px - (ax + t * vx), py - (ay + t * vy))
+}
+
+/** Draw crisp label text with a dark halo so it reads on any surface. */
+function label(ctx: Ctx, text: string, x: number, y: number, color: string): void {
+  ctx.lineWidth = 3
+  ctx.strokeStyle = COLORS.labelHalo
+  ctx.strokeText(text, Math.round(x), Math.round(y))
+  ctx.fillStyle = color
+  ctx.fillText(text, Math.round(x), Math.round(y))
+}
+
+/** Taxiway designator (kept off the runway) + runway numbers, with halos. */
 export function drawLabels(ctx: Ctx, v: View, surface: AirportSurface): void {
-  const best = new Map<string, { len: number; mid: Point }>()
+  // nm distance from a point to the nearest runway centerline — used to keep labels off the runway
+  const runways = surface.features.filter((f) => f.kind === 'runway')
+  const nearRunway = (p: Point): boolean => {
+    for (const f of runways) {
+      for (let i = 1; i < f.points.length; i += 1) {
+        const a = f.points[i - 1]
+        const b = f.points[i]
+        if (a && b && distToSeg(p[0], p[1], a[0], a[1], b[0], b[1]) < 0.03) return true
+      }
+    }
+    return false
+  }
+
+  // One anchor per taxiway ref: prefer a midpoint off the runway, then the longest segment.
+  const best = new Map<string, { score: number; mid: Point }>()
   for (const f of surface.features) {
-    if (f.kind !== 'taxiway' || !f.ref) continue
+    if ((f.kind !== 'taxiway' && f.kind !== 'taxilane') || !f.ref) continue
     const mid = f.points[Math.floor(f.points.length / 2)]
     if (!mid) continue
-    const len = polylineLength(f.points)
+    const score = (nearRunway(mid) ? 0 : 1e6) + polylineLength(f.points)
     const cur = best.get(f.ref)
-    if (!cur || len > cur.len) best.set(f.ref, { len, mid })
+    if (!cur || score > cur.score) best.set(f.ref, { score, mid })
   }
 
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
-  ctx.font = '10px ui-monospace, "SF Mono", Menlo, monospace'
-  ctx.fillStyle = COLORS.labelTaxi
-  for (const [ref, { mid }] of best) {
+  ctx.lineJoin = 'round'
+  ctx.font = '600 10px ui-monospace, "SF Mono", Menlo, monospace'
+  for (const [ref, { score, mid }] of best) {
+    if (score < 1e6) continue // would only sit on the runway — skip it
     const [sx, sy] = toScreen(v, mid[0], mid[1])
-    ctx.fillText(ref, sx, sy)
+    label(ctx, ref, sx, sy, COLORS.labelTaxi)
   }
 
   // runway numbers at the two thresholds (9 = west end, 27 = east end)
   let west: Point | null = null
   let east: Point | null = null
-  for (const f of surface.features) {
-    if (f.kind !== 'runway') continue
+  for (const f of runways) {
     for (const p of f.points) {
       if (!p) continue
       if (!west || p[0] < west[0]) west = p
       if (!east || p[0] > east[0]) east = p
     }
   }
-  ctx.fillStyle = COLORS.labelRwy
-  ctx.font = 'bold 13px ui-monospace, "SF Mono", Menlo, monospace'
+  ctx.font = '700 13px ui-monospace, "SF Mono", Menlo, monospace'
   if (west) {
     const [sx, sy] = toScreen(v, west[0], west[1])
-    ctx.fillText('9', sx - 12, sy)
+    label(ctx, '9', sx - 12, sy, COLORS.labelRwy)
   }
   if (east) {
     const [sx, sy] = toScreen(v, east[0], east[1])
-    ctx.fillText('27', sx + 14, sy)
+    label(ctx, '27', sx + 14, sy, COLORS.labelRwy)
   }
 
   ctx.textAlign = 'left'

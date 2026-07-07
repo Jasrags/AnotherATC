@@ -24,8 +24,9 @@ export const COLORS = {
   selection: '#ffd24a',
   route: '#49d3ff',
   routeDest: '#8becff',
-  labelTaxi: '#40705d',
-  labelRwy: '#93a9bd',
+  labelTaxi: '#d3bd74', // signage yellow — distinct from the green aircraft blocks
+  labelRwy: '#aebfce',
+  labelHalo: 'rgba(4, 8, 13, 0.92)',
 } as const
 
 export const DIMS = {
