@@ -37,7 +37,7 @@ The core ground-control loop. Ordered roughly by priority.
 - ✅ **Hold-short of runway / runway-crossing clearances** — routes stop at the runway; press C to clear across. _Next: snap the stop to the exact `holding_position` line; require Tower coordination._
 - ✅ **Spawn / despawn (traffic flow)** — intent-driven: departures start at gates → RWY, arrivals appear off RWY → gates; deterministic spawner, goal completion despawns, dep/arr score.
 - ✅ **Named destinations** — selected strip shows a clearance row: RWY 27 / RWY 9 (auto hold-short), arrival's gate, Hold, Cross RWY. Goal-append makes "taxi to RWY" stop at the hold line. _Next: pick an arbitrary gate/spot; assigned-route ("via B, C")._
-- ⬜ **Aircraft separation / conflict** — aircraft currently pass through each other; add spacing, give-way, and incursion alerts
+- 🚧 **Aircraft separation / conflict** — following separation + give-way-to-right, runway single-occupancy, conflict alerts (red ring + HUD). _Next: intersection deadlock handling, head-on avoidance, HS1-specific incursion, routing that avoids oncoming traffic._
 - ⬜ **Assigned taxi routes** — clearance as a sequence of taxiways ("via B, C") with readback, not just shortest path
 - ⬜ **Pushback from gate** — request → approve → push into the alley, then taxi
 - ✅ **Flight strip bay (ground)** — status-driven strips beside the scope, phase-gated actions, selection synced with the scope. _Next: squawk/route fields, drag-reorder/sequence._
