@@ -31,7 +31,7 @@ const crossing = {
 
 describe('hold-short of runway', () => {
   it('stops at the hold-short line and awaits a crossing clearance', () => {
-    const sim = createGroundSim([crossing], undefined, guard)
+    const sim = createGroundSim([crossing], { guard })
     for (let i = 0; i < 1500; i += 1) sim.step(0.1) // 150s — reaches the hold line
     const ac = sim.snapshot().aircraft[0]!
     expect(ac.holdShort).toBe(true)
@@ -42,7 +42,7 @@ describe('hold-short of runway', () => {
   })
 
   it('crosses and continues once cleared', () => {
-    const sim = createGroundSim([crossing], undefined, guard)
+    const sim = createGroundSim([crossing], { guard })
     for (let i = 0; i < 1500; i += 1) sim.step(0.1)
     expect(sim.snapshot().aircraft[0]!.holdShort).toBe(true)
 
@@ -54,7 +54,7 @@ describe('hold-short of runway', () => {
   })
 
   it('crossRunway is a no-op when not holding short', () => {
-    const sim = createGroundSim([crossing], undefined, guard)
+    const sim = createGroundSim([crossing], { guard })
     expect(() => sim.dispatch({ type: 'crossRunway', aircraftId: 'a' })).not.toThrow()
   })
 })

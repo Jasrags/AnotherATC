@@ -18,7 +18,7 @@ describe('GroundSim dispatch', () => {
     const graph = buildTaxiGraph(line)
     const sim = createGroundSim(
       [{ id: 'a', callsign: 'AAL1', type: 'B738', wake: 'M', path: [[0, 0]], targetSpeed: 0 }],
-      graph,
+      { graph },
     )
     expect(sim.snapshot().aircraft[0]!.holding).toBe(true)
 
@@ -35,7 +35,7 @@ describe('GroundSim dispatch', () => {
     const graph = buildTaxiGraph(line)
     const sim = createGroundSim(
       [{ id: 'a', callsign: 'AAL1', type: 'B738', wake: 'M', path: [[0, 0]], targetSpeed: 0 }],
-      graph,
+      { graph },
     )
     sim.dispatch({ type: 'taxiTo', aircraftId: 'a', dest: [1, 0] })
     for (let i = 0; i < 30; i += 1) sim.step(0.1)

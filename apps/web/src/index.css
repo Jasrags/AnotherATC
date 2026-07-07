@@ -201,9 +201,41 @@ body {
   margin-top: 5px;
 }
 
-.strip-type {
+.strip-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 11px;
   color: #6f9384;
+}
+
+.intent {
+  padding: 0 4px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  border-radius: 2px;
+}
+.intent-departure {
+  color: #f0c06a;
+  background: #2a2110;
+}
+.intent-arrival {
+  color: #7fd0ff;
+  background: #102530;
+}
+
+.strip-empty {
+  padding: 14px;
+  font-size: 11px;
+  color: #3f6f5c;
+  text-align: center;
+}
+
+.btn-taxi {
+  color: #9ff0c0;
+  background: #123526;
+  border-color: #245c43;
 }
 
 .strip-btn {

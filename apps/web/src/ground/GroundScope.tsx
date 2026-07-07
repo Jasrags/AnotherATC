@@ -167,7 +167,7 @@ export function GroundScope({ controller }: { controller: GroundController }) {
           const moving = snap.aircraft.filter((a) => a.groundspeed > 0).length
           const mm = String(Math.floor(snap.time / 60)).padStart(2, '0')
           const ss = String(Math.floor(snap.time % 60)).padStart(2, '0')
-          statusRef.current.textContent = `${moving} taxiing · ${snap.aircraft.length} on surface · T+${mm}:${ss}`
+          statusRef.current.textContent = `${moving} taxiing · ${snap.aircraft.length} on surface · dep ${snap.departed} · arr ${snap.arrived} · T+${mm}:${ss}`
         }
         if (hintRef.current) {
           if (selected?.holdShort) {

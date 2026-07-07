@@ -23,6 +23,7 @@ strips, KSAN charts) and `CLAUDE.md` for architecture.
 - ✅ Hold-short of runway: taxi routes auto-stop at the hold line (amber); "cross runway" (C) clearance releases them
 - ✅ Flight strip bay (ground): status-driven strips, phase-gated actions, scope↔strip selection sync
 - ✅ Sim↔UI bridge: `useSyncExternalStore` store (canvas on rAF, strips re-render only on phase/selection change)
+- ✅ Traffic flow: intent (departure/arrival), deterministic spawner, goal completion + despawn, dep/arr score; "Taxi ▸ RWY/Gate" from strips
 - ✅ Makefile (auto-routes through fnm Node 22), watch tasks
 
 ---
@@ -32,11 +33,12 @@ strips, KSAN charts) and `CLAUDE.md` for architecture.
 The core ground-control loop. Ordered roughly by priority.
 
 - ✅ **Hold-short of runway / runway-crossing clearances** — routes stop at the runway; press C to clear across. _Next: snap the stop to the exact `holding_position` line; require Tower coordination._
-- ⬜ **Named destinations** — "taxi to RWY 27", "to gate 32", "to spot" instead of raw map clicks; resolve names → graph nodes
+- ✅ **Spawn / despawn (traffic flow)** — intent-driven: departures start at gates → RWY, arrivals appear off RWY → gates; deterministic spawner, goal completion despawns, dep/arr score.
+- 🚧 **Named destinations** — "Taxi ▸ RWY / Gate" (the aircraft's goal) works from strips. Still want: named runway/gate/spot picking for arbitrary targets, resolve names → nodes.
+- ⬜ **Aircraft separation / conflict** — aircraft currently pass through each other; add spacing, give-way, and incursion alerts
 - ⬜ **Assigned taxi routes** — clearance as a sequence of taxiways ("via B, C") with readback, not just shortest path
 - ⬜ **Pushback from gate** — request → approve → push into the alley, then taxi
-- ✅ **Flight strip bay (ground)** — status-driven strips beside the scope, phase-gated actions, selection synced with the scope. _Next: per-strip taxi target, squawk/route fields, drag-reorder/sequence._
-- ⬜ **Spawn / despawn** — departures appear at gates, arrivals roll off the runway; departures exit to the runway, arrivals park
+- ✅ **Flight strip bay (ground)** — status-driven strips beside the scope, phase-gated actions, selection synced with the scope. _Next: squawk/route fields, drag-reorder/sequence._
 - ⬜ **HS1 hotspot** — render the KSAN hot spot; incursion-risk awareness
 - ⬜ **Ground conflict / incursion alerts** — two aircraft converging, or one entering an occupied runway
 - ⬜ **Handoff to/from Tower** — ground ↔ tower frequency changes at the runway
@@ -78,8 +80,8 @@ The game models four positions (see `docs/atc-flight-strips.md`). Ground first, 
 - ⬜ **ATIS / airport config** — active runway, wind, altimeter; runway-change cascade
 - ⬜ **Weather** — wind (affects ops), precipitation shading on scopes
 - ⬜ **Wake-turbulence model** — categories on strips, spacing constraints
-- ⬜ **Scenario / traffic generation** — realistic arrival/departure demand, airline/type mix, schedules
-- ⬜ **Game loop & scoring** — objectives, delays, incidents, difficulty
+- 🚧 **Scenario / traffic generation** — deterministic spawner (gates → RWY, RWY → gates) in place; want realistic demand curves, schedules, runway-config awareness
+- 🚧 **Game loop & scoring** — dep/arr counters in place; want objectives, delays, incidents, difficulty, fail states
 - 💭 **Replay / save** — determinism enables record + replay (and later multiplayer)
 - 💭 **Voice / phraseology** — TTS readbacks, speech input
 - ⬜ **More airports** — data pipeline generalizes beyond KSAN
@@ -103,6 +105,8 @@ The game models four positions (see `docs/atc-flight-strips.md`). Ground first, 
 - ⬜ Destinations are raw clicks snapped to nearest node (see named destinations)
 - ⬜ Hold-short stops at the last taxi vertex before the runway zone, not the exact painted hold line (`holding_position`)
 - ⬜ Taxi routes are shortest-path, not operationally realistic assigned routes
+- ⬜ Aircraft ignore each other (no separation/collision); arrivals spawn stationary rather than rolling off the runway
+- ⬜ Arrivals park at the nearest taxiway node + a straight leg to the gate point, not the real stand geometry
 - ⬜ Surface redrawn every frame; consider offscreen-canvas caching if perf needs it
 - ⬜ Scenario stitches arbitrary long taxiways for demo traffic — replace with real gate→runway flows
 - ℹ️ Headless screenshots show T+00:00 (Chrome virtual-time doesn't drive rAF) — motion is fine live

@@ -1,11 +1,18 @@
 import {
   KSAN_SURFACE,
-  buildKsanGroundScenario,
+  buildKsanGroundGame,
   buildRunwayGuard,
   buildTaxiGraph,
   createGroundSim,
 } from '@anotheratc/sim'
-import type { GroundCommand, GroundSim, GroundStatus, Point, WakeCategory } from '@anotheratc/sim'
+import type {
+  GroundCommand,
+  GroundIntent,
+  GroundSim,
+  GroundStatus,
+  Point,
+  WakeCategory,
+} from '@anotheratc/sim'
 
 /** What a flight strip shows — deliberately excludes fast-changing fields (position,
  *  speed) so the strip bay only re-renders when phase or selection changes. */
@@ -15,6 +22,8 @@ export interface StripItem {
   type: string
   wake: WakeCategory
   status: GroundStatus
+  intent: GroundIntent
+  gate: string | null
 }
 
 export interface StripSnapshot {
@@ -43,7 +52,8 @@ export interface GroundController {
 export function createGroundController(): GroundController {
   const graph = buildTaxiGraph(KSAN_SURFACE)
   const guard = buildRunwayGuard(KSAN_SURFACE)
-  const sim = createGroundSim(buildKsanGroundScenario(1), graph, guard)
+  const { inits, spawn } = buildKsanGroundGame(1)
+  const sim = createGroundSim(inits, { graph, guard, spawn })
 
   let selected: string | null = null
   const listeners = new Set<() => void>()
@@ -64,6 +74,8 @@ export function createGroundController(): GroundController {
         type: a.type,
         wake: a.wake,
         status: a.status,
+        intent: a.intent,
+        gate: a.gate,
       })),
     }
     for (const cb of listeners) cb()

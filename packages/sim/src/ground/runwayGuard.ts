@@ -37,7 +37,7 @@ function distToSeg(p: Point, a: Point, b: Point): number {
   return Math.hypot(p[0] - (a[0] + t * vx), p[1] - (a[1] + t * vy))
 }
 
-function onRunway(p: Point, guard: RunwayGuard): boolean {
+export function onRunway(p: Point, guard: RunwayGuard): boolean {
   for (const s of guard.segments) {
     if (distToSeg(p, s.a, s.b) <= guard.halfZoneNm) return true
   }

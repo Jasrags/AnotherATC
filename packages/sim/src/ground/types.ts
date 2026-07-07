@@ -6,9 +6,13 @@ export type WakeCategory = 'L' | 'M' | 'H' | 'J'
 /** Ground phase — drives the flight-strip state machine and available actions. */
 export type GroundStatus = 'parked' | 'taxi' | 'holding' | 'holdShort'
 
+/** Why the aircraft is on the surface: leaving (to the runway) or arriving (to a gate). */
+export type GroundIntent = 'departure' | 'arrival'
+
 /** A controller instruction to the surface simulation. */
 export type GroundCommand =
   | { type: 'taxiTo'; aircraftId: string; dest: Point }
+  | { type: 'taxiToGoal'; aircraftId: string }
   | { type: 'hold'; aircraftId: string }
   | { type: 'resume'; aircraftId: string }
   | { type: 'crossRunway'; aircraftId: string }
@@ -33,12 +37,20 @@ export interface GroundAircraft {
   holdShort: boolean
   /** Coarse ground phase for the flight strip. */
   status: GroundStatus
+  /** Departure (heading to the runway) or arrival (heading to a gate). */
+  intent: GroundIntent
+  /** Assigned gate: origin for departures, destination for arrivals (null if none). */
+  gate: string | null
 }
 
 export interface GroundSnapshot {
   /** Elapsed simulated seconds. */
   time: number
   aircraft: GroundAircraft[]
+  /** Departures completed (reached the runway). */
+  departed: number
+  /** Arrivals completed (reached a gate). */
+  arrived: number
 }
 
 export interface GroundSim {
