@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { GroundController, StripItem } from './controller'
 import { commandsFor } from './commands'
+import { isTypingTarget } from './keyboard'
 
 /** Numbered, state-dependent command menu for the selected flight strip. */
 export function StripCommandMenu({
@@ -31,9 +32,14 @@ export function StripCommandMenu({
   // menu is mounted (i.e. while this strip is selected and not route-building); reads the
   // current commands via a ref so it never needs to re-subscribe.
   const commandsRef = useRef(commands)
-  commandsRef.current = commands
+  // Keep the ref current after each render (not during — see the project hooks rule);
+  // event handlers fire after effects, so the listener always sees the latest commands.
+  useEffect(() => {
+    commandsRef.current = commands
+  })
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
+      if (isTypingTarget(e.target)) return // leave keys to a focused text field
       const cmds = commandsRef.current
       const n = e.key === '0' ? 10 : /^[1-9]$/.test(e.key) ? Number(e.key) : 0
       if (n < 1 || n > cmds.length) return

@@ -94,12 +94,12 @@ No min/max clamp; repeated zoom can drive `scale` toward 0 or huge, breaking lin
 
 ### MEDIUM
 
-- **WEB-8** — `commandsFor` (`StripCommandMenu.tsx:27-101`, ~74 lines) is the actual implementation of the "strip is a state machine" rule but is module-private and untestable. **Export or extract to `commands.ts`** and unit-test per `GroundStatus`×`GroundIntent`.
+- **WEB-8** — ✅ **FIXED** (2026-07-07) — extracted to `commands.ts`, unit-tested across every `GroundStatus`×`GroundIntent` (13 tests in `commands.test.ts`). `StripCommandMenu.tsx` now imports it.
 - **WEB-9** — `publish()` (`controller.ts:90-116`) builds a Map + signature string over all aircraft every call, including every frame (`GroundScope.tsx:223`), then usually discards it (signature unchanged). **Fix:** sim-side dirty flag/tick counter to skip the work.
 - **WEB-10** — HUD `statusRef`/`alertRef`/`hintRef` (`GroundScope.tsx:249-273`) have no `aria-live`; the `⚠ CONFLICT` alert is never announced. **Fix:** `aria-live="polite"` on hint/status, `role="alert"` / `aria-live="assertive"` on alert.
-- **WEB-11** — Ref mutated during render (`StripCommandMenu.tsx:131-132`) — violates the project's own hooks rule outright. Move to `useEffect(() => { commandsRef.current = commands })` or keep with an explicit rule-exception comment.
+- **WEB-11** — ✅ **FIXED** (2026-07-07) — the `commandsRef.current = commands` write moved out of render into a no-deps `useEffect` (runs after each render; event handlers fire later, so the listener still sees the latest). `StripCommandMenu.tsx:131-132`.
 - **WEB-12** — `nearestTaxiwayRef` (`render.ts:373-400`) is an unindexed linear scan per hover/click frame. Fine at KSAN scale; needs a spatial index (grid/quadtree) for bigger surfaces.
-- **WEB-13** — Global `keydown` listeners (`GroundScope.tsx:145-157`, `StripCommandMenu.tsx:134-150`) act on bare keys with no `activeElement`/input-focus guard. Latent — will break the first text field added.
+- **WEB-13** — ✅ **FIXED** (2026-07-07) — both global `keydown` handlers now bail via `isTypingTarget()` (new `keyboard.ts`, unit-tested) when a text field is focused. `GroundScope.tsx:145-157`, `StripCommandMenu.tsx:134-150`.
 - **WEB-14** — Inline magic-number nm thresholds in `render.ts:293,321,324` — name them like the file's other well-named constants.
 
 ### LOW
@@ -155,9 +155,9 @@ All 27 ids resolve today, but nothing asserts it. OSM ids change on upstream re-
 ### Stand up `apps/web` tests (Vitest, no DOM needed for the pure units), highest value first:
 ✅ **Harness stood up** (2026-07-07) — `apps/web` now has a `test` script (vitest, node env; reuses the already-vetted 4.1.9 from the lockfile).
 1. ~~`ground/view.ts`~~ ✅ done — `view.test.ts` covers `fitView` centering, `toScreen`/`toWorld` inverse, `zoomAt` fixed-point + clamp, `reframe`, `pan`.
-2. `ground/controller.ts` — `select`/`beginRoute`/`addVia` (consecutive-dedupe)/`removeViaAt`/`clearRoute`, and the `publish()` signature-dedupe (callbacks fire only on real change). Most load-bearing file in the layer.
-3. `ground/render.ts` pure helpers — `polylineLength`, `polylineMidpoint`, `distToSeg`, `nearestTaxiwayRef` against synthetic surfaces (no Canvas mock).
-4. `commandsFor` (WEB-8) — export it, test every `GroundStatus`×`GroundIntent` to lock the strip state-machine contract.
+2. ~~`ground/controller.ts`~~ ✅ done — `controller.test.ts`: select, route-draft lifecycle, `publish()` dedupe + unsubscribe, `notice()`.
+3. `ground/render.ts` pure helpers — `polylineLength`, `polylineMidpoint`, `distToSeg`, `nearestTaxiwayRef` against synthetic surfaces (no Canvas mock). _(still open)_
+4. ~~`commandsFor` (WEB-8)~~ ✅ done — `commands.test.ts` locks the strip state-machine contract across every `GroundStatus`×`GroundIntent`.
 
 ### Sim gaps (backfill as regression tests):
 - **Assert `.status` (not just `holding`/`groundspeed`) while an aircraft is capped to a stop mid-route** — this is exactly the gap that let `SIM-1` through.

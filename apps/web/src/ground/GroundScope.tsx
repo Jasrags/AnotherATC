@@ -14,6 +14,7 @@ import {
   drawSurface,
   nearestTaxiwayRef,
 } from './render'
+import { isTypingTarget } from './keyboard'
 
 /** Fixed simulation timestep (seconds) — decoupled from the render framerate. */
 const FIXED_DT = 0.05
@@ -147,6 +148,7 @@ export function GroundScope({ controller }: { controller: GroundController }) {
       if (id) controller.dispatch({ type: 'hold', aircraftId: id })
     }
     const onKey = (e: KeyboardEvent) => {
+      if (isTypingTarget(e.target)) return // don't hijack keys meant for a focused text field
       const id = controller.selectedId()
       const draft = controller.routeDraft()
       if (e.key === 'Escape') {
