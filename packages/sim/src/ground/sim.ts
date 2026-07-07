@@ -139,7 +139,7 @@ function outranks(a: Internal, b: Internal): boolean {
 }
 
 // `status` is derived at snapshot time, so it is not stored here.
-interface Internal extends Omit<GroundAircraft, 'status'> {
+interface Internal extends Omit<GroundAircraft, 'status' | 'wakeHoldSec'> {
   path: readonly Point[]
   leg: number
   targetSpeed: number
@@ -260,6 +260,13 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     if (!ac.holding) return 'taxi'
     if (ac.path.length < 2 && ac.held === null) return 'parked'
     return 'holding'
+  }
+
+  /** Seconds of wake separation still owed before this holding-short departure may roll. */
+  function wakeHoldFor(ac: Internal): number {
+    if (ac.intent !== 'departure' || !ac.holdShort || !lastDeparture) return 0
+    const required = wakeSeparationSec(lastDeparture.wake, ac.wake) * WAKE_TIME_SCALE
+    return Math.max(0, Math.ceil(required - (time - lastDeparture.atTime)))
   }
 
   /** Speed cap (kt) for one aircraft from traffic ahead in its corridor. */
@@ -751,6 +758,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
           conflict: ac.conflict,
           giveWayTo: ac.giveWayTo ? (find(ac.giveWayTo)?.callsign ?? null) : null,
           squawk: ac.squawk,
+          wakeHoldSec: wakeHoldFor(ac),
         })),
       }
     },

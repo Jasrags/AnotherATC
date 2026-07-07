@@ -65,8 +65,9 @@ No change to `separationCap`/`reservationCap` — those govern taxi proximity, a
 
 ## UX / tension
 
-- Immediate: clicking **Contact tower** too early is refused with `wake turbulence — Ns behind Heavy`, shown in the HUD notice. The sequence backs up behind a heavy departure exactly as the docs intend.
-- Later polish (not this pass): a wake countdown on the holding-short strip; a visual "wake hold" state distinct from a plain hold; flag a violation if we ever allow an override.
+- Clicking **Contact tower** too early is refused with `wake turbulence — Ns behind Heavy`, shown in the HUD notice. The sequence backs up behind a heavy departure exactly as the docs intend.
+- ✅ **Wake countdown on the strip** (2026-07-07): the snapshot exposes `wakeHoldSec` per holding-short departure; the flight strip shows a live `⚠ WAKE HOLD Ns` badge that ticks down, so the hold is visible without clicking. Flows through the controller `StripItem` + signature (the bay re-renders ~once/sec only while a hold is active).
+- Later polish (not yet): a distinct visual "wake hold" strip state vs. a plain hold; flag a violation if we ever allow an override.
 
 ## Test plan (TDD)
 

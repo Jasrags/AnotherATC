@@ -73,7 +73,31 @@ describe('wake-turbulence departure gate', () => {
     expect(sim.dispatch({ type: 'contactTower', aircraftId: 'lead' })).toEqual({ ok: true })
     runUntilDeparted(sim, 1)
     // No wake wait behind a Medium — the follower may roll as soon as the runway is clear.
+    expect(sim.snapshot().aircraft.find((a) => a.id === 'foll')!.wakeHoldSec).toBe(0)
     expect(sim.dispatch({ type: 'contactTower', aircraftId: 'foll' })).toEqual({ ok: true })
     expect(sim.snapshot().aircraft.find((a) => a.id === 'foll')!.status).toBe('departing')
+  })
+
+  it('reports a wake countdown on the holding-short follower that ticks down to zero', () => {
+    const lead = departure('lead', -0.3, 'H')
+    const foll = departure('foll', -0.6, 'M')
+    const sim = createGroundSim([lead, foll], { guard })
+    for (let i = 0; i < 1500; i += 1) sim.step(0.1)
+    expect(sim.snapshot().aircraft.find((a) => a.id === 'foll')!.wakeHoldSec).toBe(0) // nothing departed yet
+
+    sim.dispatch({ type: 'contactTower', aircraftId: 'lead' })
+    const t0 = sim.snapshot().time
+    runUntilDeparted(sim, 1)
+
+    const foll1 = sim.snapshot().aircraft.find((a) => a.id === 'foll')!
+    expect(foll1.wakeHoldSec).toBeGreaterThan(0)
+    expect(foll1.wakeHoldSec).toBeLessThanOrEqual(120)
+
+    for (let i = 0; i < 200; i += 1) sim.step(0.1) // +20s — countdown falls
+    const foll2 = sim.snapshot().aircraft.find((a) => a.id === 'foll')!
+    expect(foll2.wakeHoldSec).toBeLessThan(foll1.wakeHoldSec)
+
+    for (let i = 0; i < 3000 && sim.snapshot().time - t0 < 120; i += 1) sim.step(0.1)
+    expect(sim.snapshot().aircraft.find((a) => a.id === 'foll')!.wakeHoldSec).toBe(0) // interval elapsed
   })
 })

@@ -62,6 +62,9 @@ export interface GroundAircraft {
   giveWayTo: string | null
   /** Assigned transponder (beacon) code once IFR clearance is delivered, or null. */
   squawk: string | null
+  /** Seconds of wake-turbulence separation still required before this holding-short
+   *  departure can be released for takeoff; 0 when none applies. */
+  wakeHoldSec: number
 }
 
 export interface GroundSnapshot {

@@ -31,6 +31,8 @@ export interface StripItem {
   giveWayTo: string | null
   /** Assigned transponder code once cleared, or null. */
   squawk: string | null
+  /** Seconds of wake-turbulence separation still owed before takeoff release; 0 when none. */
+  wakeHoldSec: number
 }
 
 /** An in-progress "taxi via …" clearance the controller is assembling by taxiway clicks. */
@@ -103,7 +105,7 @@ export function createGroundController(): GroundController {
     let nextSig = selected ?? '-'
     nextSig += draft ? `~${draft.id}:${draft.via.join('.')}` : ''
     for (const a of acs)
-      nextSig += `|${a.id}:${a.status}:${vias.get(a.id)!.join('.')}:${a.giveWayTo ?? ''}:${a.squawk ?? ''}`
+      nextSig += `|${a.id}:${a.status}:${vias.get(a.id)!.join('.')}:${a.giveWayTo ?? ''}:${a.squawk ?? ''}:${a.wakeHoldSec}`
     if (nextSig === sig) return
     sig = nextSig
     snapshot = {
@@ -120,6 +122,7 @@ export function createGroundController(): GroundController {
         via: vias.get(a.id)!,
         giveWayTo: a.giveWayTo,
         squawk: a.squawk,
+        wakeHoldSec: a.wakeHoldSec,
       })),
     }
     for (const cb of listeners) cb()

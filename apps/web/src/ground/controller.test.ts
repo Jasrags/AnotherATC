@@ -9,6 +9,8 @@ describe('ground controller bridge', () => {
     expect(snap.selectedId).toBeNull()
     expect(snap.draft).toBeNull()
     expect(c.selectedId()).toBeNull()
+    // parked departures at t=0 owe no wake separation
+    expect(snap.aircraft.every((a) => a.wakeHoldSec === 0)).toBe(true)
   })
 
   it('select sets the selection and reflects it in the snapshot', () => {
