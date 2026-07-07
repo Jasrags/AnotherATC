@@ -15,6 +15,8 @@ export interface TaxiGraph {
   nodePoint(key: Key): Point | undefined
   /** Nearest graph node to an arbitrary point, or null if the graph is empty. */
   nearestNode(p: Point): Key | null
+  /** The graph-node key a point sits on (exact match), or null if it's not a node. */
+  keyAt(p: Point): Key | null
   /** Shortest path of node coordinates from start to goal, inclusive; [] if unreachable. */
   route(fromKey: Key, toKey: Key): Point[]
 }
@@ -120,6 +122,10 @@ export function buildTaxiGraph(surface: AirportSurface): TaxiGraph {
     },
     nodePoint: (k) => nodes.get(k),
     nearestNode,
+    keyAt: (p) => {
+      const k = keyOf(p)
+      return nodes.has(k) ? k : null
+    },
     route,
   }
 }

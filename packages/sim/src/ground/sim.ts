@@ -74,6 +74,14 @@ const SAME_DIR_DEG = 60
 /** Groundspeed (kt) above which an aircraft counts as "rolling" for right-of-way. */
 const ROLLING_KT = 1
 
+// ─── Segment reservation (hold-at-junction) ──────────────────────────────────
+/** Only reserve/hold for a contested edge whose entry node is within this range (nm). */
+const RESERVE_HORIZON_NM = 0.12
+/** Stop this far (nm) short of the contested edge's mouth, leaving the junction clear. */
+const HOLD_MARGIN_NM = MIN_GAP_NM
+/** Braking ramp (nm) used to decelerate to a stop at the hold point. */
+const HOLD_RAMP_NM = 0.03
+
 /** Smallest absolute heading difference in degrees (0–180). */
 function angleDelta(a: number, b: number): number {
   return Math.abs(((((a - b) % 360) + 540) % 360) - 180)
@@ -206,6 +214,93 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       if (c < cap) cap = c
     }
     return cap
+  }
+
+  /** The graph node behind ac, the node ahead, the one after it, and the along-path
+   * distance to the node ahead. Nulls where a route end/synthetic point intervenes. */
+  interface EdgeCtx {
+    prev: string | null
+    next: string | null
+    after: string | null
+    distToNext: number
+  }
+  function edgeCtx(ac: Internal): EdgeCtx | null {
+    if (!graph) return null
+    const keyAtIdx = (i: number): string | null => {
+      const p = ac.path[i]
+      return p ? graph.keyAt(p) : null
+    }
+    let prev: string | null = null
+    for (let i = Math.min(ac.leg, ac.path.length - 1); i >= 0; i -= 1) {
+      const k = keyAtIdx(i)
+      if (k) {
+        prev = k
+        break
+      }
+    }
+    let next: string | null = null
+    let nextIdx = -1
+    for (let i = ac.leg + 1; i < ac.path.length; i += 1) {
+      const k = keyAtIdx(i)
+      if (k) {
+        next = k
+        nextIdx = i
+        break
+      }
+    }
+    if (!next) return { prev, next: null, after: null, distToNext: Infinity }
+    let after: string | null = null
+    for (let i = nextIdx + 1; i < ac.path.length; i += 1) {
+      const k = keyAtIdx(i)
+      if (k) {
+        after = k
+        break
+      }
+    }
+    let d = 0
+    let px = ac.x
+    let py = ac.y
+    for (let i = ac.leg + 1; i <= nextIdx; i += 1) {
+      const q = ac.path[i]
+      if (!q) continue
+      d += Math.hypot(q[0] - px, q[1] - py)
+      px = q[0]
+      py = q[1]
+    }
+    return { prev, next, after, distToNext: d }
+  }
+
+  /**
+   * Speed cap that reserves one-lane taxiway segments. An aircraft may not *enter*
+   * its next edge while opposing traffic occupies it, or is about to enter it and
+   * outranks us — instead it decelerates to a stop just short of that edge's mouth,
+   * leaving the junction clear for the aircraft that has it. Because entry ties break
+   * on the same total order as {@link outranks}, exactly one of any pair yields, so two
+   * aircraft never both hold for the same segment. Graph-only (needs edge topology).
+   */
+  function reservationCap(ac: Internal): number {
+    const ctx = edgeCtx(ac)
+    if (!ctx || !ctx.next || !ctx.after) return Infinity
+    if (ctx.distToNext > RESERVE_HORIZON_NM) return Infinity
+    const from = ctx.next // the node at the mouth of the edge we're about to enter
+    const to = ctx.after
+    let hold = false
+    for (const o of fleet) {
+      if (o === ac || o.dwell >= 0) continue
+      const oc = edgeCtx(o)
+      if (!oc) continue
+      // o is physically on the contested edge, coming the other way:
+      const occupies = oc.prev === to && oc.next === from
+      // o is about to enter the contested edge against us:
+      const contends = oc.next === to && oc.after === from
+      if (occupies || (contends && outranks(o, ac))) {
+        hold = true
+        break
+      }
+    }
+    if (!hold) return Infinity
+    const d = ctx.distToNext - HOLD_MARGIN_NM
+    return d <= 0 ? 0 : Math.min(TAXI_SPEED_KT, (d / HOLD_RAMP_NM) * TAXI_SPEED_KT)
   }
 
   function detectConflicts(): void {
@@ -378,7 +473,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
   return {
     step(dt) {
       time += dt
-      const caps = fleet.map((ac) => separationCap(ac))
+      const caps = fleet.map((ac) => Math.min(separationCap(ac), reservationCap(ac)))
       fleet.forEach((ac, i) => advance(ac, dt, caps[i] ?? Infinity))
       for (const id of resolveGoals(dt)) {
         const i = fleet.findIndex((a) => a.id === id)
