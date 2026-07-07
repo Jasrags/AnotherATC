@@ -4,7 +4,7 @@ import { toScreen, type View } from './view'
 
 type Ctx = CanvasRenderingContext2D
 
-function polylineLength(points: SurfaceFeature['points']): number {
+export function polylineLength(points: SurfaceFeature['points']): number {
   let d = 0
   for (let i = 1; i < points.length; i += 1) {
     const a = points[i - 1]
@@ -15,7 +15,7 @@ function polylineLength(points: SurfaceFeature['points']): number {
 }
 
 /** The point halfway along a polyline by arc length (consistent regardless of vertex count). */
-function polylineMidpoint(points: SurfaceFeature['points']): Point | null {
+export function polylineMidpoint(points: SurfaceFeature['points']): Point | null {
   const total = polylineLength(points)
   if (total === 0) return points[0] ?? null
   const half = total / 2
@@ -124,7 +124,7 @@ export function drawSurface(ctx: Ctx, v: View, surface: AirportSurface, w: numbe
   }
 }
 
-function distToSeg(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
+export function distToSeg(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
   const vx = bx - ax
   const vy = by - ay
   const l2 = vx * vx + vy * vy
@@ -351,17 +351,6 @@ export function drawLabels(ctx: Ctx, v: View, surface: AirportSurface): void {
   ctx.textAlign = 'left'
 }
 
-/** Highlight the selected aircraft and its remaining route. */
-/** Distance from point (px,py) to segment (a→b), in world units. */
-function distToSegment(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
-  const dx = bx - ax
-  const dy = by - ay
-  const len2 = dx * dx + dy * dy
-  let t = len2 > 0 ? ((px - ax) * dx + (py - ay) * dy) / len2 : 0
-  t = Math.max(0, Math.min(1, t))
-  return Math.hypot(px - (ax + dx * t), py - (ay + dy * t))
-}
-
 /** Distances within this (nm) count as a tie — resolved in favor of the longer taxiway. */
 const TAXI_TIE_NM = 0.005
 
@@ -385,7 +374,7 @@ export function nearestTaxiwayRef(
     for (let i = 1; i < f.points.length; i += 1) {
       const a = f.points[i - 1]
       const b = f.points[i]
-      if (a && b) d = Math.min(d, distToSegment(wx, wy, a[0], a[1], b[0], b[1]))
+      if (a && b) d = Math.min(d, distToSeg(wx, wy, a[0], a[1], b[0], b[1]))
     }
     if (d > maxNm) continue
     const len = polylineLength(f.points)

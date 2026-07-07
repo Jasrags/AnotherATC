@@ -156,7 +156,7 @@ All 27 ids resolve today, but nothing asserts it. OSM ids change on upstream re-
 ✅ **Harness stood up** (2026-07-07) — `apps/web` now has a `test` script (vitest, node env; reuses the already-vetted 4.1.9 from the lockfile).
 1. ~~`ground/view.ts`~~ ✅ done — `view.test.ts` covers `fitView` centering, `toScreen`/`toWorld` inverse, `zoomAt` fixed-point + clamp, `reframe`, `pan`.
 2. ~~`ground/controller.ts`~~ ✅ done — `controller.test.ts`: select, route-draft lifecycle, `publish()` dedupe + unsubscribe, `notice()`.
-3. `ground/render.ts` pure helpers — `polylineLength`, `polylineMidpoint`, `distToSeg`, `nearestTaxiwayRef` against synthetic surfaces (no Canvas mock). _(still open)_
+3. ~~`ground/render.ts` pure helpers~~ ✅ done — `render.test.ts` covers `polylineLength`, `polylineMidpoint`, `distToSeg`, `nearestTaxiwayRef` against synthetic surfaces (no Canvas mock); also consolidated the duplicate `distToSegment` onto `distToSeg`.
 4. ~~`commandsFor` (WEB-8)~~ ✅ done — `commands.test.ts` locks the strip state-machine contract across every `GroundStatus`×`GroundIntent`.
 
 ### Sim gaps (backfill as regression tests):
