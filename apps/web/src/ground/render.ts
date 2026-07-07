@@ -78,7 +78,7 @@ export function drawSurface(ctx: Ctx, v: View, surface: AirportSurface, w: numbe
   fillPolys(ctx, v, byKind(surface, 'terminal', 'hangar'), COLORS.buildingFill, COLORS.buildingEdge)
 
   // gate stands
-  strokeFeatures(ctx, v, byKind(surface, 'parking_position'), COLORS.stand, { nm: DIMS.standNm, minPx: 0.75 })
+  strokeFeatures(ctx, v, byKind(surface, 'parking_position'), COLORS.stand, { nm: DIMS.standNm, minPx: 1.2 })
 
   // taxiways: pavement then a thin centerline
   const taxi = byKind(surface, 'taxiway', 'taxilane')
@@ -184,6 +184,25 @@ export function drawAreaLabels(ctx: Ctx, v: View, surface: AirportSurface): void
     const off = AREA_OFFSET_NM[name] ?? [0, 0]
     const [sx, sy] = toScreen(v, g.x / g.n + off[0], g.y / g.n + off[1])
     label(ctx, name.toUpperCase(), sx, sy, COLORS.labelArea)
+  }
+  ctx.textAlign = 'left'
+}
+
+/** Gate/stand numbers — only when zoomed in enough to read them (else they'd be a blur). */
+const GATE_LABEL_SCALE = 2400
+
+export function drawGates(ctx: Ctx, v: View, surface: AirportSurface): void {
+  if (v.scale < GATE_LABEL_SCALE) return
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.lineJoin = 'round'
+  ctx.font = '600 9px ui-monospace, "SF Mono", Menlo, monospace'
+  for (const f of surface.features) {
+    if (f.kind !== 'parking_position' || !f.ref) continue
+    const m = f.points[Math.floor(f.points.length / 2)]
+    if (!m) continue
+    const [sx, sy] = toScreen(v, m[0], m[1])
+    label(ctx, f.ref, sx, sy, COLORS.gateLabel)
   }
   ctx.textAlign = 'left'
 }

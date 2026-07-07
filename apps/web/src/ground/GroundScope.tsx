@@ -5,6 +5,7 @@ import { fitView, pan, toWorld, zoomAt, type View } from './view'
 import {
   drawAircraft,
   drawAreaLabels,
+  drawGates,
   drawHotspots,
   drawLabels,
   drawSelection,
@@ -196,6 +197,7 @@ export function GroundScope({ controller }: { controller: GroundController }) {
         const selectedId = controller.selectedId()
         drawSurface(ctx, view, KSAN_SURFACE, width, height)
         drawAreaLabels(ctx, view, KSAN_SURFACE)
+        drawGates(ctx, view, KSAN_SURFACE)
         drawHotspots(ctx, view, KSAN_SURFACE)
         drawLabels(ctx, view, KSAN_SURFACE)
         drawAircraft(ctx, view, snap.aircraft)
