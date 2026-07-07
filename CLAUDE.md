@@ -69,6 +69,7 @@ KSAN is the intended first airport. Charts are on the SW-3 cycle (19 MAR 2026 �
 
 ## Working Conventions
 
+- **Git:** commit directly to `main` — this is a solo project, no PRs. Keep commits conventional-format and green (`make check` passes). Don't branch or open PRs unless explicitly asked.
 - The domain uses precise ATC terminology (SID, STAR, TRACON, squawk, LUAW, feeder fix, wake category). Match it exactly — the design docs cite FAA Order 7110.65, AIM Ch. 4, and AC 90-23G as authorities.
 - Prefer deriving per-mode data from one flight record over storing redundant copies.
 - When the design docs and general ATC knowledge conflict, the docs win (they reflect intentional game-design tradeoffs, not just realism).
