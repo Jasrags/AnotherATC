@@ -39,6 +39,30 @@ describe('taxiVia', () => {
     expect(Math.hypot(done.x - 0.4, done.y)).toBeLessThan(0.02) // reached G
   })
 
+  it('collapses each multi-segment taxiway to one entry but keeps the ref boundary', () => {
+    // A runs S(0,0)→M(0,0.2) as two edges; B runs M→G(0.2,0.2) as two edges. A route over
+    // both should read ['A','B'] — each ref deduped across its own segments, the boundary kept.
+    const ell: AirportSurface = {
+      icao: 'TEST',
+      name: 'Test',
+      ref: { lat: 0, lon: 0, elevationFt: 0 },
+      units: 'nm',
+      source: 'synthetic',
+      bounds: { minX: 0, minY: 0, maxX: 0.2, maxY: 0.2 },
+      features: [
+        { kind: 'taxiway', points: [[0, 0], [0, 0.1], [0, 0.2]], ref: 'A' },
+        { kind: 'taxiway', points: [[0, 0.2], [0.1, 0.2], [0.2, 0.2]], ref: 'B' },
+      ],
+    }
+    const graph = buildTaxiGraph(ell)
+    const sim = createGroundSim(
+      [{ id: 'a', callsign: 'AAL1', type: 'B738', wake: 'M', path: [[0, 0]], targetSpeed: 0 }],
+      { graph },
+    )
+    sim.dispatch({ type: 'taxiVia', aircraftId: 'a', taxiways: ['A', 'B'], dest: [0.2, 0.2] })
+    expect(sim.taxiwaysOf('a')).toEqual(['A', 'B'])
+  })
+
   it('falls back to shortest path when the taxiway sequence cannot reach the goal', () => {
     const graph = buildTaxiGraph(diamond)
     const sim = createGroundSim(

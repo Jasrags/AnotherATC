@@ -157,15 +157,15 @@ All 27 ids resolve today, but nothing asserts it. OSM ids change on upstream re-
 4. ~~`commandsFor` (WEB-8)~~ ✅ done — `commands.test.ts` locks the strip state-machine contract across every `GroundStatus`×`GroundIntent`.
 
 ### Sim gaps (backfill as regression tests):
-- **Assert `.status` (not just `holding`/`groundspeed`) while an aircraft is capped to a stop mid-route** — this is exactly the gap that let `SIM-1` through.
-- Arrival→gate completion path (`GATE_DWELL_SEC` dwell, `arrived` increment, fleet removal, `sim.ts:627-643`) — only departures are tested.
-- `giveWayCap` "forget" branch (`GIVEWAY_FORGET_NM`, `:395`).
-- `reservationCap` `contends` branch isolated from `occupies`; final-edge no-lookahead (SIM-10).
-- `dispatch({type:'giveWay', toId: <unknown/self>})`.
-- Fully unreachable destination (disconnected graph) via `taxiTo`/`taxiVia` (`applyRoute` silent no-op, `:464-465`).
-- `goalNodeFor` centerline degeneracy (SIM-6).
-- `edgeCtx()`, `outranks()`, `taxiwaysOf()` consecutive-dedup beyond the one happy path.
-- Schema/sanity smoke test on generated `KSAN_SURFACE` (SIM-4).
+- ~~**Assert `.status` while capped to a stop mid-route**~~ ✅ done — `status.test.ts` asserts a give-way hard-stop reports `status: 'holding'`, not `'taxi'` (the `advance()`→`holding`→`statusOf` path shared by every cap; the SIM-1 gap). _Note: the reservation ramp usually only slows an aircraft to a creep rather than a full stop, so `'taxi'` there is correct — the full-stop contract is what matters and it's covered._
+- ~~Arrival→gate completion path~~ ✅ done — `arrival.test.ts`: reaches the stand, shows `status: 'parked'` during the `GATE_DWELL_SEC` dwell, then increments `arrived` and despawns; a second case asserts it is *not* counted until the full dwell elapses.
+- ~~`giveWayCap` "forget" branch (`GIVEWAY_FORGET_NM`)~~ ✅ done — `giveWay.test.ts`: a hold-position aircraft gives way to traffic that drives far off-side and clears purely by distance (never passing behind).
+- `reservationCap` `contends` branch isolated from `occupies`; final-edge no-lookahead (SIM-10). _(still open — low value; isolating these two branches cleanly is awkward and the corridor/separation guarantee already covers the head-on case.)_
+- ~~`dispatch({type:'giveWay', toId: <unknown/self>})`~~ ✅ done — covered in `dispatchResult.test.ts`.
+- ~~Fully unreachable destination (disconnected graph) via `taxiTo`~~ ✅ done — `dispatchResult.test.ts`: a two-component graph refuses with "no taxi route" and leaves the route untouched (no partial/garbage path).
+- ~~`goalNodeFor` centerline degeneracy (SIM-6)~~ ✅ done — `runwayRouting.test.ts`.
+- ~~`taxiwaysOf()` consecutive-dedup beyond the one happy path~~ ✅ done — `taxiVia.test.ts`: a route over two multi-segment taxiways reads `['A','B']` (each ref deduped across its own segments, the boundary kept). `edgeCtx()`/`outranks()` remain internal (exercised via separation/reservation tests, not exported for direct unit testing).
+- Schema/sanity smoke test on generated `KSAN_SURFACE` (SIM-4). _(still open — `validateSurface` is unit-tested on synthetic input; a smoke test on the committed `KSAN_SURFACE` itself would be belt-and-suspenders.)_
 
 ---
 

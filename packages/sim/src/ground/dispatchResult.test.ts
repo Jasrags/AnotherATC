@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { createGroundSim } from './sim'
+import { buildTaxiGraph } from './taxiGraph'
 import type { AircraftInit } from './sim'
+import type { AirportSurface } from '../world/types'
 
 function dep(id: string): AircraftInit {
   return { id, callsign: id, type: 'B738', wake: 'M', path: [[0, 0]], targetSpeed: 0, intent: 'departure' }
@@ -55,5 +57,30 @@ describe('dispatch result feedback', () => {
     const r = sim.dispatch({ type: 'taxiTo', aircraftId: 'a', dest: [1, 1] })
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.reason).toMatch(/route|graph/i)
+  })
+
+  it('refuses a taxi to a destination in a disconnected part of the graph', () => {
+    // Two taxiways with no shared node: nothing routes from one component to the other.
+    const split: AirportSurface = {
+      icao: 'TEST',
+      name: 'Test',
+      ref: { lat: 0, lon: 0, elevationFt: 0 },
+      units: 'nm',
+      source: 'synthetic',
+      bounds: { minX: 0, minY: 0, maxX: 1, maxY: 0.2 },
+      features: [
+        { kind: 'taxiway', points: [[0, 0], [0, 0.2]], ref: 'A' }, // component 1 (near the aircraft)
+        { kind: 'taxiway', points: [[1, 0], [1, 0.2]], ref: 'B' }, // component 2 (the destination)
+      ],
+    }
+    const graph = buildTaxiGraph(split)
+    const parked: AircraftInit = { id: 'a', callsign: 'a', type: 'B738', wake: 'M', path: [[0, 0]], targetSpeed: 0 }
+    const sim = createGroundSim([parked], { graph })
+
+    const r = sim.dispatch({ type: 'taxiTo', aircraftId: 'a', dest: [1, 0.2] })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.reason).toMatch(/no taxi route/i)
+    // Refused = untouched: still a single-point (parked) route, never a partial/garbage one.
+    expect(sim.routeOf('a')).toEqual([])
   })
 })
