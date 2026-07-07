@@ -56,6 +56,46 @@ The core ground-control loop. Ordered roughly by priority.
 
 ---
 
+## ⬜ Flight-strip command menu (interaction model)
+
+Reference: the ground-ATC command menu in an EHAM/Schiphol ATC sim — a numbered, state-dependent
+list opened for the selected aircraft. Goal: replace the inline clearance-row buttons with a proper
+**command menu opened from the flight strip**, showing only the actions valid for the aircraft's
+current phase, with submenus for commands that need a target. This is the interaction model that the
+individual command features below plug into; it generalizes across controller modes later.
+
+### Menu framework
+- ⬜ **Open a command menu from the selected strip** — click the strip (or a caret) to open a numbered
+  action list; `1`–`9`/`0` keyboard shortcuts mirror the list. Anchored to the strip, dismissible.
+- ⬜ **State-gating** — show only phase-valid actions, driven by the strip state machine (parked →
+  Pushback; taxiing → Hold/Continue/Give-way; holding short → Cross; etc.). Greys out or hides the rest.
+- ⬜ **Submenus (`>`) for parameterized commands** — Taxi to…, Hold short…, Cross runway…, Give way to…,
+  Continue taxi, Hold position — pick the target (destination / runway / other aircraft) from a submenu
+  or by clicking the scope.
+- ⬜ **Migrate existing clearance-row actions** (Taxi to, Hold, Cross RWY, Route ▸) into the menu so
+  there's one consistent command surface.
+
+### Commands (menu vocabulary from the reference)
+- 🚧 **Taxi to…** — have named destinations + the via-route builder; fold into the menu.
+- 💭 **Progressive taxi** — step-by-step "turn here" guidance (see Progressive taxi above).
+- ⬜ **Continue taxi** — resume/clear to the next point after a hold; submenu "continue to…".
+- ⬜ **Hold short…** — hold short of a chosen runway/taxiway (generalize runway hold-short to any target).
+- ✅ **Cross runway…** — have `crossRunway`; add a submenu to pick the runway when several apply.
+- 🚧 **Give way to…** — give way to a specific aircraft (see Player-instructed give-way); pick the target.
+- ✅ **Hold position** — have `hold`; place it under the menu.
+- ⬜ **Pushback approved** — approve pushback (see Pushback from gate); gated to parked departures.
+- ⬜ **Misc. messages** — catch-all phraseology (say again, expedite, verify heading/altitude, etc.).
+- ⬜ **Contact other frequency** — hand off to Tower / next frequency (see Handoff to/from Tower).
+
+### Supporting systems shown in the reference
+- ⬜ **Communications log** — timestamped readback/clearance transcript in ATC phraseology (ties into
+  Read-back verification + 💭 Voice/phraseology).
+- ⬜ **Richer strip / data-block header** — GS, IAS, altitude, heading, active state on the selected aircraft.
+- ⬜ **Quick-state tabs** — small summary of the aircraft's current clearance on the strip (e.g. "Pushback",
+  "Taxi 24"), as fast context + shortcuts.
+
+---
+
 ## Controller modes (epics)
 
 The game models four positions (see `docs/atc-flight-strips.md`). Ground first, then:
