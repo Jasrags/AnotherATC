@@ -49,12 +49,24 @@ export function GroundScope({ controller }: { controller: GroundController }) {
     const observer = new ResizeObserver(resize)
     observer.observe(canvas)
 
-    let dragging = false
+    // Active pointers (mouse or touch). One → pan/tap; two → pinch-zoom.
+    const pointers = new Map<number, { x: number; y: number }>()
     let moved = false
-    let lastX = 0
-    let lastY = 0
     let downX = 0
     let downY = 0
+    let pinchDist = 0
+    let pinchCx = 0
+    let pinchCy = 0
+
+    const rectPt = (e: PointerEvent): { x: number; y: number } => {
+      const r = canvas.getBoundingClientRect()
+      return { x: e.clientX - r.left, y: e.clientY - r.top }
+    }
+    const pinchState = (): { dist: number; cx: number; cy: number } => {
+      const [a, b] = [...pointers.values()]
+      if (!a || !b) return { dist: 0, cx: 0, cy: 0 }
+      return { dist: Math.hypot(a.x - b.x, a.y - b.y), cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2 }
+    }
 
     const onWheel = (e: WheelEvent) => {
       e.preventDefault()
@@ -63,29 +75,47 @@ export function GroundScope({ controller }: { controller: GroundController }) {
       view = zoomAt(view, Math.exp(-e.deltaY * 0.0015), e.clientX - rect.left, e.clientY - rect.top)
     }
     const onDown = (e: PointerEvent) => {
-      if (e.button !== 0) return
-      dragging = true
-      moved = false
-      lastX = e.clientX
-      lastY = e.clientY
-      downX = e.clientX
-      downY = e.clientY
+      if (e.pointerType === 'mouse' && e.button !== 0) return
+      const p = rectPt(e)
+      pointers.set(e.pointerId, p)
       canvas.setPointerCapture(e.pointerId)
+      if (pointers.size === 1) {
+        moved = false
+        downX = p.x
+        downY = p.y
+      } else if (pointers.size === 2) {
+        const s = pinchState()
+        pinchDist = s.dist
+        pinchCx = s.cx
+        pinchCy = s.cy
+        moved = true
+      }
     }
     const onMove = (e: PointerEvent) => {
-      if (!dragging || !view) return
-      if (Math.hypot(e.clientX - downX, e.clientY - downY) > DRAG_PX) moved = true
-      view = pan(view, e.clientX - lastX, e.clientY - lastY)
-      lastX = e.clientX
-      lastY = e.clientY
+      const prev = pointers.get(e.pointerId)
+      if (!prev || !view) return
+      const p = rectPt(e)
+      pointers.set(e.pointerId, p)
+      if (pointers.size >= 2) {
+        const s = pinchState()
+        if (pinchDist > 0) {
+          view = zoomAt(view, s.dist / pinchDist, s.cx, s.cy)
+          view = pan(view, s.cx - pinchCx, s.cy - pinchCy)
+        }
+        pinchDist = s.dist
+        pinchCx = s.cx
+        pinchCy = s.cy
+        moved = true
+      } else {
+        if (Math.hypot(p.x - downX, p.y - downY) > DRAG_PX) moved = true
+        view = pan(view, p.x - prev.x, p.y - prev.y)
+      }
     }
-    const onUp = (e: PointerEvent) => {
-      if (e.button !== 0) return
-      dragging = false
-      canvas.releasePointerCapture(e.pointerId)
-      if (moved || !view) return
-      const rect = canvas.getBoundingClientRect()
-      handleClick(e.clientX - rect.left, e.clientY - rect.top)
+    const endPointer = (e: PointerEvent) => {
+      const had = pointers.delete(e.pointerId)
+      if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId)
+      if (pointers.size < 2) pinchDist = 0
+      if (had && pointers.size === 0 && !moved && view) handleClick(downX, downY)
     }
     const onContextMenu = (e: MouseEvent) => {
       e.preventDefault()
@@ -132,7 +162,8 @@ export function GroundScope({ controller }: { controller: GroundController }) {
     canvas.addEventListener('wheel', onWheel, { passive: false })
     canvas.addEventListener('pointerdown', onDown)
     canvas.addEventListener('pointermove', onMove)
-    canvas.addEventListener('pointerup', onUp)
+    canvas.addEventListener('pointerup', endPointer)
+    canvas.addEventListener('pointercancel', endPointer)
     canvas.addEventListener('contextmenu', onContextMenu)
     window.addEventListener('keydown', onKey)
 
@@ -198,7 +229,8 @@ export function GroundScope({ controller }: { controller: GroundController }) {
       canvas.removeEventListener('wheel', onWheel)
       canvas.removeEventListener('pointerdown', onDown)
       canvas.removeEventListener('pointermove', onMove)
-      canvas.removeEventListener('pointerup', onUp)
+      canvas.removeEventListener('pointerup', endPointer)
+      canvas.removeEventListener('pointercancel', endPointer)
       canvas.removeEventListener('contextmenu', onContextMenu)
       window.removeEventListener('keydown', onKey)
     }
