@@ -144,9 +144,13 @@ export function GroundScope({ controller }: { controller: GroundController }) {
     }
     const onKey = (e: KeyboardEvent) => {
       const id = controller.selectedId()
+      const draft = controller.routeDraft()
       if (e.key === 'Escape') {
-        if (controller.routeDraft()) controller.clearRoute()
+        if (draft) controller.clearRoute()
         else controller.select(null)
+      } else if (e.key === 'Backspace' && draft) {
+        e.preventDefault()
+        controller.removeViaAt(draft.via.length - 1) // drop the last taxiway
       } else if ((e.key === 'c' || e.key === 'C') && id) {
         controller.dispatch({ type: 'crossRunway', aircraftId: id })
       }
@@ -255,7 +259,7 @@ export function GroundScope({ controller }: { controller: GroundController }) {
         if (hintRef.current) {
           if (draft && selected) {
             const via = draft.via.length ? `via ${draft.via.join(' · ')}` : '(none yet)'
-            hintRef.current.textContent = `Routing ${selected.callsign} ${via} — click taxiways in order, then a destination in the strip · Esc to cancel`
+            hintRef.current.textContent = `Routing ${selected.callsign} ${via} — click taxiways to add · tap a chip or Backspace to remove · pick a destination to issue · Esc to cancel`
           } else if (selected?.holdShort) {
             hintRef.current.textContent = `${selected.callsign} holding short of the runway — press C to clear across · Esc to deselect`
           } else if (selected) {

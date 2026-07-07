@@ -62,6 +62,8 @@ export interface GroundController {
   beginRoute(id: string): void
   /** Append a taxiway designator to the active draft (ignores consecutive repeats). */
   addVia(ref: string): void
+  /** Remove the taxiway at the given index from the active draft. */
+  removeViaAt(index: number): void
   /** Discard the active draft. */
   clearRoute(): void
   publish(): void
@@ -130,6 +132,11 @@ export function createGroundController(): GroundController {
     addVia: (ref) => {
       if (!draft || draft.via[draft.via.length - 1] === ref) return
       draft = { id: draft.id, via: [...draft.via, ref] }
+      publish()
+    },
+    removeViaAt: (index) => {
+      if (!draft || index < 0 || index >= draft.via.length) return
+      draft = { id: draft.id, via: draft.via.filter((_, k) => k !== index) }
       publish()
     },
     clearRoute: () => {

@@ -57,8 +57,21 @@ function ClearanceRow({
     return (
       <div className="clearance">
         <span className="clearance-label">
-          ROUTE {draft.via.length ? `· VIA ${draft.via.join(' · ')}` : '· click taxiways in order'}
+          ROUTE{draft.via.length ? ' · VIA' : ' · click taxiways in order'}
         </span>
+        {draft.via.map((t, i) => (
+          <button
+            key={`${t}-${i}`}
+            className="strip-btn btn-via-chip"
+            title="Remove from route"
+            onClick={(e) => {
+              stop(e)
+              controller.removeViaAt(i)
+            }}
+          >
+            {t} ✕
+          </button>
+        ))}
         {controller.destinations.map((d) => (
           <button key={d.id} className="strip-btn btn-taxi" onClick={issueVia(d.point)}>
             {d.label}

@@ -260,6 +260,17 @@ body {
   border-color: #276b83;
 }
 
+.btn-via-chip {
+  color: #cfeeff;
+  background: #123a4a;
+  border-color: #2f7d99;
+  letter-spacing: 0.04em;
+}
+.btn-via-chip:hover {
+  color: #ffd7d2;
+  border-color: #b5544a;
+}
+
 .clearance {
   display: flex;
   flex-wrap: wrap;
