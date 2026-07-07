@@ -212,12 +212,13 @@ export function drawAreaLabels(ctx: Ctx, v: View, surface: AirportSurface): void
 const GATE_LABEL_SCALE = 2400
 
 interface Stand {
-  ref: string | null
+  ref: string
   point: Point
 }
 
-/** One stand per gate: prefer the OSM gate node (terminal gates), fall back to a
- *  parking line's midpoint for cargo/remote stands that have no gate node. */
+/** One numbered stand per gate: prefer the OSM gate node (terminal gates), fall
+ *  back to a parking line's midpoint for numbered cargo/remote stands. Untagged
+ *  parking positions are skipped (they'd just be unlabeled squares). */
 function collectStands(surface: AirportSurface): Stand[] {
   const stands: Stand[] = []
   const seen = new Set<string>()
@@ -229,12 +230,11 @@ function collectStands(surface: AirportSurface): Stand[] {
     stands.push({ ref: f.ref, point: p })
   }
   for (const f of surface.features) {
-    if (f.kind !== 'parking_position') continue
-    if (f.ref && seen.has(f.ref)) continue
+    if (f.kind !== 'parking_position' || !f.ref || seen.has(f.ref)) continue
     const m = polylineMidpoint(f.points)
     if (!m) continue
-    if (f.ref) seen.add(f.ref)
-    stands.push({ ref: f.ref ?? null, point: m })
+    seen.add(f.ref)
+    stands.push({ ref: f.ref, point: m })
   }
   return stands
 }
@@ -254,7 +254,6 @@ export function drawGates(ctx: Ctx, v: View, surface: AirportSurface): void {
   ctx.lineJoin = 'round'
   ctx.font = '600 9px ui-monospace, "SF Mono", Menlo, monospace'
   for (const s of stands) {
-    if (!s.ref) continue
     const [sx, sy] = toScreen(v, s.point[0], s.point[1])
     label(ctx, s.ref.toUpperCase(), sx, sy - 7, COLORS.gateLabel)
   }
