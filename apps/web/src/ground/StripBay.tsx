@@ -89,6 +89,7 @@ export function StripBay({ controller }: { controller: GroundController }) {
                   {a.gate ? ` · ${a.gate}` : ''}
                 </span>
               </div>
+              {a.via.length > 0 && <div className="strip-route">VIA {a.via.join(' · ')}</div>}
               {selected && <ClearanceRow controller={controller} item={a} />}
             </div>
           )

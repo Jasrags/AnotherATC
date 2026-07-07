@@ -360,12 +360,8 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     }
   }
 
-  function routeTo(ac: Internal, dest: Point, appendExact: boolean): void {
-    if (!graph) return
-    const startKey = graph.nearestNode([ac.x, ac.y])
-    const goalKey = graph.nearestNode(dest)
-    if (!startKey || !goalKey) return
-    const routePoints = graph.route(startKey, goalKey)
+  /** Assign a freshly computed graph route (node points) to an aircraft. */
+  function applyRoute(ac: Internal, routePoints: readonly Point[], dest: Point, appendExact: boolean): void {
     if (routePoints.length === 0) return
     const full: Point[] = [[ac.x, ac.y], ...routePoints]
     if (appendExact) full.push(dest)
@@ -379,6 +375,25 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     ac.holdShort = false
   }
 
+  function routeTo(ac: Internal, dest: Point, appendExact: boolean): void {
+    if (!graph) return
+    const startKey = graph.nearestNode([ac.x, ac.y])
+    const goalKey = graph.nearestNode(dest)
+    if (!startKey || !goalKey) return
+    applyRoute(ac, graph.route(startKey, goalKey), dest, appendExact)
+  }
+
+  /** Route via an ordered taxiway sequence, falling back to shortest path if that
+   *  exact sequence can't reach the destination (so a bad clearance still taxis). */
+  function routeVia(ac: Internal, taxiways: readonly string[], dest: Point, appendExact: boolean): void {
+    if (!graph) return
+    const startKey = graph.nearestNode([ac.x, ac.y])
+    const goalKey = graph.nearestNode(dest)
+    if (!startKey || !goalKey) return
+    const via = graph.routeVia(startKey, goalKey, taxiways)
+    applyRoute(ac, via.length > 0 ? via : graph.route(startKey, goalKey), dest, appendExact)
+  }
+
   function dispatch(command: GroundCommand): void {
     const ac = find(command.aircraftId)
     if (!ac) return
@@ -390,6 +405,9 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         // Append the exact goal so departures hold short at the runway and
         // arrivals park at the stand (rather than stopping at the nearest node).
         if (ac.goalPoint) routeTo(ac, ac.goalPoint, true)
+        break
+      case 'taxiVia':
+        routeVia(ac, command.taxiways, command.dest, command.exact ?? false)
         break
       case 'hold':
         ac.targetSpeed = 0
@@ -515,6 +533,25 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       if (ac.leg < ac.path.length - 1) return [[ac.x, ac.y], ...ac.path.slice(ac.leg + 1)]
       if (ac.held && ac.held.length >= 2) return [[ac.x, ac.y], ...ac.held.slice(1)]
       return []
+    },
+    taxiwaysOf(aircraftId: string): string[] {
+      const ac = find(aircraftId)
+      if (!ac || !graph) return []
+      const out: string[] = []
+      let prevKey: string | null = null
+      for (const p of ac.path) {
+        const k = graph.keyAt(p)
+        if (!k) {
+          prevKey = null
+          continue
+        }
+        if (prevKey) {
+          const ref = graph.refBetween(prevKey, k)
+          if (ref && out[out.length - 1] !== ref) out.push(ref)
+        }
+        prevKey = k
+      }
+      return out
     },
   }
 }

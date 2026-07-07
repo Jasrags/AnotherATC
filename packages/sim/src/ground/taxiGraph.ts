@@ -4,6 +4,8 @@ type Key = string
 interface Edge {
   to: Key
   w: number
+  /** Taxiway designator this edge belongs to (e.g. "B7"), when the source feature is named. */
+  ref?: string
 }
 
 /** OSM taxiway segments share vertices (identical rounded coords), so a vertex
@@ -17,8 +19,13 @@ export interface TaxiGraph {
   nearestNode(p: Point): Key | null
   /** The graph-node key a point sits on (exact match), or null if it's not a node. */
   keyAt(p: Point): Key | null
+  /** The taxiway designator of the edge between two adjacent nodes, or undefined. */
+  refBetween(a: Key, b: Key): string | undefined
   /** Shortest path of node coordinates from start to goal, inclusive; [] if unreachable. */
   route(fromKey: Key, toKey: Key): Point[]
+  /** Shortest path from start to goal that traverses the given taxiways in order,
+   *  inclusive of endpoints; [] if no such path exists (caller may fall back to {@link route}). */
+  routeVia(fromKey: Key, toKey: Key, taxiways: readonly string[]): Point[]
 }
 
 /** Build a routable taxiway graph from an airport's taxiway/taxilane geometry. */
@@ -34,10 +41,12 @@ export function buildTaxiGraph(surface: AirportSurface): TaxiGraph {
     }
     return k
   }
-  const addEdge = (a: Key, b: Key, w: number): void => {
+  const addEdge = (a: Key, b: Key, w: number, ref?: string): void => {
     if (a === b) return
-    adj.get(a)?.push({ to: b, w })
-    adj.get(b)?.push({ to: a, w })
+    const ab: Edge = ref === undefined ? { to: b, w } : { to: b, w, ref }
+    const ba: Edge = ref === undefined ? { to: a, w } : { to: a, w, ref }
+    adj.get(a)?.push(ab)
+    adj.get(b)?.push(ba)
   }
 
   for (const f of surface.features) {
@@ -48,12 +57,14 @@ export function buildTaxiGraph(surface: AirportSurface): TaxiGraph {
       if (!p) continue
       const k = addNode(p)
       if (prevKey && prevPoint) {
-        addEdge(prevKey, k, Math.hypot(p[0] - prevPoint[0], p[1] - prevPoint[1]))
+        addEdge(prevKey, k, Math.hypot(p[0] - prevPoint[0], p[1] - prevPoint[1]), f.ref)
       }
       prevKey = k
       prevPoint = p
     }
   }
+
+  const refBetween = (a: Key, b: Key): string | undefined => adj.get(a)?.find((e) => e.to === b)?.ref
 
   const nearestNode = (p: Point): Key | null => {
     let best: Key | null = null
@@ -116,6 +127,70 @@ export function buildTaxiGraph(surface: AirportSurface): TaxiGraph {
     return out.reverse()
   }
 
+  /**
+   * Shortest path that traverses `taxiways` in order. Searches a product graph of
+   * (node, k) where k = how many of the required taxiways have been entered so far;
+   * traversing an edge whose ref matches taxiways[k] advances k. The goal is the
+   * destination node with all taxiways consumed. [] if no such path exists.
+   */
+  const routeVia = (fromKey: Key, toKey: Key, taxiways: readonly string[]): Point[] => {
+    if (!nodes.has(fromKey) || !nodes.has(toKey)) return []
+    const seq = taxiways.filter((t) => t.length > 0)
+    if (seq.length === 0) return route(fromKey, toKey)
+    const K = seq.length
+    const state = (nk: Key, k: number): string => `${nk}#${k}`
+    const startState = state(fromKey, 0)
+    const dist = new Map<string, number>([[startState, 0]])
+    const prev = new Map<string, string>()
+    const visited = new Set<string>()
+    const frontier = new Set<string>([startState])
+    let goalState: string | null = null
+
+    while (frontier.size > 0) {
+      let u: string | null = null
+      let ud = Infinity
+      for (const s of frontier) {
+        const d = dist.get(s) ?? Infinity
+        if (d < ud) {
+          ud = d
+          u = s
+        }
+      }
+      if (u === null) break
+      frontier.delete(u)
+      visited.add(u)
+      const hash = u.lastIndexOf('#')
+      const nk = u.slice(0, hash)
+      const k = Number(u.slice(hash + 1))
+      if (nk === toKey && k === K) {
+        goalState = u
+        break
+      }
+      for (const e of adj.get(nk) ?? []) {
+        const nextK = k < K && e.ref === seq[k] ? k + 1 : k
+        const ns = state(e.to, nextK)
+        if (visited.has(ns)) continue
+        const nd = ud + e.w
+        if (nd < (dist.get(ns) ?? Infinity)) {
+          dist.set(ns, nd)
+          prev.set(ns, u)
+          frontier.add(ns)
+        }
+      }
+    }
+
+    if (!goalState) return []
+    const out: Point[] = []
+    let cur: string | undefined = goalState
+    while (cur) {
+      const p = nodes.get(cur.slice(0, cur.lastIndexOf('#')))
+      if (p) out.push(p)
+      if (cur === startState) break
+      cur = prev.get(cur)
+    }
+    return out.reverse()
+  }
+
   return {
     get size() {
       return nodes.size
@@ -126,6 +201,8 @@ export function buildTaxiGraph(surface: AirportSurface): TaxiGraph {
       const k = keyOf(p)
       return nodes.has(k) ? k : null
     },
+    refBetween,
     route,
+    routeVia,
   }
 }

@@ -13,6 +13,7 @@ export type GroundIntent = 'departure' | 'arrival'
 export type GroundCommand =
   | { type: 'taxiTo'; aircraftId: string; dest: Point; exact?: boolean }
   | { type: 'taxiToGoal'; aircraftId: string }
+  | { type: 'taxiVia'; aircraftId: string; taxiways: string[]; dest: Point; exact?: boolean }
   | { type: 'hold'; aircraftId: string }
   | { type: 'resume'; aircraftId: string }
   | { type: 'crossRunway'; aircraftId: string }
@@ -72,4 +73,6 @@ export interface GroundSim {
   dispatch(command: GroundCommand): void
   /** Remaining route waypoints for an aircraft (for drawing); [] if none. */
   routeOf(aircraftId: string): Point[]
+  /** The named taxiways the aircraft's current route follows, in order (e.g. ["A","B"]). */
+  taxiwaysOf(aircraftId: string): string[]
 }

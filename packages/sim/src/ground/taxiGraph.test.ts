@@ -47,6 +47,58 @@ describe('buildTaxiGraph', () => {
     expect(g.route(g.nearestNode([0, 0])!, g.nearestNode([6, 5])!)).toEqual([])
   })
 
+  it('reports the taxiway designator of an edge', () => {
+    const named: AirportSurface = {
+      ...toy,
+      features: [
+        { kind: 'taxiway', points: [[0, 0], [1, 0]], ref: 'A' },
+        { kind: 'taxiway', points: [[1, 0], [1, 1]], ref: 'B' },
+      ],
+    }
+    const g = buildTaxiGraph(named)
+    expect(g.refBetween(g.nearestNode([0, 0])!, g.nearestNode([1, 0])!)).toBe('A')
+    expect(g.refBetween(g.nearestNode([1, 0])!, g.nearestNode([1, 1])!)).toBe('B')
+  })
+
+  describe('routeVia', () => {
+    // Two ways S→G: taxiway A over the top, taxiway B underneath (same length).
+    const diamond: AirportSurface = {
+      ...toy,
+      features: [
+        { kind: 'taxiway', points: [[0, 0], [0.2, 0.1], [0.4, 0]], ref: 'A' },
+        { kind: 'taxiway', points: [[0, 0], [0.2, -0.1], [0.4, 0]], ref: 'B' },
+      ],
+    }
+
+    it('routes via the requested taxiway even when equal-cost alternatives exist', () => {
+      const g = buildTaxiGraph(diamond)
+      const s = g.nearestNode([0, 0])!
+      const gg = g.nearestNode([0.4, 0])!
+      expect(g.routeVia(s, gg, ['A'])).toContainEqual([0.2, 0.1]) // took the top (A)
+      expect(g.routeVia(s, gg, ['B'])).toContainEqual([0.2, -0.1]) // took the bottom (B)
+    })
+
+    it('follows a taxiway sequence in order and returns [] for an unknown taxiway', () => {
+      // S ─A─ M ─B─ G : "via A, B" is the direct route.
+      const chain: AirportSurface = {
+        ...toy,
+        features: [
+          { kind: 'taxiway', points: [[0, 0], [0.2, 0]], ref: 'A' },
+          { kind: 'taxiway', points: [[0.2, 0], [0.4, 0]], ref: 'B' },
+        ],
+      }
+      const g = buildTaxiGraph(chain)
+      const s = g.nearestNode([0, 0])!
+      const gg = g.nearestNode([0.4, 0])!
+      expect(g.routeVia(s, gg, ['A', 'B'])).toEqual([
+        [0, 0],
+        [0.2, 0],
+        [0.4, 0],
+      ])
+      expect(g.routeVia(s, gg, ['Z'])).toEqual([]) // no such taxiway → no route
+    })
+  })
+
   it('builds a large connected graph for KSAN', () => {
     const g = buildTaxiGraph(KSAN_SURFACE)
     expect(g.size).toBeGreaterThan(100)

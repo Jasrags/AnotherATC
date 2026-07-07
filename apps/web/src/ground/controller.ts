@@ -25,6 +25,8 @@ export interface StripItem {
   status: GroundStatus
   intent: GroundIntent
   gate: string | null
+  /** Named taxiways the current route follows, in order (e.g. ["A","B"]). */
+  via: string[]
 }
 
 export interface StripSnapshot {
@@ -64,8 +66,9 @@ export function createGroundController(): GroundController {
 
   const publish = (): void => {
     const acs = sim.snapshot().aircraft
+    const vias = new Map(acs.map((a) => [a.id, sim.taxiwaysOf(a.id)]))
     let nextSig = selected ?? '-'
-    for (const a of acs) nextSig += `|${a.id}:${a.status}`
+    for (const a of acs) nextSig += `|${a.id}:${a.status}:${vias.get(a.id)!.join('.')}`
     if (nextSig === sig) return
     sig = nextSig
     snapshot = {
@@ -78,6 +81,7 @@ export function createGroundController(): GroundController {
         status: a.status,
         intent: a.intent,
         gate: a.gate,
+        via: vias.get(a.id)!,
       })),
     }
     for (const cb of listeners) cb()

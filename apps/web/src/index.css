@@ -234,6 +234,13 @@ body {
   background: #102530;
 }
 
+.strip-route {
+  margin-top: 5px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: #8fb3a3;
+}
+
 .strip-empty {
   padding: 14px;
   font-size: 11px;
