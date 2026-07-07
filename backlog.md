@@ -94,7 +94,7 @@ The game models four positions (see `docs/atc-flight-strips.md`). Ground first, 
 
 - ✅ Ramp / terminal area labels (Terminal 1/2, North Ramp, Air Cargo Ramp, General Aviation, Coast Guard). _Missing: West/Island Ramp Parking (unnamed in OSM), Fire Station/TWR/Admin point features._
 - ✅ HS1 hotspot marker (dashed orange circle near GA / taxiway H)
-- ✅ Visible gate stands + zoom-gated gate numbers
+- ✅ Gate stands: clean gate-node markers + zoom-gated numbers (T2 20–51, T1 101–119 from OSM gate nodes, matching the researched scheme); spawn from terminal gate nodes
 - ✅ Mobile: pinch-zoom / touch pan / tap-select, responsive stacked layout, LAN dev hosting
 - ⬜ Label density control (show major spines when zoomed out, exits when zoomed in) + collision avoidance
 - ⬜ Scale bar / range rings; recenter + zoom-to-fit control
