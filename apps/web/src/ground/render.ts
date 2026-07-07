@@ -435,6 +435,15 @@ export function drawAircraft(ctx: Ctx, v: View, aircraft: GroundAircraft[]): voi
     ctx.fill()
     ctx.restore()
 
+    // separation conflict alert
+    if (ac.conflict) {
+      ctx.strokeStyle = COLORS.conflict
+      ctx.lineWidth = 1.6
+      ctx.beginPath()
+      ctx.arc(sx, sy, r + 4, 0, Math.PI * 2)
+      ctx.stroke()
+    }
+
     // data block, offset up-right, with a thin connector
     const bx = sx + DIMS.blockLeader
     const by = sy - DIMS.blockLeader

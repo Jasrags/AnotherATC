@@ -23,6 +23,7 @@ export function GroundScope({ controller }: { controller: GroundController }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const statusRef = useRef<HTMLDivElement>(null)
   const hintRef = useRef<HTMLDivElement>(null)
+  const alertRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -211,6 +212,10 @@ export function GroundScope({ controller }: { controller: GroundController }) {
           const ss = String(Math.floor(snap.time % 60)).padStart(2, '0')
           statusRef.current.textContent = `${moving} taxiing · ${snap.aircraft.length} on surface · dep ${snap.departed} · arr ${snap.arrived} · T+${mm}:${ss}`
         }
+        if (alertRef.current) {
+          const inConflict = snap.aircraft.filter((a) => a.conflict).length
+          alertRef.current.textContent = inConflict > 0 ? `⚠ CONFLICT` : ''
+        }
         if (hintRef.current) {
           if (selected?.holdShort) {
             hintRef.current.textContent = `${selected.callsign} holding short of the runway — press C to clear across · Esc to deselect`
@@ -246,6 +251,7 @@ export function GroundScope({ controller }: { controller: GroundController }) {
         <div className="hud-sub">GND CON 123.9 · D-ATIS 134.8 · SURFACE (ASDE-X)</div>
       </div>
       <div ref={statusRef} className="hud hud-tr mono" />
+      <div ref={alertRef} className="hud hud-alert mono" />
       <div ref={hintRef} className="hud hud-bc mono" />
     </div>
   )

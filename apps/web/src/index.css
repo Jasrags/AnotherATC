@@ -103,6 +103,15 @@ body {
   color: #7fbfa4;
 }
 
+.hud-alert {
+  top: 44px;
+  right: 18px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: #ff5a4d;
+}
+
 /* ─── Flight strip bay ─────────────────────────────────────────────────── */
 
 .strip-bay {

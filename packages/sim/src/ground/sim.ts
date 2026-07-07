@@ -60,6 +60,23 @@ const GATE_EPS = 0.02
 /** Seconds an arrival dwells at the gate before it clears the stand. */
 const GATE_DWELL_SEC = 8
 
+// ─── Separation ─────────────────────────────────────────────────────────────
+/** How far ahead (nm) an aircraft watches for traffic. */
+const LOOK_AHEAD_NM = 0.06
+/** Half-width (nm) of the path corridor: traffic outside it is off to the side. */
+const CORRIDOR_HALF_NM = 0.012
+/** Minimum gap (nm) an aircraft keeps behind traffic ahead. */
+const MIN_GAP_NM = 0.022
+/** Two aircraft closer than this (nm) are in conflict. */
+const CONFLICT_NM = 0.015
+/** Heading difference (deg) under which traffic ahead counts as same-direction (a leader). */
+const SAME_DIR_DEG = 60
+
+/** Smallest absolute heading difference in degrees (0–180). */
+function angleDelta(a: number, b: number): number {
+  return Math.abs(((((a - b) % 360) + 540) % 360) - 180)
+}
+
 function bearing(ax: number, ay: number, bx: number, by: number): number {
   return (Math.atan2(bx - ax, by - ay) * 180) / Math.PI
 }
@@ -121,6 +138,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       holdShort: path.length < 2 && held !== null,
       intent: init.intent ?? 'departure',
       gate: init.gate ?? null,
+      conflict: false,
       path,
       leg: 0,
       targetSpeed: init.targetSpeed,
@@ -142,9 +160,51 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     return 'holding'
   }
 
-  function advance(ac: Internal, dt: number): void {
+  /** Speed cap (kt) for one aircraft from traffic ahead in its corridor. */
+  function separationCap(ac: Internal): number {
+    if (ac.targetSpeed <= 0 && ac.groundspeed <= 0) return Infinity
+    const rad = (ac.heading * Math.PI) / 180
+    const hx = Math.sin(rad)
+    const hy = Math.cos(rad)
+    let cap = Infinity
+    for (const o of fleet) {
+      if (o === ac) continue
+      // Aircraft parked at a gate (single-point, stationary) or dwelling aren't
+      // movement-area obstacles — otherwise neighbours block each other at the gates.
+      if (o.dwell >= 0 || (o.path.length < 2 && o.groundspeed <= 0.1)) continue
+      const dx = o.x - ac.x
+      const dy = o.y - ac.y
+      const forward = dx * hx + dy * hy // projection onto heading
+      if (forward <= 0 || forward > LOOK_AHEAD_NM) continue
+      const cross = hx * dy - hy * dx // >0 = left, <0 = right
+      if (Math.abs(cross) > CORRIDOR_HALF_NM) continue
+      // Follow leaders (same direction); at crossings give way to the right only.
+      const sameDir = angleDelta(ac.heading, o.heading) < SAME_DIR_DEG
+      if (!sameDir && cross >= 0) continue // traffic on the left — ac has right of way
+      const gap = forward - MIN_GAP_NM
+      const c = gap <= 0 ? 0 : (gap / (LOOK_AHEAD_NM - MIN_GAP_NM)) * TAXI_SPEED_KT
+      if (c < cap) cap = c
+    }
+    return cap
+  }
+
+  function detectConflicts(): void {
+    for (const ac of fleet) ac.conflict = false
+    for (let i = 0; i < fleet.length; i += 1) {
+      for (let j = i + 1; j < fleet.length; j += 1) {
+        const a = fleet[i]
+        const b = fleet[j]
+        if (a && b && Math.hypot(a.x - b.x, a.y - b.y) < CONFLICT_NM) {
+          a.conflict = true
+          b.conflict = true
+        }
+      }
+    }
+  }
+
+  function advance(ac: Internal, dt: number, cap: number): void {
     const atEnd = ac.leg >= ac.path.length - 1
-    const target = atEnd ? 0 : ac.targetSpeed
+    const target = Math.min(atEnd ? 0 : ac.targetSpeed, cap)
 
     if (ac.groundspeed < target) {
       ac.groundspeed = Math.min(target, ac.groundspeed + TAXI_ACCEL * dt)
@@ -227,6 +287,8 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         break
       case 'crossRunway':
         if (ac.held && ac.held.length >= 2) {
+          // Don't clear onto an occupied runway.
+          if (guard && fleet.some((o) => o !== ac && onRunway([o.x, o.y], guard))) break
           ac.path = ac.held
           ac.leg = 0
           ac.held = null
@@ -296,7 +358,8 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
   return {
     step(dt) {
       time += dt
-      for (const ac of fleet) advance(ac, dt)
+      const caps = fleet.map((ac) => separationCap(ac))
+      fleet.forEach((ac, i) => advance(ac, dt, caps[i] ?? Infinity))
       for (const id of resolveGoals(dt)) {
         const i = fleet.findIndex((a) => a.id === id)
         if (i >= 0) fleet.splice(i, 1)
@@ -305,6 +368,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         nextSpawnAt = time + (spawn?.intervalSec ?? Infinity)
         trySpawn()
       }
+      detectConflicts()
     },
     snapshot(): GroundSnapshot {
       return {
@@ -325,6 +389,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
           status: statusOf(ac),
           intent: ac.intent,
           gate: ac.gate,
+          conflict: ac.conflict,
         })),
       }
     },

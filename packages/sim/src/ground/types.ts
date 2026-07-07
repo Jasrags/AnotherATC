@@ -49,6 +49,8 @@ export interface GroundAircraft {
   intent: GroundIntent
   /** Assigned gate: origin for departures, destination for arrivals (null if none). */
   gate: string | null
+  /** Too close to another aircraft — a separation conflict. */
+  conflict: boolean
 }
 
 export interface GroundSnapshot {

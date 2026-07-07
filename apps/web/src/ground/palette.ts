@@ -17,6 +17,7 @@ export const COLORS = {
   gateLabel: '#a9d0e2', // gate numbers (shown when zoomed in)
   target: '#f2f9ff',
   targetHalo: '#7fd4ff',
+  conflict: '#ff5a4d', // separation conflict alert
   targetHold: '#9aacbd',
   leader: '#5aa8cb',
   block1: '#8ef0b4',
