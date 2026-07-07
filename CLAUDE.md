@@ -67,6 +67,19 @@ These are called out repeatedly as the interesting/hard parts and should be firs
 
 KSAN is the intended first airport. Charts are on the SW-3 cycle (19 MAR 2026 – 16 APR 2026).
 
+## Working with Claude (development harness)
+
+How we collaborate here (defaults — override any time with a one-off instruction):
+
+- **Cadence — a theme at a time.** Given a goal, decompose it into items, execute end-to-end, commit each green step to `main`, and check in when the theme is done or a real fork appears. Don't stop after every item for confirmation.
+- **You give the goal, I decompose.** You hand me a theme in your words; I break it down, sequence it (propose the order, then go). Work queues: `backlog.md` (features) and `docs/code-review-baseline.md` (review debt).
+- **Planning is lightweight — TDD is the spec.** A few bullets, then failing tests (RED→GREEN); the tests document intent. No formal PRD/design docs except for a genuinely new subsystem (e.g. a new controller mode), which gets a short `docs/` note first.
+- **Reach for heavy tooling proactively.** Use parallel agents / workflows when breadth clearly warrants it (e.g. a multi-file review sweep), noting the rough cost — don't wait to be asked.
+
+**Steering vocabulary** (cheap mid-flight redirects): *"plan this"* = plan-mode, no code till approved · *"continue"/"keep going"* = execute autonomously, commit per green step · *"review X"* = code-review pass · *"fan out"/"ultracode"* = multi-agent breadth · *"checkpoint"* = stop and summarize state.
+
+**Always-on guardrails** (enforced without asking): determinism (seeded `Rng`, never `Math.random`/`Date.now`), immutability, sim headless boundary, supply-chain vetting before any dep, `make check` green before every commit, docs-win-over-realism.
+
 ## Working Conventions
 
 - **Git:** commit directly to `main` — this is a solo project, no PRs. Keep commits conventional-format and green (`make check` passes). Don't branch or open PRs unless explicitly asked.
