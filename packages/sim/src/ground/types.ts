@@ -45,7 +45,8 @@ export interface GroundAircraft {
   heading: number
   /** Groundspeed in knots. */
   groundspeed: number
-  /** True once the aircraft has reached the end of its route and stopped. */
+  /** Stopped with a zero-speed target: either at the end of its route, or held mid-route
+   * by traffic separation, a junction reservation, or a give-way instruction. */
   holding: boolean
   /** Stopped at a runway hold-short line, awaiting a crossing clearance. */
   holdShort: boolean

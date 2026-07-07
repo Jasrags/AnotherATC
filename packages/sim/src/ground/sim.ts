@@ -249,8 +249,11 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     if (ac.pushingBack) return 'pushback'
     if (ac.holdShort) return 'holdShort'
     if (ac.dwell >= 0) return 'parked'
-    const cleared = ac.groundspeed > 0.5 || (ac.targetSpeed > 0 && ac.leg < ac.path.length - 1)
-    if (cleared) return 'taxi'
+    // `holding` is the authoritative "stopped" flag (set each tick in advance()). Trust
+    // it rather than re-deriving taxi-vs-hold from the nominal targetSpeed, which stays
+    // > 0 even when a separation / reservation / give-way cap has forced a full stop —
+    // that divergence used to report a mid-route traffic hold as 'taxi'.
+    if (!ac.holding) return 'taxi'
     if (ac.path.length < 2 && ac.held === null) return 'parked'
     return 'holding'
   }
@@ -496,9 +499,12 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       }
       if (seg) {
         const side = ccw(seg.a, seg.b, from)
-        const onSide = graph.nearestNodeWhere(
-          dest,
-          (n) => !onRunway(n, guard) && ccw(seg.a, seg.b, n) * side > 0,
+        // `side === 0` means `from` sits exactly on the centerline (mid-crossing, or a
+        // float coincidence at a threshold) — there is no "own side", so don't let the
+        // sign filter go vacuous and fall through to an on-runway node. Just take the
+        // nearest off-runway node, honoring goalNodeFor's off-runway hold-short contract.
+        const onSide = graph.nearestNodeWhere(dest, (n) =>
+          side === 0 ? !onRunway(n, guard) : !onRunway(n, guard) && ccw(seg.a, seg.b, n) * side > 0,
         )
         if (onSide) return onSide
       }

@@ -25,10 +25,17 @@ const NM_PER_DEG_LON = 60 * Math.cos((REF.lat * Math.PI) / 180)
 const M_TO_NM = 0.000539956803
 
 /** Project a geographic point to local nm (x = east, y = north) from REF. */
-const project = ({ lat, lon }) => [
-  round((lon - REF.lon) * NM_PER_DEG_LON),
-  round((lat - REF.lat) * NM_PER_DEG_LAT),
-]
+const project = ({ lat, lon }) => {
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+    throw new Error(`non-finite geographic coordinate in OSM data: ${JSON.stringify({ lat, lon })}`)
+  }
+  const x = round((lon - REF.lon) * NM_PER_DEG_LON)
+  const y = round((lat - REF.lat) * NM_PER_DEG_LAT)
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    throw new Error(`projection produced a non-finite point from ${JSON.stringify({ lat, lon })}`)
+  }
+  return [x, y]
+}
 const round = (n) => Math.round(n * 1e4) / 1e4
 
 // aeroway values we keep, in draw order (background surfaces first).
@@ -87,24 +94,42 @@ const REF_PATCH = {
 // Charted hot spots (not in OSM). HS1 sits by the GA parking / taxiway H area.
 const HOTSPOTS = [{ id: 'HS1', label: 'HS 1', point: [0.507, -0.02], radiusNm: 0.05 }]
 
-const raw = JSON.parse(readFileSync(RAW, 'utf8'))
+let raw
+try {
+  raw = JSON.parse(readFileSync(RAW, 'utf8'))
+} catch (err) {
+  throw new Error(`failed to read/parse ${RAW}`, { cause: err })
+}
+if (!Array.isArray(raw?.elements)) {
+  throw new Error(`${RAW}: expected an OSM response with an "elements" array (a rate-limited or error response?)`)
+}
+
 const features = []
+const matchedRefPatch = new Set() // REF_PATCH ids actually seen in this snapshot
+const skippedKept = [] // KEEP-listed elements dropped for want of usable geometry
 
 for (const el of raw.elements) {
   const kind = el.tags?.aeroway
   if (!kind || !KEEP.has(kind)) continue
 
   let points
-  if (el.type === 'way' && Array.isArray(el.geometry)) {
+  if (el.type === 'way' && Array.isArray(el.geometry) && el.geometry.length > 0) {
     points = el.geometry.map(project)
   } else if (el.type === 'node' && el.lat != null) {
     points = [project(el)]
   } else {
+    // A KEEP-listed element with no usable geometry — e.g. an Overpass response
+    // missing `out geom`, or a way truncated on re-fetch. Don't drop it silently:
+    // a vanished taxiway/runway segment would break routing with no error.
+    skippedKept.push(`${el.type}/${el.id} (${kind})`)
     continue
   }
 
   const feature = { kind, points }
-  const ref = el.tags.ref ?? el.tags.name ?? REF_PATCH[el.id]
+  const patch = REF_PATCH[el.id]
+  if (patch !== undefined) matchedRefPatch.add(String(el.id))
+  // Use truthy-fallback (not ??): an empty-string OSM ref/name must not defeat REF_PATCH.
+  const ref = el.tags.ref || el.tags.name || patch
   if (ref) feature.ref = ref
   if (el.tags.width) {
     const meters = parseFloat(el.tags.width)
@@ -116,6 +141,19 @@ for (const el of raw.elements) {
     feature.closed = true
   }
   features.push(feature)
+}
+
+// Fail loudly rather than write partial/mislabeled data into the deterministic core.
+if (skippedKept.length > 0) {
+  throw new Error(
+    `${skippedKept.length} kept aeroway element(s) had no usable geometry: ${skippedKept.join(', ')} — refusing to write a partial surface`,
+  )
+}
+const unmatchedRefPatch = Object.keys(REF_PATCH).filter((id) => !matchedRefPatch.has(id))
+if (unmatchedRefPatch.length > 0) {
+  throw new Error(
+    `REF_PATCH has ${unmatchedRefPatch.length} way id(s) not present in this OSM snapshot: ${unmatchedRefPatch.join(', ')} — the upstream ways changed; re-verify against docs/SAN/taxiway-naming.md`,
+  )
 }
 
 // Bounds over everything except the (huge) aerodrome boundary polygon.
@@ -130,6 +168,11 @@ for (const f of features) {
     if (x > maxX) maxX = x
     if (y < minY) minY = y
     if (y > maxY) maxY = y
+  }
+}
+for (const v of [minX, minY, maxX, maxY]) {
+  if (!Number.isFinite(v)) {
+    throw new Error(`computed bounds are not finite — no usable non-aerodrome features? ${JSON.stringify({ minX, minY, maxX, maxY })}`)
   }
 }
 
