@@ -23,6 +23,39 @@ describe('separation', () => {
     expect(f.conflict).toBe(false)
   })
 
+  it('resolves a head-on: one aircraft yields while the other proceeds (no deadlock)', () => {
+    // Two aircraft nose-to-nose on the same line, closing on each other.
+    const a = taxiing('a', [0, 0], [0, 0.4]) // northbound
+    const b = taxiing('b', [0, 0.4], [0, 0]) // southbound, same line
+    const sim = createGroundSim([a, b])
+
+    // Run through the encounter, capturing both speeds at closest approach.
+    let minSep = Infinity
+    let aSpeedAtMin = 0
+    let bSpeedAtMin = 0
+    for (let i = 0; i < 2000; i += 1) {
+      sim.step(0.1)
+      const snap = sim.snapshot()
+      const av = snap.aircraft.find((x) => x.id === 'a')!
+      const bv = snap.aircraft.find((x) => x.id === 'b')!
+      const sep = Math.abs(av.y - bv.y)
+      if (sep < minSep) {
+        minSep = sep
+        aSpeedAtMin = av.groundspeed
+        bSpeedAtMin = bv.groundspeed
+      }
+    }
+    // 'a' outranks 'b' (stable id tiebreak) → at the pinch 'b' holds, 'a' keeps rolling.
+    expect(bSpeedAtMin).toBeLessThan(2)
+    expect(aSpeedAtMin).toBeGreaterThan(5)
+
+    // And the standoff clears: both reach their destinations rather than freezing.
+    for (let i = 0; i < 4000; i += 1) sim.step(0.1)
+    const done = sim.snapshot().aircraft
+    expect(done.find((x) => x.id === 'a')!.y).toBeGreaterThan(0.38)
+    expect(done.find((x) => x.id === 'b')!.y).toBeLessThan(0.02)
+  })
+
   it('does not slow for traffic on a parallel path (out of corridor)', () => {
     const a = taxiing('a', [0, 0], [0, 0.6])
     const b = taxiing('b', [0.1, 0.1], [0.1, 0.7]) // parallel, ~0.1 nm to the side

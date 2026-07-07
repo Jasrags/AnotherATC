@@ -71,6 +71,8 @@ const MIN_GAP_NM = 0.022
 const CONFLICT_NM = 0.015
 /** Heading difference (deg) under which traffic ahead counts as same-direction (a leader). */
 const SAME_DIR_DEG = 60
+/** Groundspeed (kt) above which an aircraft counts as "rolling" for right-of-way. */
+const ROLLING_KT = 1
 
 /** Smallest absolute heading difference in degrees (0–180). */
 function angleDelta(a: number, b: number): number {
@@ -85,6 +87,20 @@ function normalizeDeg(d: number): number {
 }
 function dist(a: Point, b: Point): number {
   return Math.hypot(a[0] - b[0], a[1] - b[1])
+}
+
+/**
+ * Total right-of-way order between two aircraft: returns `true` when `a` goes first.
+ * A rolling aircraft outranks a stopped one (don't halt a moving jet for a stationary
+ * one); ties break on a stable id. Because this is a *total* order, of any two aircraft
+ * exactly one yields — never both — which is precisely what stops a head-on or an
+ * intersection from locking up when each aircraft is waiting on the other.
+ */
+function outranks(a: Internal, b: Internal): boolean {
+  const aRolling = a.groundspeed > ROLLING_KT
+  const bRolling = b.groundspeed > ROLLING_KT
+  if (aRolling !== bRolling) return aRolling
+  return a.id < b.id
 }
 
 // `status` is derived at snapshot time, so it is not stored here.
@@ -178,9 +194,13 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       if (forward <= 0 || forward > LOOK_AHEAD_NM) continue
       const cross = hx * dy - hy * dx // >0 = left, <0 = right
       if (Math.abs(cross) > CORRIDOR_HALF_NM) continue
-      // Follow leaders (same direction); at crossings give way to the right only.
+      // Same-direction traffic ahead is a leader — queue behind it (gap cap below).
+      // Crossing/opposing traffic is a right-of-way contest: slow only for whoever
+      // outranks us. Since outranks() is a *total* order, exactly one of any pair
+      // yields, so two aircraft can never both stop for each other — no deadlock,
+      // and a head-on resolves to one holding while the other proceeds.
       const sameDir = angleDelta(ac.heading, o.heading) < SAME_DIR_DEG
-      if (!sameDir && cross >= 0) continue // traffic on the left — ac has right of way
+      if (!sameDir && !outranks(o, ac)) continue // ac has right of way — hold speed
       const gap = forward - MIN_GAP_NM
       const c = gap <= 0 ? 0 : (gap / (LOOK_AHEAD_NM - MIN_GAP_NM)) * TAXI_SPEED_KT
       if (c < cap) cap = c
