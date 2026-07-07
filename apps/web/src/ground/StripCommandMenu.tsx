@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import type { GroundController, StripItem } from './controller'
 import { commandsFor } from './commands'
 import { isTypingTarget } from './keyboard'
@@ -15,6 +15,8 @@ export function StripCommandMenu({
 }) {
   const [openSub, setOpenSub] = useState<number | null>(null)
   const commands = commandsFor(controller, item, aircraft)
+  const menuId = useId()
+  const subId = (i: number): string => `${menuId}-sub-${i}`
 
   const stop = (e: React.MouseEvent) => e.stopPropagation()
   const activate = (i: number): void => {
@@ -69,6 +71,9 @@ export function StripCommandMenu({
               type="button"
               className={`cmd-item${disabled ? ' cmd-disabled' : ''}${openSub === i ? ' cmd-open' : ''}`}
               disabled={disabled}
+              aria-haspopup={isSub ? 'menu' : undefined}
+              aria-expanded={isSub ? openSub === i : undefined}
+              aria-controls={isSub && openSub === i ? subId(i) : undefined}
               onClick={(e) => {
                 stop(e)
                 activate(i)
@@ -80,11 +85,12 @@ export function StripCommandMenu({
               {disabled && <span className="cmd-soon">soon</span>}
             </button>
             {c.action.kind === 'submenu' && openSub === i && (
-              <div className="cmd-sub">
+              <div className="cmd-sub" id={subId(i)} role="menu">
                 {c.action.items.map((leaf) => (
                   <button
                     type="button"
                     key={leaf.label}
+                    role="menuitem"
                     className="cmd-item cmd-sub-item"
                     onClick={(e) => {
                       stop(e)

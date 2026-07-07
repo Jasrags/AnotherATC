@@ -26,6 +26,11 @@ const TAXI_HIT_PX = 26
 /** Pointer movement beyond this (px) counts as a pan, not a click. */
 const DRAG_PX = 4
 
+/** Set an element's text only when it changed — avoids re-announcing aria-live regions. */
+function setText(el: HTMLElement, text: string): void {
+  if (el.textContent !== text) el.textContent = text
+}
+
 export function GroundScope({ controller }: { controller: GroundController }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const statusRef = useRef<HTMLDivElement>(null)
@@ -252,33 +257,37 @@ export function GroundScope({ controller }: { controller: GroundController }) {
         drawSelection(ctx, view, selected, selectedId ? sim.routeOf(selectedId) : [])
         ctx.restore()
 
+        // Only write when the text actually changes: the status/hint/alert nodes are
+        // aria-live regions, and re-assigning an identical string re-announces it.
         if (statusRef.current) {
           const moving = snap.aircraft.filter((a) => a.groundspeed > 0).length
           const mm = String(Math.floor(snap.time / 60)).padStart(2, '0')
           const ss = String(Math.floor(snap.time % 60)).padStart(2, '0')
-          statusRef.current.textContent = `${moving} taxiing · ${snap.aircraft.length} on surface · dep ${snap.departed} · arr ${snap.arrived} · T+${mm}:${ss}`
+          setText(statusRef.current, `${moving} taxiing · ${snap.aircraft.length} on surface · dep ${snap.departed} · arr ${snap.arrived} · T+${mm}:${ss}`)
         }
         if (alertRef.current) {
           const inConflict = snap.aircraft.filter((a) => a.conflict).length
-          alertRef.current.textContent = inConflict > 0 ? `⚠ CONFLICT` : ''
+          setText(alertRef.current, inConflict > 0 ? `⚠ CONFLICT` : '')
         }
         if (hintRef.current) {
           const notice = controller.notice()
+          let hint: string
           if (notice) {
-            hintRef.current.textContent = `⛔ ${notice}`
+            hint = `⛔ ${notice}`
           } else if (draft && selected) {
             const via = draft.via.length ? `via ${draft.via.join(' · ')}` : '(none yet)'
-            hintRef.current.textContent = `Routing ${selected.callsign} ${via} — click taxiways to add · tap a chip or Backspace to remove · pick a destination to issue · Esc to cancel`
+            hint = `Routing ${selected.callsign} ${via} — click taxiways to add · tap a chip or Backspace to remove · pick a destination to issue · Esc to cancel`
           } else if (selected?.holdShort) {
-            hintRef.current.textContent =
+            hint =
               selected.intent === 'departure'
                 ? `${selected.callsign} holding short — use the strip's Contact tower (or C) to release for departure · Esc to deselect`
                 : `${selected.callsign} holding short of the runway — press C to clear across · Esc to deselect`
           } else if (selected) {
-            hintRef.current.textContent = `${selected.callsign} selected — click a point to assign taxi · right-click to hold · Esc to deselect`
+            hint = `${selected.callsign} selected — click a point to assign taxi · right-click to hold · Esc to deselect`
           } else {
-            hintRef.current.textContent = 'click an aircraft (scope or strip) to select · drag to pan · scroll to zoom'
+            hint = 'click an aircraft (scope or strip) to select · drag to pan · scroll to zoom'
           }
+          setText(hintRef.current, hint)
         }
       }
       raf = requestAnimationFrame(frame)
@@ -301,14 +310,20 @@ export function GroundScope({ controller }: { controller: GroundController }) {
 
   return (
     <div className="scope">
-      <canvas ref={canvasRef} className="scope-canvas" />
+      <canvas
+        ref={canvasRef}
+        className="scope-canvas"
+        tabIndex={0}
+        role="application"
+        aria-label="KSAN ground surface radar. Tab to a flight strip to select and command an aircraft; drag to pan, scroll to zoom."
+      />
       <div className="hud hud-tl">
         <div className="hud-title">KSAN · SAN DIEGO INTL</div>
         <div className="hud-sub">GND CON 123.9 · D-ATIS 134.8 · SURFACE (ASDE-X)</div>
       </div>
       <div ref={statusRef} className="hud hud-tr mono" />
-      <div ref={alertRef} className="hud hud-alert mono" />
-      <div ref={hintRef} className="hud hud-bc mono" />
+      <div ref={alertRef} className="hud hud-alert mono" role="alert" />
+      <div ref={hintRef} className="hud hud-bc mono" aria-live="polite" />
     </div>
   )
 }

@@ -25,7 +25,7 @@ This is a solo early-dev game, so correctness and data integrity outrank a11y po
    - ~~`SIM-6` — `goalNodeFor` centerline degeneracy~~ ✅ fixed.
    - ~~`ING-1` / `ING-2` / `ING-3` + `SIM-4`~~ ✅ fixed (validation theme T2).
 2. **Next batch (robustness / UX):** ~~`WEB-6`+`SIM-5` (dispatch feedback), `WEB-2` (resize), `WEB-7` (zoom clamp)~~ ✅ done. Remaining: `WEB-1` (per-frame recompute of static geometry).
-3. **Accessibility batch:** `WEB-3`, `WEB-4`, `WEB-5`, `WEB-10` — the ground UI is currently mouse-only and silent to screen readers.
+3. ~~**Accessibility batch:** `WEB-3`, `WEB-4`, `WEB-5`, `WEB-10`~~ ✅ done (theme T3) — strips are focusable buttons, canvas is labeled with a Tab-to-strip path, submenus expose ARIA state, conflict alert announces.
 4. **Design debt (schedule deliberately):** ~~`SIM-2` — wake-turbulence spacing~~ ✅ done (design note + departure gate).
 5. **Test coverage:** stand up a Vitest setup for `apps/web` and backfill the sim gaps below. See "Test coverage" section.
 
@@ -77,14 +77,11 @@ No Critical findings. Effect cleanup (rAF, listeners, `ResizeObserver`) is corre
 **WEB-2 — `ResizeObserver` handler discards the user's pan/zoom on every reflow.** ✅ **FIXED** (2026-07-07) — first layout fits to bounds; subsequent resizes call the new `reframe()` (preserves zoom, holds the world point at screen center). Tested in `view.test.ts`. `GroundScope.tsx:47-58`.
 `resize()` always calls `fitView(...)`, so any window resize / layout reflow silently recenters a controller who panned into a runway. **Fix:** preserve current scale/center on resize; only `fitView` on first mount.
 
-**WEB-3 — Flight strips are not keyboard-operable.** `StripBay.tsx:88-92`.
-A `<div onClick>` with no `role`/`tabIndex`/`onKeyDown`. Keyboard and switch-access users can't select a strip at all — which blocks the entire command flow gated behind selection. **Fix:** `<button type="button">` (or `role="button" tabIndex={0}` + Enter/Space) with an accessible name.
+**WEB-3 — Flight strips are not keyboard-operable.** ✅ **FIXED** (2026-07-07) — the strip's clickable summary is now a real `<button type="button" className="strip-summary">` (native Enter/Space, accessible name from callsign + status badge, `aria-pressed` reflects selection, `:focus-visible` ring). The command menu is a sibling of the button, not nested inside it, so there's no interactive-nesting violation. `StripBay.tsx`, `index.css`.
 
-**WEB-4 — Canvas radar scope has no keyboard-accessible equivalent.** `GroundScope.tsx:194-201,293-295`.
-All scope interaction is pointer/wheel/contextmenu on a `<canvas>` with no `tabIndex`/`role`/`aria-label`; the keyboard shortcuts all require a selection that's mouse-only (WEB-3). The primary game surface is inoperable without a pointer. **Fix:** give the canvas `tabIndex`/`role="application"`/`aria-label` and a keyboard path to cycle/select aircraft (Tab through the existing strip list).
+**WEB-4 — Canvas radar scope has no keyboard-accessible equivalent.** ✅ **FIXED** (2026-07-07) — the canvas now has `tabIndex={0}` / `role="application"` / `aria-label` describing the surface and how to operate it; the keyboard path to select/command aircraft is Tab through the now-focusable strip buttons (WEB-3). `GroundScope.tsx`.
 
-**WEB-5 — Submenu disclosure buttons are missing ARIA state.** `StripCommandMenu.tsx:160-173`.
-Submenu triggers render a caret but have no `aria-haspopup`/`aria-expanded`/`aria-controls`. Screen-reader users get no indication a nested menu ("Taxi to…", "Give way to…") exists or is open. **Fix:** add the three ARIA attrs + a stable id on the `cmd-sub` container.
+**WEB-5 — Submenu disclosure buttons are missing ARIA state.** ✅ **FIXED** (2026-07-07) — submenu triggers carry `aria-haspopup="menu"` / `aria-expanded` / `aria-controls` (stable `useId`-scoped id); the `cmd-sub` container is `role="menu"` and its leaves `role="menuitem"`. `StripCommandMenu.tsx`.
 
 **WEB-6 — `dispatch` has no error handling around sim command execution.** ✅ **FIXED** (2026-07-07) — the controller wraps `sim.dispatch` in try/catch (logs with context on throw) and turns an `{ok:false}` result or an exception into a transient HUD notice (`controller.notice()`, shown in the hint line for ~4s). See theme **T1**. `controller.ts:129-132`.
 `sim.dispatch(cmd); publish()` with no try/catch, called from event handlers everywhere. An invalid/stale command throws inside the handler — the click just appears to do nothing, no user feedback, no logged context. Violates the project's "never silently swallow errors" rule. See cross-cutting theme **T1**.
@@ -96,7 +93,7 @@ No min/max clamp; repeated zoom can drive `scale` toward 0 or huge, breaking lin
 
 - **WEB-8** — ✅ **FIXED** (2026-07-07) — extracted to `commands.ts`, unit-tested across every `GroundStatus`×`GroundIntent` (13 tests in `commands.test.ts`). `StripCommandMenu.tsx` now imports it.
 - **WEB-9** — `publish()` (`controller.ts:90-116`) builds a Map + signature string over all aircraft every call, including every frame (`GroundScope.tsx:223`), then usually discards it (signature unchanged). **Fix:** sim-side dirty flag/tick counter to skip the work.
-- **WEB-10** — HUD `statusRef`/`alertRef`/`hintRef` (`GroundScope.tsx:249-273`) have no `aria-live`; the `⚠ CONFLICT` alert is never announced. **Fix:** `aria-live="polite"` on hint/status, `role="alert"` / `aria-live="assertive"` on alert.
+- **WEB-10** — ✅ **FIXED** (2026-07-07) — the `⚠ CONFLICT` alert element is now `role="alert"` (assertive) and the hint line is `aria-live="polite"`; per-frame writes are guarded by a `setText` helper that only assigns on change, so an unchanged string is never re-announced. The status line is deliberately **not** a live region — it carries a `T+mm:ss` clock that ticks every second and would spam the screen reader. `GroundScope.tsx`.
 - **WEB-11** — ✅ **FIXED** (2026-07-07) — the `commandsRef.current = commands` write moved out of render into a no-deps `useEffect` (runs after each render; event handlers fire later, so the listener still sees the latest). `StripCommandMenu.tsx:131-132`.
 - **WEB-12** — `nearestTaxiwayRef` (`render.ts:373-400`) is an unindexed linear scan per hover/click frame. Fine at KSAN scale; needs a spatial index (grid/quadtree) for bigger surfaces.
 - **WEB-13** — ✅ **FIXED** (2026-07-07) — both global `keydown` handlers now bail via `isTypingTarget()` (new `keyboard.ts`, unit-tested) when a text field is focused. `GroundScope.tsx:145-157`, `StripCommandMenu.tsx:134-150`.
@@ -144,7 +141,7 @@ All 27 ids resolve today, but nothing asserts it. OSM ids change on upstream re-
 
 **T2 — Unvalidated external-data boundary (ING-1/2/3/5 + SIM-4).** ✅ **ADDRESSED** (2026-07-07) — both sides now validate: the ingest build fails loudly on missing geometry, non-finite coords, unmatched `REF_PATCH` ids, or a malformed response; and `validateSurface` guards the sim boundary on load. `ING-7` (a final output schema gate in the build) remains open as belt-and-suspenders but is largely subsumed by consumer-side `validateSurface`.
 
-**T3 — Accessibility: the ground UI is pointer-only and silent (WEB-3/4/5/10).** No keyboard path to select or command aircraft; conflict alerts aren't announced. Batch these into one a11y pass.
+**T3 — Accessibility: the ground UI is pointer-only and silent (WEB-3/4/5/10).** ✅ **ADDRESSED** (2026-07-07) — one a11y batch: strips are now focusable buttons (WEB-3), the canvas is labeled/focusable with a Tab-to-strip keyboard path (WEB-4), submenus expose ARIA disclosure state (WEB-5), and the conflict alert announces via `role="alert"` with guarded live-region writes (WEB-10). The pointer-only, screen-reader-silent gaps are closed for the ground slice.
 
 ---
 

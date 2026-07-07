@@ -88,26 +88,32 @@ export function StripBay({ controller }: { controller: GroundController }) {
             <div
               key={a.id}
               className={`strip strip-${a.status}${selected ? ' strip-selected' : ''}`}
-              onClick={() => controller.select(a.id)}
             >
-              <div className="strip-row1">
-                <span className="strip-cs">
-                  {a.callsign}
-                  {wake}
-                </span>
-                <span className={`strip-badge badge-${a.status}`}>{STATUS_LABEL[a.status]}</span>
-              </div>
-              <div className="strip-row2">
-                <span className="strip-meta">
-                  <span className={`intent intent-${a.intent}`}>{intentLabel(a.intent)}</span>
-                  {a.type}
-                  {a.gate ? ` · ${a.gate}` : ''}
-                </span>
-                {a.squawk && <span className="strip-squawk">{a.squawk}</span>}
-              </div>
-              {a.via.length > 0 && <div className="strip-route">VIA {a.via.join(' · ')}</div>}
-              {a.giveWayTo && <div className="strip-giveway">◁ GIVE WAY {a.giveWayTo}</div>}
-              {a.wakeHoldSec > 0 && <div className="strip-wake">⚠ WAKE HOLD {a.wakeHoldSec}s</div>}
+              <button
+                type="button"
+                className="strip-summary"
+                aria-pressed={selected}
+                onClick={() => controller.select(a.id)}
+              >
+                <div className="strip-row1">
+                  <span className="strip-cs">
+                    {a.callsign}
+                    {wake}
+                  </span>
+                  <span className={`strip-badge badge-${a.status}`}>{STATUS_LABEL[a.status]}</span>
+                </div>
+                <div className="strip-row2">
+                  <span className="strip-meta">
+                    <span className={`intent intent-${a.intent}`}>{intentLabel(a.intent)}</span>
+                    {a.type}
+                    {a.gate ? ` · ${a.gate}` : ''}
+                  </span>
+                  {a.squawk && <span className="strip-squawk">{a.squawk}</span>}
+                </div>
+                {a.via.length > 0 && <div className="strip-route">VIA {a.via.join(' · ')}</div>}
+                {a.giveWayTo && <div className="strip-giveway">◁ GIVE WAY {a.giveWayTo}</div>}
+                {a.wakeHoldSec > 0 && <div className="strip-wake">⚠ WAKE HOLD {a.wakeHoldSec}s</div>}
+              </button>
               {selected &&
                 (snap.draft && snap.draft.id === a.id ? (
                   <RouteBuilderRow controller={controller} item={a} draft={snap.draft} />

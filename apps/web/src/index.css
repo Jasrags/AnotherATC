@@ -147,11 +147,30 @@ body {
   border: 1px solid #16242f;
   border-left: 3px solid #2a4535;
   border-radius: 4px;
-  cursor: pointer;
 }
 
 .strip:hover {
   background: #0e1a24;
+}
+
+/* Keyboard-operable selection target: a real button reset flush to the card. */
+.strip-summary {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.strip-summary:focus-visible {
+  outline: 2px solid #ffd24a;
+  outline-offset: 3px;
+  border-radius: 3px;
 }
 
 .strip-taxi {
