@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { KSAN_SURFACE } from '@anotheratc/sim'
 import type { GroundController } from './controller'
-import { fitView, pan, toWorld, zoomAt, type View } from './view'
+import { fitView, pan, reframe, toWorld, zoomAt, type View } from './view'
 import {
   drawAircraft,
   drawAreaLabels,
@@ -46,12 +46,16 @@ export function GroundScope({ controller }: { controller: GroundController }) {
 
     const resize = () => {
       const rect = canvas.getBoundingClientRect()
-      width = rect.width
-      height = rect.height
+      const newW = rect.width
+      const newH = rect.height
       dpr = Math.min(window.devicePixelRatio || 1, 2)
-      canvas.width = Math.round(width * dpr)
-      canvas.height = Math.round(height * dpr)
-      view = fitView(KSAN_SURFACE.bounds, width, height)
+      canvas.width = Math.round(newW * dpr)
+      canvas.height = Math.round(newH * dpr)
+      // First layout fits to bounds; later resizes/reflows preserve the controller's
+      // pan/zoom by holding the world point at screen center (WEB-2).
+      view = view ? reframe(view, width, height, newW, newH) : fitView(KSAN_SURFACE.bounds, newW, newH)
+      width = newW
+      height = newH
     }
     resize()
     const observer = new ResizeObserver(resize)

@@ -24,7 +24,7 @@ This is a solo early-dev game, so correctness and data integrity outrank a11y po
    - ~~`SIM-1` — status/holding contradiction~~ ✅ fixed.
    - ~~`SIM-6` — `goalNodeFor` centerline degeneracy~~ ✅ fixed.
    - ~~`ING-1` / `ING-2` / `ING-3` + `SIM-4`~~ ✅ fixed (validation theme T2).
-2. **Next batch (robustness / UX):** ~~`WEB-6`+`SIM-5` (dispatch error handling + feedback)~~ ✅ done. Remaining: `WEB-2` (resize eats pan/zoom), `WEB-7` (zoom clamp), `WEB-1` (per-frame recompute of static geometry).
+2. **Next batch (robustness / UX):** ~~`WEB-6`+`SIM-5` (dispatch feedback), `WEB-2` (resize), `WEB-7` (zoom clamp)~~ ✅ done. Remaining: `WEB-1` (per-frame recompute of static geometry).
 3. **Accessibility batch:** `WEB-3`, `WEB-4`, `WEB-5`, `WEB-10` — the ground UI is currently mouse-only and silent to screen readers.
 4. **Design debt (schedule deliberately):** `SIM-2` — wake-turbulence spacing is unimplemented despite `CLAUDE.md` flagging it as a mandatory first-class mechanic.
 5. **Test coverage:** stand up a Vitest setup for `apps/web` and backfill the sim gaps below. See "Test coverage" section.
@@ -74,7 +74,7 @@ No Critical findings. Effect cleanup (rAF, listeners, `ResizeObserver`) is corre
 **WEB-1 — Static surface geometry is recomputed from scratch every animation frame.** `ground/render.ts:93-352`, driven from `GroundScope.tsx:231-243`.
 `drawSurface`/`drawAreaLabels`/`drawGates`/`drawLabels` re-filter features and rebuild Maps/Sets over static `KSAN_SURFACE` up to 60×/sec. Pure GC churn; scales badly as airports grow. **Fix:** precompute buckets/anchors once (module scope or `useMemo`); only recompute per-frame data (aircraft, selection, hover, route draft).
 
-**WEB-2 — `ResizeObserver` handler discards the user's pan/zoom on every reflow.** `GroundScope.tsx:47-58`.
+**WEB-2 — `ResizeObserver` handler discards the user's pan/zoom on every reflow.** ✅ **FIXED** (2026-07-07) — first layout fits to bounds; subsequent resizes call the new `reframe()` (preserves zoom, holds the world point at screen center). Tested in `view.test.ts`. `GroundScope.tsx:47-58`.
 `resize()` always calls `fitView(...)`, so any window resize / layout reflow silently recenters a controller who panned into a runway. **Fix:** preserve current scale/center on resize; only `fitView` on first mount.
 
 **WEB-3 — Flight strips are not keyboard-operable.** `StripBay.tsx:88-92`.
@@ -89,7 +89,7 @@ Submenu triggers render a caret but have no `aria-haspopup`/`aria-expanded`/`ari
 **WEB-6 — `dispatch` has no error handling around sim command execution.** ✅ **FIXED** (2026-07-07) — the controller wraps `sim.dispatch` in try/catch (logs with context on throw) and turns an `{ok:false}` result or an exception into a transient HUD notice (`controller.notice()`, shown in the hint line for ~4s). See theme **T1**. `controller.ts:129-132`.
 `sim.dispatch(cmd); publish()` with no try/catch, called from event handlers everywhere. An invalid/stale command throws inside the handler — the click just appears to do nothing, no user feedback, no logged context. Violates the project's "never silently swallow errors" rule. See cross-cutting theme **T1**.
 
-**WEB-7 — No bounds on zoom scale.** `GroundScope.tsx:83-88` (`onWheel`), `view.ts:29-34` (`zoomAt`).
+**WEB-7 — No bounds on zoom scale.** ✅ **FIXED** (2026-07-07) — `zoomAt` clamps to `[MIN_SCALE, MAX_SCALE]` (50–20000 px/nm), holding the cursor point fixed at the clamped scale. Tested in `view.test.ts`. `GroundScope.tsx:83-88` (`onWheel`), `view.ts:29-34` (`zoomAt`).
 No min/max clamp; repeated zoom can drive `scale` toward 0 or huge, breaking line widths, label thresholds, and hit-test radii (`HIT_PX / view.scale`). **Fix:** named `MIN_SCALE`/`MAX_SCALE` constants, clamp in `zoomAt`.
 
 ### MEDIUM
@@ -153,7 +153,8 @@ All 27 ids resolve today, but nothing asserts it. OSM ids change on upstream re-
 **`apps/web` and `tools/ingest` have zero tests.** Sim core has 48 (green).
 
 ### Stand up `apps/web` tests (Vitest, no DOM needed for the pure units), highest value first:
-1. `ground/view.ts` — `fitView`, `toScreen`/`toWorld` are true inverses, `zoomAt` fixed-point invariant (world point under cursor stays under cursor), `pan`. Pure math, trivial 100%.
+✅ **Harness stood up** (2026-07-07) — `apps/web` now has a `test` script (vitest, node env; reuses the already-vetted 4.1.9 from the lockfile).
+1. ~~`ground/view.ts`~~ ✅ done — `view.test.ts` covers `fitView` centering, `toScreen`/`toWorld` inverse, `zoomAt` fixed-point + clamp, `reframe`, `pan`.
 2. `ground/controller.ts` — `select`/`beginRoute`/`addVia` (consecutive-dedupe)/`removeViaAt`/`clearRoute`, and the `publish()` signature-dedupe (callbacks fire only on real change). Most load-bearing file in the layer.
 3. `ground/render.ts` pure helpers — `polylineLength`, `polylineMidpoint`, `distToSeg`, `nearestTaxiwayRef` against synthetic surfaces (no Canvas mock).
 4. `commandsFor` (WEB-8) — export it, test every `GroundStatus`×`GroundIntent` to lock the strip state-machine contract.
