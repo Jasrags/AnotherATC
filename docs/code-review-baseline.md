@@ -26,7 +26,7 @@ This is a solo early-dev game, so correctness and data integrity outrank a11y po
    - ~~`ING-1` / `ING-2` / `ING-3` + `SIM-4`~~ ✅ fixed (validation theme T2).
 2. **Next batch (robustness / UX):** ~~`WEB-6`+`SIM-5` (dispatch feedback), `WEB-2` (resize), `WEB-7` (zoom clamp)~~ ✅ done. Remaining: `WEB-1` (per-frame recompute of static geometry).
 3. **Accessibility batch:** `WEB-3`, `WEB-4`, `WEB-5`, `WEB-10` — the ground UI is currently mouse-only and silent to screen readers.
-4. **Design debt (schedule deliberately):** `SIM-2` — wake-turbulence spacing is unimplemented despite `CLAUDE.md` flagging it as a mandatory first-class mechanic.
+4. **Design debt (schedule deliberately):** ~~`SIM-2` — wake-turbulence spacing~~ ✅ done (design note + departure gate).
 5. **Test coverage:** stand up a Vitest setup for `apps/web` and backfill the sim gaps below. See "Test coverage" section.
 
 ---
@@ -41,7 +41,7 @@ An aircraft stopped mid-route by `separationCap`/`reservationCap`/`giveWayCap` r
 
 ### MEDIUM
 
-**SIM-2 — Wake-turbulence spacing is not implemented.** `ground/sim.ts:68-96`, `separationCap` `:259-288`, `reservationCap` `:352-375`.
+**SIM-2 — Wake-turbulence spacing is not implemented.** ✅ **FIXED** (2026-07-07) — departure wake separation implemented as a time-based release gate on `contactTower` (`wake.ts` matrix + `sim.ts` gate; design in `docs/wake-turbulence.md`). Heavy/Super leaders hold lighter followers 90–180s; refusal surfaces via the `DispatchResult` reason channel. Tests: `wake.test.ts`, `wakeGate.test.ts`. `ground/sim.ts:68-96`, `separationCap` `:259-288`, `reservationCap` `:352-375`.
 `ac.wake` is tracked end-to-end and surfaced in the snapshot, but separation constants are flat — a Heavy (`B763`) gets identical spacing to a Medium. `CLAUDE.md` explicitly lists this as a mandatory first-class mechanic. Not a crash/divergence bug; a missing domain invariant. No test exists because the feature doesn't.
 
 **SIM-3 — Pervasive in-place mutation of internal fleet state is an undocumented exception to the CRITICAL immutability rule.** `ground/sim.ts:163-164` (comment), `dispatch()` `:528-615`, `advance()` `:417-461`, `fleet.push/splice`.

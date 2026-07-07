@@ -11,6 +11,7 @@ import type {
   WakeCategory,
 } from './types'
 import type { TaxiGraph } from './taxiGraph'
+import { wakeSeparationSec, WAKE_TIME_SCALE } from './wake'
 import { onRunway, splitRouteAtRunway, type RunwayGuard } from './runwayGuard'
 
 /** Initial definition of one aircraft: a route (nm waypoints) taxied at a target speed. */
@@ -168,6 +169,8 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
   let time = 0
   let departed = 0
   let arrived = 0
+  /** The most recent departure to begin its takeoff roll — the wake-separation leader. */
+  let lastDeparture: { wake: WakeCategory; atTime: number } | null = null
   let seq = 0
   const spawnRng = spawn ? createRng(spawn.seed) : null
   let nextSpawnAt = spawn ? spawn.intervalSec : Infinity
@@ -628,6 +631,16 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         if (ac.intent !== 'departure') return refused('only departures contact tower for takeoff')
         if (!ac.holdShort) return refused('not holding short of the runway')
         if (guard && fleet.some((o) => o !== ac && onRunway([o.x, o.y], guard))) return refused('runway occupied')
+        // Wake-turbulence hold: a following departure can't roll until the interval behind
+        // the previous departure has elapsed (see docs/wake-turbulence.md).
+        if (lastDeparture) {
+          const required = wakeSeparationSec(lastDeparture.wake, ac.wake) * WAKE_TIME_SCALE
+          const remaining = required - (time - lastDeparture.atTime)
+          if (remaining > 0) {
+            const category = lastDeparture.wake === 'J' ? 'Super' : 'Heavy'
+            return refused(`wake turbulence — ${Math.ceil(remaining)}s behind ${category}`)
+          }
+        }
         const far = farRunwayEnd([ac.x, ac.y])
         if (!far) return refused('no runway end found')
         ac.path = [[ac.x, ac.y], far]
@@ -637,6 +650,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         ac.targetSpeed = TAKEOFF_SPEED_KT
         ac.holding = false
         ac.holdShort = false
+        lastDeparture = { wake: ac.wake, atTime: time }
         return ACCEPTED
       }
     }

@@ -1,6 +1,6 @@
 # Wake-Turbulence Separation — Design Note
 
-Status: **proposed** (design; not yet implemented). Closes review finding `SIM-2`.
+Status: **implemented** (2026-07-07). Closes review finding `SIM-2`. Code: `packages/sim/src/ground/wake.ts` (matrix) + the `contactTower` gate in `sim.ts`; tests in `wake.test.ts` (matrix) and `wakeGate.test.ts` (release gate).
 Scope of this note: the **Ground/Tower** slice only — successive-**departure** spacing at the runway. Arrival separation on final is a TRACON concern and is explicitly out of scope here (see [Out of scope](#out-of-scope)).
 
 ## Why
@@ -82,8 +82,8 @@ No change to `separationCap`/`reservationCap` — those govern taxi proximity, a
 - **Arrival / final-approach distance separation** (4–6 nm behind a Heavy) — that lives in TRACON, a later mode. This note is departures only.
 - Intersection-departure and opposite-direction adjustments, LUAW-specific timing, crossing-runway wake, and RECAT/pairwise wake recategorization — future refinements once the base gate exists.
 
-## Open questions (need a decision before implementing)
+## Decisions (resolved 2026-07-07)
 
-1. **Time values / compression.** The matrix is in real-world seconds. The game's taxi/roll run near real-time, but the departure cadence (spawn ~22s) is compressed — 2–3 real minutes may feel punishing. Options: (a) ship real values as-is; (b) add `WAKE_TIME_SCALE` (default `1.0`) and tune by feel, likely starting ~`0.5`. **Recommend (b)** so the mechanic is real by default but tunable.
-2. **Does wake also gate `crossRunway`** (an aircraft transiting behind a heavy departure)? Real-world: crossing behind a departing heavy has wake considerations, but it's a weaker, position-dependent case. **Recommend deferring** — departures only for now.
-3. **Reference point** — measure from leader's *roll start* (proposed) vs. *liftoff*. Roll start is simpler and standard for same-runway; confirm.
+1. **Time values / compression** → real-world seconds by default, with a `WAKE_TIME_SCALE` knob (default `1.0`) to tune feel during playtest without touching the matrix.
+2. **`crossRunway`** → not gated for now; departures (`contactTower`) only. Revisit when runway crossings behind heavies become a live concern.
+3. **Reference point** → measured from the leader's **roll start** (the successful `contactTower`), the standard for same-runway successive departures.
