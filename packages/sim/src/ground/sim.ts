@@ -147,6 +147,8 @@ interface Internal extends Omit<GroundAircraft, 'status'> {
   pushingBack: boolean
   /** Id of traffic this aircraft has been told to give way to (holds until it passes), or null. */
   giveWayTo: string | null
+  /** Transponder code assigned when IFR clearance is delivered (departures), or null. */
+  squawk: string | null
 }
 
 /**
@@ -163,6 +165,14 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
   let seq = 0
   const spawnRng = spawn ? createRng(spawn.seed) : null
   let nextSpawnAt = spawn ? spawn.intervalSec : Infinity
+
+  // Deterministic beacon-code assignment for IFR clearances (4-digit octal).
+  let squawkSeq = 0
+  const nextSquawk = (): string => {
+    const code = (0o4201 + squawkSeq * 0o27) % 0o10000
+    squawkSeq += 1
+    return code.toString(8).padStart(4, '0')
+  }
 
   const plan = (route: readonly Point[]): { path: Point[]; held: Point[] | null } => {
     if (!guard || route.length < 2) return { path: [...route], held: null }
@@ -197,6 +207,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       held,
       pushingBack: false,
       giveWayTo: null,
+      squawk: null,
     }
   }
 
@@ -544,6 +555,11 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
           ac.holdShort = false
         }
         break
+      case 'clearance':
+        // Clearance delivery: issue the IFR clearance to a departure, assigning a beacon
+        // code. Gates pushback — a gate departure can't push until it's been cleared.
+        if (ac.intent === 'departure' && !ac.squawk) ac.squawk = nextSquawk()
+        break
       case 'contactTower':
         // Ground → Tower handoff: a departure holding short of its runway is released
         // onto it (tower's takeoff), completing its ground segment via the runway goal.
@@ -652,6 +668,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
           gate: ac.gate,
           conflict: ac.conflict,
           giveWayTo: ac.giveWayTo ? (find(ac.giveWayTo)?.callsign ?? null) : null,
+          squawk: ac.squawk,
         })),
       }
     },

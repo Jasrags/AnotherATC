@@ -29,6 +29,8 @@ export interface StripItem {
   via: string[]
   /** Callsign of the traffic this aircraft is giving way to, or null. */
   giveWayTo: string | null
+  /** Assigned transponder code once cleared, or null. */
+  squawk: string | null
 }
 
 /** An in-progress "taxi via …" clearance the controller is assembling by taxiway clicks. */
@@ -90,7 +92,8 @@ export function createGroundController(): GroundController {
     const vias = new Map(acs.map((a) => [a.id, sim.taxiwaysOf(a.id)]))
     let nextSig = selected ?? '-'
     nextSig += draft ? `~${draft.id}:${draft.via.join('.')}` : ''
-    for (const a of acs) nextSig += `|${a.id}:${a.status}:${vias.get(a.id)!.join('.')}:${a.giveWayTo ?? ''}`
+    for (const a of acs)
+      nextSig += `|${a.id}:${a.status}:${vias.get(a.id)!.join('.')}:${a.giveWayTo ?? ''}:${a.squawk ?? ''}`
     if (nextSig === sig) return
     sig = nextSig
     snapshot = {
@@ -106,6 +109,7 @@ export function createGroundController(): GroundController {
         gate: a.gate,
         via: vias.get(a.id)!,
         giveWayTo: a.giveWayTo,
+        squawk: a.squawk,
       })),
     }
     for (const cb of listeners) cb()

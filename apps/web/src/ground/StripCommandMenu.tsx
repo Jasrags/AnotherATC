@@ -43,8 +43,14 @@ function commandsFor(controller: GroundController, item: StripItem, aircraft: St
     ]
   }
 
-  // A departure at the gate must push back before it can taxi.
+  // Gate departure: deliver the IFR clearance (assigns a squawk), then push back.
   if (item.status === 'parked' && item.intent === 'departure') {
+    if (!item.squawk) {
+      return [
+        { label: 'Deliver clearance', action: { kind: 'run', run: () => send({ type: 'clearance', aircraftId: id }) } },
+        { label: 'Contact tower', action: { kind: 'soon' } },
+      ]
+    }
     return [
       { label: 'Pushback approved', action: { kind: 'run', run: () => send({ type: 'pushback', aircraftId: id }) } },
       { label: 'Contact tower', action: { kind: 'soon' } },

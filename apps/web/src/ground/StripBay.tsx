@@ -102,6 +102,7 @@ export function StripBay({ controller }: { controller: GroundController }) {
                   {a.type}
                   {a.gate ? ` · ${a.gate}` : ''}
                 </span>
+                {a.squawk && <span className="strip-squawk">{a.squawk}</span>}
               </div>
               {a.via.length > 0 && <div className="strip-route">VIA {a.via.join(' · ')}</div>}
               {a.giveWayTo && <div className="strip-giveway">◁ GIVE WAY {a.giveWayTo}</div>}

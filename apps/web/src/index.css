@@ -225,6 +225,12 @@ body {
   color: #6f9384;
 }
 
+.strip-squawk {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  color: #c3d3df;
+}
+
 .intent {
   padding: 0 4px;
   font-size: 9px;

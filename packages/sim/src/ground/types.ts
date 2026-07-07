@@ -21,6 +21,7 @@ export type GroundCommand =
   | { type: 'crossRunway'; aircraftId: string }
   | { type: 'giveWay'; aircraftId: string; toId: string }
   | { type: 'contactTower'; aircraftId: string }
+  | { type: 'clearance'; aircraftId: string }
 
 /** A pickable, named place a controller can clear an aircraft to. */
 export interface NamedDestination {
@@ -58,6 +59,8 @@ export interface GroundAircraft {
   conflict: boolean
   /** Callsign of the traffic this aircraft has been told to give way to, or null. */
   giveWayTo: string | null
+  /** Assigned transponder (beacon) code once IFR clearance is delivered, or null. */
+  squawk: string | null
 }
 
 export interface GroundSnapshot {
