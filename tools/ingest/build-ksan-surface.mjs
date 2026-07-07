@@ -46,6 +46,20 @@ const KEEP = new Set([
   'gate',
 ])
 
+// OpenStreetMap has no designators for KSAN's taxiway A and its A1–A7 exits, so
+// we assign them by OSM way id (stable), matched to the FAA airport diagram:
+// taxiway A is the south parallel; A1 is the east (RWY 27) end, A7 the west.
+const REF_PATCH = {
+  1509583620: 'A', // long south parallel spine
+  1509583618: 'A7', // west connector
+  1509583626: 'A6',
+  1509583622: 'A5',
+  1128125683: 'A4',
+  1509583636: 'A3',
+  1509583634: 'A2',
+  1509583633: 'A1', // east connector (RWY 27 end)
+}
+
 const raw = JSON.parse(readFileSync(RAW, 'utf8'))
 const features = []
 
@@ -63,7 +77,7 @@ for (const el of raw.elements) {
   }
 
   const feature = { kind, points }
-  const ref = el.tags.ref ?? el.tags.name
+  const ref = el.tags.ref ?? el.tags.name ?? REF_PATCH[el.id]
   if (ref) feature.ref = ref
   if (el.tags.width) {
     const meters = parseFloat(el.tags.width)
