@@ -1,6 +1,7 @@
 import { createRng, type Rng } from '../random'
 import type { Point } from '../world/types'
 import type {
+  DispatchResult,
   GroundAircraft,
   GroundCommand,
   GroundIntent,
@@ -512,52 +513,70 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     return graph.nearestNode(dest)
   }
 
-  function routeTo(ac: Internal, dest: Point, appendExact: boolean): void {
-    if (!graph) return
+  /** Route to a destination. Returns false (nothing applied) when there is no graph or
+   *  no path reaches the destination, so the caller can report the refusal. */
+  function routeTo(ac: Internal, dest: Point, appendExact: boolean): boolean {
+    if (!graph) return false
     const startKey = graph.nearestNode([ac.x, ac.y])
     const goalKey = goalNodeFor(dest, [ac.x, ac.y])
-    if (!startKey || !goalKey) return
-    applyRoute(ac, graph.route(startKey, goalKey), dest, appendExact)
+    if (!startKey || !goalKey) return false
+    const route = graph.route(startKey, goalKey)
+    if (route.length === 0) return false
+    applyRoute(ac, route, dest, appendExact)
+    return true
   }
 
   /** Route via an ordered taxiway sequence, falling back to shortest path if that
-   *  exact sequence can't reach the destination (so a bad clearance still taxis). */
-  function routeVia(ac: Internal, taxiways: readonly string[], dest: Point, appendExact: boolean): void {
-    if (!graph) return
+   *  exact sequence can't reach the destination (so a bad clearance still taxis).
+   *  Returns false when no route could be applied at all. */
+  function routeVia(ac: Internal, taxiways: readonly string[], dest: Point, appendExact: boolean): boolean {
+    if (!graph) return false
     const startKey = graph.nearestNode([ac.x, ac.y])
     const goalKey = goalNodeFor(dest, [ac.x, ac.y])
-    if (!startKey || !goalKey) return
+    if (!startKey || !goalKey) return false
     const via = graph.routeVia(startKey, goalKey, taxiways)
-    applyRoute(ac, via.length > 0 ? via : graph.route(startKey, goalKey), dest, appendExact)
+    const route = via.length > 0 ? via : graph.route(startKey, goalKey)
+    if (route.length === 0) return false
+    applyRoute(ac, route, dest, appendExact)
+    return true
   }
 
-  function dispatch(command: GroundCommand): void {
+  const ACCEPTED: DispatchResult = { ok: true }
+  const refused = (reason: string): DispatchResult => ({ ok: false, reason })
+
+  function dispatch(command: GroundCommand): DispatchResult {
     const ac = find(command.aircraftId)
-    if (!ac) return
+    if (!ac) return refused(`unknown aircraft "${command.aircraftId}"`)
     switch (command.type) {
       case 'taxiTo':
-        routeTo(ac, command.dest, command.exact ?? false)
-        break
+        return routeTo(ac, command.dest, command.exact ?? false)
+          ? ACCEPTED
+          : refused('no taxi route to that point')
       case 'taxiToGoal':
         // Append the exact goal so departures hold short at the runway and
         // arrivals park at the stand (rather than stopping at the nearest node).
-        if (ac.goalPoint) routeTo(ac, ac.goalPoint, true)
-        break
+        if (!ac.goalPoint) return refused('aircraft has no assigned goal')
+        return routeTo(ac, ac.goalPoint, true) ? ACCEPTED : refused('no taxi route to the goal')
       case 'taxiVia':
-        routeVia(ac, command.taxiways, command.dest, command.exact ?? false)
-        break
+        return routeVia(ac, command.taxiways, command.dest, command.exact ?? false)
+          ? ACCEPTED
+          : refused('no taxi route via those taxiways')
       case 'taxiViaGoal':
-        if (ac.goalPoint) routeVia(ac, command.taxiways, ac.goalPoint, true)
-        break
+        if (!ac.goalPoint) return refused('aircraft has no assigned goal')
+        return routeVia(ac, command.taxiways, ac.goalPoint, true)
+          ? ACCEPTED
+          : refused('no taxi route via those taxiways')
       case 'pushback': {
         // Ease the aircraft off the stand onto the nearest taxilane node (the alley),
         // then it's ready to taxi. Departures only, only from a stationary aircraft that
-        // is still at its gate (a single-point route) — ignored once routed or moving.
-        if (!graph || ac.intent !== 'departure' || ac.pushingBack || ac.groundspeed > 0.1 || ac.path.length > 1)
-          break
+        // is still at its gate (a single-point route) — refused once routed or moving.
+        if (ac.intent !== 'departure') return refused('only departures push back')
+        if (!graph) return refused('no taxi graph')
+        if (ac.pushingBack) return refused('already pushing back')
+        if (ac.groundspeed > 0.1 || ac.path.length > 1) return refused('already moving or routed')
         const alleyKey = graph.nearestNode([ac.x, ac.y])
         const alley = alleyKey ? graph.nodePoint(alleyKey) : undefined
-        if (!alley || dist([ac.x, ac.y], alley) < GATE_EPS) break
+        if (!alley || dist([ac.x, ac.y], alley) < GATE_EPS) return refused('no alley to push onto')
         ac.path = [[ac.x, ac.y], alley]
         ac.leg = 0
         ac.held = null
@@ -566,48 +585,51 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         ac.targetSpeed = PUSHBACK_SPEED_KT
         ac.holding = false
         ac.holdShort = false
-        break
+        return ACCEPTED
       }
       case 'hold':
         ac.targetSpeed = 0
-        break
+        return ACCEPTED
       case 'resume':
         ac.giveWayTo = null // "continue taxi" also cancels a give-way hold
         if (ac.leg < ac.path.length - 1) {
           ac.targetSpeed = TAXI_SPEED_KT
           ac.holding = false
         }
-        break
+        return ACCEPTED
       case 'giveWay': {
         const target = find(command.toId)
-        if (target && target !== ac) ac.giveWayTo = command.toId
-        break
+        if (!target || target === ac) return refused('unknown or self give-way target')
+        ac.giveWayTo = command.toId
+        return ACCEPTED
       }
       case 'crossRunway':
-        if (ac.held && ac.held.length >= 2) {
-          // Don't clear onto an occupied runway.
-          if (guard && fleet.some((o) => o !== ac && onRunway([o.x, o.y], guard))) break
-          ac.path = ac.held
-          ac.leg = 0
-          ac.held = null
-          ac.targetSpeed = TAXI_SPEED_KT
-          ac.holding = false
-          ac.holdShort = false
-        }
-        break
+        if (!ac.held || ac.held.length < 2) return refused('not holding short of a runway')
+        // Don't clear onto an occupied runway.
+        if (guard && fleet.some((o) => o !== ac && onRunway([o.x, o.y], guard))) return refused('runway occupied')
+        ac.path = ac.held
+        ac.leg = 0
+        ac.held = null
+        ac.targetSpeed = TAXI_SPEED_KT
+        ac.holding = false
+        ac.holdShort = false
+        return ACCEPTED
       case 'clearance':
         // Clearance delivery: issue the IFR clearance to a departure, assigning a beacon
         // code. Gates pushback — a gate departure can't push until it's been cleared.
-        if (ac.intent === 'departure' && !ac.squawk) ac.squawk = nextSquawk()
-        break
+        if (ac.intent !== 'departure') return refused('only departures receive IFR clearance')
+        if (ac.squawk) return refused('already cleared')
+        ac.squawk = nextSquawk()
+        return ACCEPTED
       case 'contactTower': {
         // Ground → Tower handoff: a departure holding short of its runway lines up and
         // rolls for takeoff down the runway toward the far end, then lifts off (despawns
         // as a completed departure). Requires a clear runway.
-        if (ac.intent !== 'departure' || !ac.holdShort) break
-        if (guard && fleet.some((o) => o !== ac && onRunway([o.x, o.y], guard))) break
+        if (ac.intent !== 'departure') return refused('only departures contact tower for takeoff')
+        if (!ac.holdShort) return refused('not holding short of the runway')
+        if (guard && fleet.some((o) => o !== ac && onRunway([o.x, o.y], guard))) return refused('runway occupied')
         const far = farRunwayEnd([ac.x, ac.y])
-        if (!far) break
+        if (!far) return refused('no runway end found')
         ac.path = [[ac.x, ac.y], far]
         ac.leg = 0
         ac.held = null
@@ -615,7 +637,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         ac.targetSpeed = TAKEOFF_SPEED_KT
         ac.holding = false
         ac.holdShort = false
-        break
+        return ACCEPTED
       }
     }
   }

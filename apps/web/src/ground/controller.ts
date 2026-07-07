@@ -59,6 +59,9 @@ export interface GroundController {
   selectedId(): string | null
   select(id: string | null): void
   dispatch(cmd: GroundCommand): void
+  /** A transient controller-facing message (a refused command or an error), or null.
+   *  Expires a few seconds after it is set. */
+  notice(): string | null
   routeOf(id: string): Point[]
   /** The route currently being assembled by taxiway clicks, or null. */
   routeDraft(): RouteDraft | null
@@ -86,6 +89,13 @@ export function createGroundController(): GroundController {
   const listeners = new Set<() => void>()
   let snapshot: StripSnapshot = { aircraft: [], selectedId: null, draft: null }
   let sig = ''
+
+  /** How long a refusal/error message stays on the HUD (ms). */
+  const NOTICE_MS = 4000
+  let activeNotice: { message: string; until: number } | null = null
+  const flashNotice = (message: string): void => {
+    activeNotice = { message, until: performance.now() + NOTICE_MS }
+  }
 
   const publish = (): void => {
     const acs = sim.snapshot().aircraft
@@ -127,8 +137,23 @@ export function createGroundController(): GroundController {
       publish()
     },
     dispatch: (cmd) => {
-      sim.dispatch(cmd)
+      try {
+        const result = sim.dispatch(cmd)
+        if (!result.ok) flashNotice(result.reason)
+      } catch (err) {
+        // A command should never throw; if it does, don't let the click silently vanish.
+        console.error('ground command failed', cmd, err)
+        flashNotice('command failed — see console')
+      }
       publish()
+    },
+    notice: () => {
+      if (!activeNotice) return null
+      if (performance.now() >= activeNotice.until) {
+        activeNotice = null
+        return null
+      }
+      return activeNotice.message
     },
     routeOf: (id) => sim.routeOf(id),
     routeDraft: () => draft,

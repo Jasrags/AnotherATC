@@ -74,13 +74,17 @@ export interface GroundSnapshot {
   arrived: number
 }
 
+/** Outcome of a dispatched command: accepted, or refused with a controller-facing reason. */
+export type DispatchResult = { readonly ok: true } | { readonly ok: false; readonly reason: string }
+
 export interface GroundSim {
   /** Advance the simulation by a fixed timestep (seconds). */
   step(dtSeconds: number): void
   /** An immutable view of current state for rendering. */
   snapshot(): GroundSnapshot
-  /** Apply a controller instruction (requires a taxi graph for routing). */
-  dispatch(command: GroundCommand): void
+  /** Apply a controller instruction (requires a taxi graph for routing). Returns whether
+   *  it was accepted, or a reason it was refused (occupied runway, unknown aircraft, …). */
+  dispatch(command: GroundCommand): DispatchResult
   /** Remaining route waypoints for an aircraft (for drawing); [] if none. */
   routeOf(aircraftId: string): Point[]
   /** The named taxiways the aircraft's current route follows, in order (e.g. ["A","B"]). */

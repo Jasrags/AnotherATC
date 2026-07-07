@@ -257,7 +257,10 @@ export function GroundScope({ controller }: { controller: GroundController }) {
           alertRef.current.textContent = inConflict > 0 ? `⚠ CONFLICT` : ''
         }
         if (hintRef.current) {
-          if (draft && selected) {
+          const notice = controller.notice()
+          if (notice) {
+            hintRef.current.textContent = `⛔ ${notice}`
+          } else if (draft && selected) {
             const via = draft.via.length ? `via ${draft.via.join(' · ')}` : '(none yet)'
             hintRef.current.textContent = `Routing ${selected.callsign} ${via} — click taxiways to add · tap a chip or Backspace to remove · pick a destination to issue · Esc to cancel`
           } else if (selected?.holdShort) {

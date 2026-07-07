@@ -24,7 +24,7 @@ This is a solo early-dev game, so correctness and data integrity outrank a11y po
    - ~~`SIM-1` — status/holding contradiction~~ ✅ fixed.
    - ~~`SIM-6` — `goalNodeFor` centerline degeneracy~~ ✅ fixed.
    - ~~`ING-1` / `ING-2` / `ING-3` + `SIM-4`~~ ✅ fixed (validation theme T2).
-2. **Next batch (robustness / UX):** `WEB-6`+`SIM-5` (dispatch error handling + feedback channel — one theme), `WEB-2` (resize eats pan/zoom), `WEB-7` (zoom clamp), `WEB-1` (per-frame recompute of static geometry).
+2. **Next batch (robustness / UX):** ~~`WEB-6`+`SIM-5` (dispatch error handling + feedback)~~ ✅ done. Remaining: `WEB-2` (resize eats pan/zoom), `WEB-7` (zoom clamp), `WEB-1` (per-frame recompute of static geometry).
 3. **Accessibility batch:** `WEB-3`, `WEB-4`, `WEB-5`, `WEB-10` — the ground UI is currently mouse-only and silent to screen readers.
 4. **Design debt (schedule deliberately):** `SIM-2` — wake-turbulence spacing is unimplemented despite `CLAUDE.md` flagging it as a mandatory first-class mechanic.
 5. **Test coverage:** stand up a Vitest setup for `apps/web` and backfill the sim gaps below. See "Test coverage" section.
@@ -50,7 +50,7 @@ The *external* snapshot contract is immutable (fresh objects each `snapshot()`),
 **SIM-4 — `KSAN_SURFACE` is force-cast with zero runtime validation at the sim boundary.** ✅ **FIXED** (2026-07-07) — new `world/validateSurface.ts` validates on load (finite coords/bounds, known kinds, non-empty points) and throws a named error; `ksan.ts` now calls it instead of the blind cast. 8 unit tests in `validateSurface.test.ts`. `world/ksan.ts:8`: `surface as unknown as AirportSurface`.
 Violates "never trust file content." Malformed geometry (NaN coords, missing `points`) propagates silently: NaN distances make every `d < bestDist` comparison in `taxiGraph.ts:100-112` false, silently returning `null` routes instead of throwing. **Fix:** lightweight schema/sanity check (finite numbers, non-empty `points`, bounds present) at load. Pairs with `ING-2`.
 
-**SIM-5 — `dispatch()` has no feedback channel; every refused command is a silent no-op.** `ground/sim.ts:528-615`, interface `types.ts:81-82`.
+**SIM-5 — `dispatch()` has no feedback channel; every refused command is a silent no-op.** ✅ **FIXED** (2026-07-07) — `dispatch` now returns `DispatchResult` (`{ok:true}` | `{ok:false, reason}`); every refusal branch names its reason (runway occupied, wrong intent, unknown target, no route, …). 7 tests in `dispatchResult.test.ts`. See theme **T1**. `ground/sim.ts:528-615`, interface `types.ts:81-82`.
 `pushback` when already moving, `crossRunway`/`contactTower` when the runway is occupied, `clearance`/`giveWay` for unknown ids — all return `void` with no signal. A caller can't distinguish "refused because runway occupied" from "not yet visible." Consistent design choice (tests confirm), but the UI needs to surface *why* a command was refused. See cross-cutting theme **T1**.
 
 **SIM-6 — `goalNodeFor` degenerates on the runway centerline.** ✅ **FIXED** (2026-07-07) — `side === 0` now takes the nearest off-runway node instead of a vacuous filter falling through to an on-runway node; regression test in `runwayRouting.test.ts`. (Real-world impact was partly masked by `splitRouteAtRunway`; the fix removes the spurious planned crossing.) `ground/sim.ts:485-507`.
@@ -86,7 +86,7 @@ All scope interaction is pointer/wheel/contextmenu on a `<canvas>` with no `tabI
 **WEB-5 — Submenu disclosure buttons are missing ARIA state.** `StripCommandMenu.tsx:160-173`.
 Submenu triggers render a caret but have no `aria-haspopup`/`aria-expanded`/`aria-controls`. Screen-reader users get no indication a nested menu ("Taxi to…", "Give way to…") exists or is open. **Fix:** add the three ARIA attrs + a stable id on the `cmd-sub` container.
 
-**WEB-6 — `dispatch` has no error handling around sim command execution.** `controller.ts:129-132`.
+**WEB-6 — `dispatch` has no error handling around sim command execution.** ✅ **FIXED** (2026-07-07) — the controller wraps `sim.dispatch` in try/catch (logs with context on throw) and turns an `{ok:false}` result or an exception into a transient HUD notice (`controller.notice()`, shown in the hint line for ~4s). See theme **T1**. `controller.ts:129-132`.
 `sim.dispatch(cmd); publish()` with no try/catch, called from event handlers everywhere. An invalid/stale command throws inside the handler — the click just appears to do nothing, no user feedback, no logged context. Violates the project's "never silently swallow errors" rule. See cross-cutting theme **T1**.
 
 **WEB-7 — No bounds on zoom scale.** `GroundScope.tsx:83-88` (`onWheel`), `view.ts:29-34` (`zoomAt`).
@@ -140,7 +140,7 @@ All 27 ids resolve today, but nothing asserts it. OSM ids change on upstream re-
 
 ## Cross-cutting themes
 
-**T1 — No command-refusal feedback (SIM-5 + WEB-6).** The sim silently no-ops refused commands *and* the web layer swallows any throw. Together, a controller's refused/invalid command is indistinguishable from a lag or a bug. Fix as one unit: have `dispatch` return a result/reason (or emit a rejection), have the controller surface it to the HUD and log context. Highest-leverage robustness fix given the docs emphasize runway-release/go-around tension.
+**T1 — No command-refusal feedback (SIM-5 + WEB-6).** ✅ **ADDRESSED** (2026-07-07) — `dispatch` returns a typed `DispatchResult` with a reason; the web controller surfaces refusals/errors as a transient HUD notice and logs exceptions with context. Follow-up: `WEB-10` (add `aria-live` to the hint element) would make these notices screen-reader-announced — folded into the a11y batch.
 
 **T2 — Unvalidated external-data boundary (ING-1/2/3/5 + SIM-4).** ✅ **ADDRESSED** (2026-07-07) — both sides now validate: the ingest build fails loudly on missing geometry, non-finite coords, unmatched `REF_PATCH` ids, or a malformed response; and `validateSurface` guards the sim boundary on load. `ING-7` (a final output schema gate in the build) remains open as belt-and-suspenders but is largely subsumed by consumer-side `validateSurface`.
 

@@ -24,6 +24,7 @@ export type {
   GroundSnapshot,
   GroundSim,
   GroundCommand,
+  DispatchResult,
   GroundStatus,
   GroundIntent,
   NamedDestination,
