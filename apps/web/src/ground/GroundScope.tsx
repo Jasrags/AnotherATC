@@ -1,23 +1,29 @@
 import { useEffect, useRef } from 'react'
-import { KSAN_SURFACE, buildKsanGroundScenario, createGroundSim } from '@anotheratc/sim'
-import { fitView, pan, zoomAt, type View } from './view'
-import { drawAircraft, drawSurface } from './render'
+import { KSAN_SURFACE, buildKsanGroundScenario, buildTaxiGraph, createGroundSim } from '@anotheratc/sim'
+import { fitView, pan, toWorld, zoomAt, type View } from './view'
+import { drawAircraft, drawLabels, drawSelection, drawSurface } from './render'
 
 /** Fixed simulation timestep (seconds) — decoupled from the render framerate. */
 const FIXED_DT = 0.05
+/** Click must land within this many px of a target to select it. */
+const HIT_PX = 14
+/** Pointer movement beyond this (px) counts as a pan, not a click. */
+const DRAG_PX = 4
 
 export function GroundScope() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const statusRef = useRef<HTMLDivElement>(null)
+  const hintRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const canvas = canvasRef.current
-    const status = statusRef.current
     if (!canvas) return
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
-    const sim = createGroundSim(buildKsanGroundScenario(1))
+    const graph = buildTaxiGraph(KSAN_SURFACE)
+    const sim = createGroundSim(buildKsanGroundScenario(1), graph)
+    let selectedId: string | null = null
 
     let width = 0
     let height = 0
@@ -37,10 +43,14 @@ export function GroundScope() {
     const observer = new ResizeObserver(resize)
     observer.observe(canvas)
 
-    // pan + zoom
+    // pan / zoom / click
     let dragging = false
+    let moved = false
     let lastX = 0
     let lastY = 0
+    let downX = 0
+    let downY = 0
+
     const onWheel = (e: WheelEvent) => {
       e.preventDefault()
       if (!view) return
@@ -48,25 +58,73 @@ export function GroundScope() {
       view = zoomAt(view, Math.exp(-e.deltaY * 0.0015), e.clientX - rect.left, e.clientY - rect.top)
     }
     const onDown = (e: PointerEvent) => {
+      if (e.button !== 0) return // primary button only; right-click is handled separately
       dragging = true
+      moved = false
       lastX = e.clientX
       lastY = e.clientY
+      downX = e.clientX
+      downY = e.clientY
       canvas.setPointerCapture(e.pointerId)
     }
     const onMove = (e: PointerEvent) => {
       if (!dragging || !view) return
+      if (Math.hypot(e.clientX - downX, e.clientY - downY) > DRAG_PX) moved = true
       view = pan(view, e.clientX - lastX, e.clientY - lastY)
       lastX = e.clientX
       lastY = e.clientY
     }
     const onUp = (e: PointerEvent) => {
+      if (e.button !== 0) return
       dragging = false
       canvas.releasePointerCapture(e.pointerId)
+      if (moved || !view) return
+      const rect = canvas.getBoundingClientRect()
+      handleClick(e.clientX - rect.left, e.clientY - rect.top)
     }
+    const onContextMenu = (e: MouseEvent) => {
+      e.preventDefault()
+      if (selectedId) sim.dispatch({ type: 'hold', aircraftId: selectedId })
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') selectedId = null
+    }
+
+    function handleClick(sx: number, sy: number): void {
+      if (!view) return
+      const snap = sim.snapshot()
+      let hit: string | null = null
+      let hitDist = HIT_PX
+      for (const a of snap.aircraft) {
+        const [ax, ay] = toScreenSafe(a.x, a.y)
+        const d = Math.hypot(ax - sx, ay - sy)
+        if (d < hitDist) {
+          hitDist = d
+          hit = a.id
+        }
+      }
+      if (hit) {
+        selectedId = hit
+      } else if (selectedId) {
+        const [wx, wy] = toWorld(view, sx, sy)
+        sim.dispatch({ type: 'taxiTo', aircraftId: selectedId, dest: [wx, wy] })
+      } else {
+        selectedId = null
+      }
+    }
+
+    // toScreen needs the current view; small local helper to avoid null checks inline
+    const toScreenSafe = (x: number, y: number): [number, number] => {
+      if (!view) return [-1e6, -1e6]
+      return [x * view.scale + view.offX, -y * view.scale + view.offY]
+    }
+
     canvas.addEventListener('wheel', onWheel, { passive: false })
     canvas.addEventListener('pointerdown', onDown)
     canvas.addEventListener('pointermove', onMove)
     canvas.addEventListener('pointerup', onUp)
+    canvas.addEventListener('contextmenu', onContextMenu)
+    window.addEventListener('keydown', onKey)
 
     let raf = 0
     let last = 0
@@ -94,14 +152,22 @@ export function GroundScope() {
         ctx.scale(dpr, dpr)
         const snap = sim.snapshot()
         drawSurface(ctx, view, KSAN_SURFACE, width, height)
+        drawLabels(ctx, view, KSAN_SURFACE)
         drawAircraft(ctx, view, snap.aircraft)
+        const selected = selectedId ? snap.aircraft.find((a) => a.id === selectedId) : undefined
+        drawSelection(ctx, view, selected, selectedId ? sim.routeOf(selectedId) : [])
         ctx.restore()
 
-        if (status) {
+        if (statusRef.current) {
           const moving = snap.aircraft.filter((a) => a.groundspeed > 0).length
           const mm = String(Math.floor(snap.time / 60)).padStart(2, '0')
           const ss = String(Math.floor(snap.time % 60)).padStart(2, '0')
-          status.textContent = `${moving} taxiing · ${snap.aircraft.length} on surface · T+${mm}:${ss}`
+          statusRef.current.textContent = `${moving} taxiing · ${snap.aircraft.length} on surface · T+${mm}:${ss}`
+        }
+        if (hintRef.current) {
+          hintRef.current.textContent = selected
+            ? `${selected.callsign} selected — click a taxiway point to assign taxi · right-click to hold · Esc to deselect`
+            : 'click an aircraft to select · drag to pan · scroll to zoom'
         }
       }
       raf = requestAnimationFrame(frame)
@@ -115,6 +181,8 @@ export function GroundScope() {
       canvas.removeEventListener('pointerdown', onDown)
       canvas.removeEventListener('pointermove', onMove)
       canvas.removeEventListener('pointerup', onUp)
+      canvas.removeEventListener('contextmenu', onContextMenu)
+      window.removeEventListener('keydown', onKey)
     }
   }, [])
 
@@ -126,7 +194,7 @@ export function GroundScope() {
         <div className="hud-sub">GND CON 123.9 · D-ATIS 134.8 · SURFACE (ASDE-X)</div>
       </div>
       <div ref={statusRef} className="hud hud-tr mono" />
-      <div className="hud hud-bl mono">drag to pan · scroll to zoom · geometry © OpenStreetMap</div>
+      <div ref={hintRef} className="hud hud-bc mono" />
     </div>
   )
 }

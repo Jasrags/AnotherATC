@@ -20,6 +20,11 @@ export const COLORS = {
   block1: '#8ef0b4',
   block2: '#54b487',
   connector: '#2b4a5b',
+  selection: '#ffd24a',
+  route: '#49d3ff',
+  routeDest: '#8becff',
+  labelTaxi: '#40705d',
+  labelRwy: '#93a9bd',
 } as const
 
 export const DIMS = {

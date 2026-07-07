@@ -1,5 +1,6 @@
 import type { Point } from '../world/types'
-import type { GroundAircraft, GroundSim, GroundSnapshot, WakeCategory } from './types'
+import type { GroundAircraft, GroundCommand, GroundSim, GroundSnapshot, WakeCategory } from './types'
+import type { TaxiGraph } from './taxiGraph'
 
 /** Initial definition of one aircraft: a route (nm waypoints) taxied at a target speed. */
 export interface AircraftInit {
@@ -17,8 +18,9 @@ export interface AircraftInit {
 
 /** Taxi acceleration/deceleration in knots per second. */
 const TAXI_ACCEL = 4
+/** Default speed assigned when a controller issues a taxi clearance. */
+const TAXI_SPEED_KT = 15
 
-/** Heading (deg true) from point a to point b, where x=east, y=north. */
 function bearing(ax: number, ay: number, bx: number, by: number): number {
   return (Math.atan2(bx - ax, by - ay) * 180) / Math.PI
 }
@@ -35,11 +37,11 @@ interface Internal extends GroundAircraft {
 
 /**
  * A deterministic surface-movement simulation. Aircraft follow their route at a
- * performance-limited speed; heading tracks the current segment. Internal state
- * is mutated in place each tick (the hot loop); {@link GroundSim.snapshot}
- * hands consumers fresh immutable objects.
+ * performance-limited speed; heading tracks the current segment. A {@link TaxiGraph}
+ * (optional) enables `taxiTo` routing. Internal state is mutated in place each tick;
+ * {@link GroundSim.snapshot} hands consumers fresh immutable objects.
  */
-export function createGroundSim(inits: readonly AircraftInit[]): GroundSim {
+export function createGroundSim(inits: readonly AircraftInit[], graph?: TaxiGraph): GroundSim {
   let time = 0
 
   const fleet: Internal[] = inits.map((init) => {
@@ -63,6 +65,8 @@ export function createGroundSim(inits: readonly AircraftInit[]): GroundSim {
     }
   })
 
+  const find = (id: string): Internal | undefined => fleet.find((a) => a.id === id)
+
   function advance(ac: Internal, dt: number): void {
     const atEnd = ac.leg >= ac.path.length - 1
     const target = atEnd ? 0 : ac.targetSpeed
@@ -73,9 +77,9 @@ export function createGroundSim(inits: readonly AircraftInit[]): GroundSim {
       ac.groundspeed = Math.max(target, ac.groundspeed - TAXI_ACCEL * dt)
     }
 
-    if (atEnd && ac.groundspeed <= 0.01) {
+    ac.holding = target === 0 && ac.groundspeed <= 0.01
+    if (ac.groundspeed <= 0.01 && target === 0) {
       ac.groundspeed = 0
-      ac.holding = true
       return
     }
 
@@ -104,6 +108,43 @@ export function createGroundSim(inits: readonly AircraftInit[]): GroundSim {
     }
   }
 
+  function dispatch(command: GroundCommand): void {
+    const ac = find(command.aircraftId)
+    if (!ac) return
+    switch (command.type) {
+      case 'taxiTo': {
+        if (!graph) return
+        const startKey = graph.nearestNode([ac.x, ac.y])
+        const goalKey = graph.nearestNode(command.dest)
+        if (!startKey || !goalKey) return
+        const routePoints = graph.route(startKey, goalKey)
+        if (routePoints.length === 0) return
+        // Prepend the exact current position so it drives smoothly onto the graph.
+        ac.path = [[ac.x, ac.y], ...routePoints]
+        ac.leg = 0
+        ac.targetSpeed = TAXI_SPEED_KT
+        ac.holding = false
+        break
+      }
+      case 'hold':
+        ac.targetSpeed = 0
+        break
+      case 'resume':
+        if (ac.leg < ac.path.length - 1) {
+          ac.targetSpeed = TAXI_SPEED_KT
+          ac.holding = false
+        }
+        break
+    }
+  }
+
+  function routeOf(aircraftId: string): Point[] {
+    const ac = find(aircraftId)
+    if (!ac || ac.leg >= ac.path.length - 1) return []
+    const ahead = ac.path.slice(ac.leg + 1)
+    return [[ac.x, ac.y], ...ahead]
+  }
+
   return {
     step(dt) {
       time += dt
@@ -125,5 +166,7 @@ export function createGroundSim(inits: readonly AircraftInit[]): GroundSim {
         })),
       }
     },
+    dispatch,
+    routeOf,
   }
 }

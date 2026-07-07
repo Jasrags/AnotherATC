@@ -1,5 +1,13 @@
+import type { Point } from '../world/types'
+
 /** ICAO wake turbulence category: Light / Medium / Heavy / Super. */
 export type WakeCategory = 'L' | 'M' | 'H' | 'J'
+
+/** A controller instruction to the surface simulation. */
+export type GroundCommand =
+  | { type: 'taxiTo'; aircraftId: string; dest: Point }
+  | { type: 'hold'; aircraftId: string }
+  | { type: 'resume'; aircraftId: string }
 
 /** An aircraft on the airport surface, as seen by a consumer (immutable snapshot). */
 export interface GroundAircraft {
@@ -30,4 +38,8 @@ export interface GroundSim {
   step(dtSeconds: number): void
   /** An immutable view of current state for rendering. */
   snapshot(): GroundSnapshot
+  /** Apply a controller instruction (requires a taxi graph for routing). */
+  dispatch(command: GroundCommand): void
+  /** Remaining route waypoints for an aircraft (for drawing); [] if none. */
+  routeOf(aircraftId: string): Point[]
 }

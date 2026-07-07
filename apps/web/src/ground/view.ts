@@ -20,6 +20,11 @@ export function toScreen(v: View, x: number, y: number): [number, number] {
   return [x * v.scale + v.offX, -y * v.scale + v.offY]
 }
 
+/** Inverse of toScreen: screen px → world nm. */
+export function toWorld(v: View, sx: number, sy: number): [number, number] {
+  return [(sx - v.offX) / v.scale, (v.offY - sy) / v.scale]
+}
+
 /** Zoom by `factor` keeping the world point under (sx, sy) fixed on screen. */
 export function zoomAt(v: View, factor: number, sx: number, sy: number): View {
   const wx = (sx - v.offX) / v.scale

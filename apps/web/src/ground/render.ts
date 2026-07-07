@@ -1,8 +1,18 @@
-import type { AirportSurface, GroundAircraft, SurfaceFeature, SurfaceKind } from '@anotheratc/sim'
+import type { AirportSurface, GroundAircraft, Point, SurfaceFeature, SurfaceKind } from '@anotheratc/sim'
 import { COLORS, DIMS } from './palette'
 import { toScreen, type View } from './view'
 
 type Ctx = CanvasRenderingContext2D
+
+function polylineLength(points: SurfaceFeature['points']): number {
+  let d = 0
+  for (let i = 1; i < points.length; i += 1) {
+    const a = points[i - 1]
+    const b = points[i]
+    if (a && b) d += Math.hypot(b[0] - a[0], b[1] - a[1])
+  }
+  return d
+}
 
 interface StrokeOpts {
   /** Pavement width in nm (scales with zoom). */
@@ -92,6 +102,99 @@ export function drawSurface(ctx: Ctx, v: View, surface: AirportSurface, w: numbe
     ctx.rect(sx - 1.6, sy - 1.6, 3.2, 3.2)
     ctx.fill()
   }
+}
+
+/** One label per taxiway designator (at its longest segment) + runway numbers. */
+export function drawLabels(ctx: Ctx, v: View, surface: AirportSurface): void {
+  const best = new Map<string, { len: number; mid: Point }>()
+  for (const f of surface.features) {
+    if (f.kind !== 'taxiway' || !f.ref) continue
+    const mid = f.points[Math.floor(f.points.length / 2)]
+    if (!mid) continue
+    const len = polylineLength(f.points)
+    const cur = best.get(f.ref)
+    if (!cur || len > cur.len) best.set(f.ref, { len, mid })
+  }
+
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.font = '10px ui-monospace, "SF Mono", Menlo, monospace'
+  ctx.fillStyle = COLORS.labelTaxi
+  for (const [ref, { mid }] of best) {
+    const [sx, sy] = toScreen(v, mid[0], mid[1])
+    ctx.fillText(ref, sx, sy)
+  }
+
+  // runway numbers at the two thresholds (9 = west end, 27 = east end)
+  let west: Point | null = null
+  let east: Point | null = null
+  for (const f of surface.features) {
+    if (f.kind !== 'runway') continue
+    for (const p of f.points) {
+      if (!p) continue
+      if (!west || p[0] < west[0]) west = p
+      if (!east || p[0] > east[0]) east = p
+    }
+  }
+  ctx.fillStyle = COLORS.labelRwy
+  ctx.font = 'bold 13px ui-monospace, "SF Mono", Menlo, monospace'
+  if (west) {
+    const [sx, sy] = toScreen(v, west[0], west[1])
+    ctx.fillText('9', sx - 12, sy)
+  }
+  if (east) {
+    const [sx, sy] = toScreen(v, east[0], east[1])
+    ctx.fillText('27', sx + 14, sy)
+  }
+
+  ctx.textAlign = 'left'
+}
+
+/** Highlight the selected aircraft and its remaining route. */
+export function drawSelection(
+  ctx: Ctx,
+  v: View,
+  selected: GroundAircraft | undefined,
+  route: Point[],
+): void {
+  if (!selected) return
+
+  if (route.length >= 2) {
+    ctx.strokeStyle = COLORS.route
+    ctx.lineWidth = 2
+    ctx.lineCap = 'round'
+    ctx.lineJoin = 'round'
+    ctx.setLineDash([7, 6])
+    ctx.beginPath()
+    let started = false
+    for (const p of route) {
+      const [sx, sy] = toScreen(v, p[0], p[1])
+      if (!started) {
+        ctx.moveTo(sx, sy)
+        started = true
+      } else {
+        ctx.lineTo(sx, sy)
+      }
+    }
+    ctx.stroke()
+    ctx.setLineDash([])
+    const dest = route[route.length - 1]
+    if (dest) {
+      const [dx, dy] = toScreen(v, dest[0], dest[1])
+      ctx.fillStyle = COLORS.routeDest
+      ctx.beginPath()
+      ctx.arc(dx, dy, 4, 0, Math.PI * 2)
+      ctx.fill()
+    }
+  }
+
+  const [sx, sy] = toScreen(v, selected.x, selected.y)
+  ctx.strokeStyle = COLORS.selection
+  ctx.lineWidth = 1.6
+  ctx.setLineDash([])
+  ctx.beginPath()
+  ctx.arc(sx, sy, 11, 0, Math.PI * 2)
+  ctx.stroke()
 }
 
 export function drawAircraft(ctx: Ctx, v: View, aircraft: GroundAircraft[]): void {

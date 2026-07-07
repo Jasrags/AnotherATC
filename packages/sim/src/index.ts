@@ -14,4 +14,12 @@ export type {
 export { createGroundSim } from './ground/sim'
 export type { AircraftInit } from './ground/sim'
 export { buildKsanGroundScenario } from './ground/ksanScenario'
-export type { GroundAircraft, GroundSnapshot, GroundSim, WakeCategory } from './ground/types'
+export { buildTaxiGraph } from './ground/taxiGraph'
+export type { TaxiGraph } from './ground/taxiGraph'
+export type {
+  GroundAircraft,
+  GroundSnapshot,
+  GroundSim,
+  GroundCommand,
+  WakeCategory,
+} from './ground/types'
