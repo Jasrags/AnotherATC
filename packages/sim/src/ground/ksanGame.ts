@@ -58,6 +58,14 @@ function gates(): GateSlot[] {
     slots.push({ ref, point: standStop(f, taxi) })
     n += 1
   }
+  // Gate-node-only stands (the new Terminal 1, gates 101–119) have no stand line.
+  for (const f of KSAN_SURFACE.features) {
+    if (f.kind !== 'gate' || !f.ref || seen.has(f.ref)) continue
+    const p = f.points[0]
+    if (!p) continue
+    seen.add(f.ref)
+    slots.push({ ref: f.ref, point: p })
+  }
   return slots
 }
 

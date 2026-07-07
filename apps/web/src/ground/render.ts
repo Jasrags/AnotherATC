@@ -212,17 +212,38 @@ export function drawAreaLabels(ctx: Ctx, v: View, surface: AirportSurface): void
 const GATE_LABEL_SCALE = 2400
 
 export function drawGates(ctx: Ctx, v: View, surface: AirportSurface): void {
+  const parkingRefs = new Set(
+    surface.features.filter((f) => f.kind === 'parking_position' && f.ref).map((f) => f.ref),
+  )
+
+  // Gate-node-only stands (e.g. the new Terminal 1, gates 101–119) have no stand
+  // line, so mark each with a small dot so the terminal isn't empty.
+  ctx.fillStyle = COLORS.gateNode
+  for (const f of surface.features) {
+    if (f.kind !== 'gate' || !f.ref || parkingRefs.has(f.ref)) continue
+    const p = f.points[0]
+    if (!p) continue
+    const [sx, sy] = toScreen(v, p[0], p[1])
+    ctx.fillRect(sx - 1.5, sy - 1.5, 3, 3)
+  }
+
   if (v.scale < GATE_LABEL_SCALE) return
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
   ctx.lineJoin = 'round'
   ctx.font = '600 9px ui-monospace, "SF Mono", Menlo, monospace'
   for (const f of surface.features) {
-    if (f.kind !== 'parking_position' || !f.ref) continue
-    const m = polylineMidpoint(f.points)
-    if (!m) continue
-    const [sx, sy] = toScreen(v, m[0], m[1])
-    label(ctx, f.ref.toUpperCase(), sx, sy, COLORS.gateLabel)
+    if (f.kind === 'parking_position' && f.ref) {
+      const m = polylineMidpoint(f.points)
+      if (!m) continue
+      const [sx, sy] = toScreen(v, m[0], m[1])
+      label(ctx, f.ref.toUpperCase(), sx, sy, COLORS.gateLabel)
+    } else if (f.kind === 'gate' && f.ref && !parkingRefs.has(f.ref)) {
+      const p = f.points[0]
+      if (!p) continue
+      const [sx, sy] = toScreen(v, p[0], p[1])
+      label(ctx, f.ref.toUpperCase(), sx, sy - 7, COLORS.gateLabel)
+    }
   }
   ctx.textAlign = 'left'
 }
