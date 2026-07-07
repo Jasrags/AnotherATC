@@ -1,6 +1,6 @@
 import { KSAN_SURFACE } from '../world/ksan'
 import { createRng, type Rng } from '../random'
-import type { Point, SurfaceFeature } from '../world/types'
+import type { Point } from '../world/types'
 import type { AircraftInit, GateSlot, SpawnConfig } from './sim'
 import type { NamedDestination, WakeCategory } from './types'
 
@@ -22,43 +22,11 @@ function identity(rng: Rng): { callsign: string; type: string; wake: WakeCategor
   return { callsign: `${airline}${rng.int(100, 1899)}`, type, wake }
 }
 
-function minSqDistToTaxi(p: Point, taxi: readonly Point[]): number {
-  let m = Infinity
-  for (const q of taxi) {
-    const d = (q[0] - p[0]) ** 2 + (q[1] - p[1]) ** 2
-    if (d < m) m = d
-  }
-  return m
-}
-
-/** A stand's stop position: the endpoint farthest from the taxiway (deepest into the ramp),
- *  i.e. where an aircraft actually parks — not a mid-line vertex. */
-function standStop(f: SurfaceFeature, taxi: readonly Point[]): Point {
-  const a = f.points[0]
-  const b = f.points[f.points.length - 1]
-  if (!a) return [0, 0]
-  if (!b) return a
-  return minSqDistToTaxi(a, taxi) >= minSqDistToTaxi(b, taxi) ? a : b
-}
-
-/** Gates from parking positions, parked at their stop position, de-duplicated by ref. */
+/** Passenger terminal gates from OSM gate nodes (Terminal 2 = 20–51, Terminal 1 = 101–119),
+ *  where an aircraft parks at the gate. Cargo/remote stands are excluded from spawning. */
 function gates(): GateSlot[] {
-  const taxi: Point[] = []
-  for (const f of KSAN_SURFACE.features) {
-    if (f.kind === 'taxiway' || f.kind === 'taxilane') for (const p of f.points) if (p) taxi.push(p)
-  }
   const slots: GateSlot[] = []
   const seen = new Set<string>()
-  let n = 0
-  for (const f of KSAN_SURFACE.features) {
-    if (f.kind !== 'parking_position' || f.points.length < 1) continue
-    const ref = f.ref ?? `G${n}`
-    if (seen.has(ref)) continue
-    seen.add(ref)
-    slots.push({ ref, point: standStop(f, taxi) })
-    n += 1
-  }
-  // Gate-node-only stands (the new Terminal 1, gates 101–119) have no stand line.
   for (const f of KSAN_SURFACE.features) {
     if (f.kind !== 'gate' || !f.ref || seen.has(f.ref)) continue
     const p = f.points[0]

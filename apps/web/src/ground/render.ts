@@ -97,8 +97,8 @@ export function drawSurface(ctx: Ctx, v: View, surface: AirportSurface, w: numbe
   fillPolys(ctx, v, byKind(surface, 'apron'), COLORS.apronFill, COLORS.apronEdge)
   fillPolys(ctx, v, byKind(surface, 'terminal', 'hangar'), COLORS.buildingFill, COLORS.buildingEdge)
 
-  // gate stands
-  strokeFeatures(ctx, v, byKind(surface, 'parking_position'), COLORS.stand, { nm: DIMS.standNm, minPx: 0.85 })
+  // gate stands are drawn as markers in drawGates (cleaner than the tangle of
+  // OSM parking guidance lines).
 
   // taxiways: pavement then a thin centerline
   const taxi = byKind(surface, 'taxiway', 'taxilane')
@@ -211,19 +211,40 @@ export function drawAreaLabels(ctx: Ctx, v: View, surface: AirportSurface): void
 /** Gate/stand numbers — only when zoomed in enough to read them (else they'd be a blur). */
 const GATE_LABEL_SCALE = 2400
 
-export function drawGates(ctx: Ctx, v: View, surface: AirportSurface): void {
-  const parkingRefs = new Set(
-    surface.features.filter((f) => f.kind === 'parking_position' && f.ref).map((f) => f.ref),
-  )
+interface Stand {
+  ref: string | null
+  point: Point
+}
 
-  // Gate-node-only stands (e.g. the new Terminal 1, gates 101–119) have no stand
-  // line, so mark each with a small dot so the terminal isn't empty.
-  ctx.fillStyle = COLORS.gateNode
+/** One stand per gate: prefer the OSM gate node (terminal gates), fall back to a
+ *  parking line's midpoint for cargo/remote stands that have no gate node. */
+function collectStands(surface: AirportSurface): Stand[] {
+  const stands: Stand[] = []
+  const seen = new Set<string>()
   for (const f of surface.features) {
-    if (f.kind !== 'gate' || !f.ref || parkingRefs.has(f.ref)) continue
+    if (f.kind !== 'gate' || !f.ref) continue
     const p = f.points[0]
-    if (!p) continue
-    const [sx, sy] = toScreen(v, p[0], p[1])
+    if (!p || seen.has(f.ref)) continue
+    seen.add(f.ref)
+    stands.push({ ref: f.ref, point: p })
+  }
+  for (const f of surface.features) {
+    if (f.kind !== 'parking_position') continue
+    if (f.ref && seen.has(f.ref)) continue
+    const m = polylineMidpoint(f.points)
+    if (!m) continue
+    if (f.ref) seen.add(f.ref)
+    stands.push({ ref: f.ref ?? null, point: m })
+  }
+  return stands
+}
+
+export function drawGates(ctx: Ctx, v: View, surface: AirportSurface): void {
+  const stands = collectStands(surface)
+
+  ctx.fillStyle = COLORS.gateNode
+  for (const s of stands) {
+    const [sx, sy] = toScreen(v, s.point[0], s.point[1])
     ctx.fillRect(sx - 1.5, sy - 1.5, 3, 3)
   }
 
@@ -232,18 +253,10 @@ export function drawGates(ctx: Ctx, v: View, surface: AirportSurface): void {
   ctx.textBaseline = 'middle'
   ctx.lineJoin = 'round'
   ctx.font = '600 9px ui-monospace, "SF Mono", Menlo, monospace'
-  for (const f of surface.features) {
-    if (f.kind === 'parking_position' && f.ref) {
-      const m = polylineMidpoint(f.points)
-      if (!m) continue
-      const [sx, sy] = toScreen(v, m[0], m[1])
-      label(ctx, f.ref.toUpperCase(), sx, sy, COLORS.gateLabel)
-    } else if (f.kind === 'gate' && f.ref && !parkingRefs.has(f.ref)) {
-      const p = f.points[0]
-      if (!p) continue
-      const [sx, sy] = toScreen(v, p[0], p[1])
-      label(ctx, f.ref.toUpperCase(), sx, sy - 7, COLORS.gateLabel)
-    }
+  for (const s of stands) {
+    if (!s.ref) continue
+    const [sx, sy] = toScreen(v, s.point[0], s.point[1])
+    label(ctx, s.ref.toUpperCase(), sx, sy - 7, COLORS.gateLabel)
   }
   ctx.textAlign = 'left'
 }
