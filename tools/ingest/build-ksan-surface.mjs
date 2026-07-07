@@ -59,6 +59,29 @@ const REF_PATCH = {
   1509583634: 'A2',
   1509583633: 'A1', // east connector (RWY 27 end)
   625964914: 'North Ramp', // unnamed north-central apron on the chart
+
+  // Connector-segment completions: untagged OSM taxiway ways that continue a
+  // numbered connector, matched by endpoint topology and cross-referenced to the
+  // airport diagram (docs/SAN/taxiway-naming.md). Terminal-apron ways and the
+  // ambiguous junction fillets are deliberately left unnamed.
+  275612613: 'B1',
+  485854353: 'B10',
+  485854355: 'B10',
+  485854356: 'B10',
+  485854358: 'B9',
+  485854363: 'B9',
+  485854364: 'B9',
+  485854369: 'B8',
+  517076827: 'C2',
+  1128125772: 'C4',
+  1128125775: 'C4',
+  1509583621: 'A5',
+  1509583627: 'A6',
+  1509583631: 'A1',
+  1509583632: 'A1',
+  1509583637: 'A3',
+  1509583638: 'A3',
+  1509583639: 'A2',
 }
 
 // Charted hot spots (not in OSM). HS1 sits by the GA parking / taxiway H area.

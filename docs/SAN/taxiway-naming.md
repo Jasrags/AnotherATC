@@ -20,6 +20,14 @@ Runway runs SE→NW: `[0.261,-0.077]` (RWY 27) → `[-0.632,0.180]` (RWY 9).
 Patch these in `tools/ingest/build-ksan-surface.mjs` (same by-way-id mechanism already used
 to add taxiway A / A1–A7), then re-run the ingest.
 
+## Applied (2026-07-07)
+
+18 untagged OSM ways patched to their numbered connector (A1/A2/A3/A5/A6, B1/B8/B9/B10, C2/C4)
+via `REF_PATCH`, selected conservatively: a segment is named only when an endpoint identifies a
+specific numbered connector, or it is collinear with the runway (a spine gap — none turned out to
+exist). Named taxiway coverage rose 73→91/129. Terminal-apron ways (Terminal 1, T2 East/West) and
+the ~9 junction fillets between two mains (C–F, H–C, H–J, J–C, B–A) were left unnamed on purpose.
+
 | idx | kind | len nm | proposed ref | rationale |
 |---|---|---|---|---|
 | 294 | taxiway | 0.158 | — | STANDALONE (no named endpoint) — likely ramp/apron lane, VERIFY on chart |
