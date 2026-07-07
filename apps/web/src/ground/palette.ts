@@ -28,8 +28,11 @@ export const DIMS = {
   blockFont: 11,
   /** Data-block offset from the target, px. */
   blockLeader: 15,
-  /** Projected-track (leader) line length, in minutes of travel. */
-  ptlMinutes: 1,
+  /** Projected-track (velocity vector) length, in seconds of travel.
+   *  Short, because surface speeds are low — a 1-min vector would span the field. */
+  ptlSeconds: 15,
+  /** Hide the velocity vector below this groundspeed (kt) — parked/creeping aircraft. */
+  ptlMinSpeedKt: 3,
   /** Default pavement widths in nm when OSM omits width. */
   taxiwayNm: 0.012,
   runwayNm: 0.033,

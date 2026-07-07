@@ -10,8 +10,9 @@ The design docs under `docs/` are the source of truth for the domain model. Read
 
 ## Toolchain & Commands
 
-- **Node ≥ 22.13 is required** (pnpm 11 uses `node:sqlite`). If `pnpm` errors about `node:sqlite`, you're on an old Node — this repo pins Node 22 via `.nvmrc`.
+- **Node ≥ 22.13 is required** (pnpm 11 uses `node:sqlite`). If `pnpm` errors about `node:sqlite`, you're on an old Node — this repo pins Node 22 via `.nvmrc` (`fnm use` / `nvm use`).
 - Package manager is **pnpm 11** (pinned in root `packageManager`).
+- A `Makefile` wraps the common tasks — run `make help`. Notably `make watch` (dev server + `tsc --watch` + Vitest together) and `make check` (typecheck + lint + test).
 
 ```bash
 pnpm install            # honors the supply-chain policy (cooldown, allowBuilds, etc.)

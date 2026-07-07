@@ -103,9 +103,9 @@ export function drawAircraft(ctx: Ctx, v: View, aircraft: GroundAircraft[]): voi
     const [sx, sy] = toScreen(v, ac.x, ac.y)
     const rad = (ac.heading * Math.PI) / 180
 
-    // projected-track (leader) line: ~1 minute of travel at current groundspeed
-    if (ac.groundspeed > 0) {
-      const nm = (ac.groundspeed / 60) * DIMS.ptlMinutes
+    // projected-track (velocity vector): a few seconds of travel at current groundspeed
+    if (ac.groundspeed >= DIMS.ptlMinSpeedKt) {
+      const nm = ac.groundspeed * (DIMS.ptlSeconds / 3600)
       const [lx, ly] = toScreen(v, ac.x + Math.sin(rad) * nm, ac.y + Math.cos(rad) * nm)
       ctx.strokeStyle = COLORS.leader
       ctx.lineWidth = 1.2
