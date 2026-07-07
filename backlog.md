@@ -161,7 +161,7 @@ The game models four positions (see `docs/atc-flight-strips.md`). Ground first, 
 ## Tech debt / known limitations
 
 - ⬜ Destinations are raw clicks snapped to nearest node (see named destinations)
-- ⬜ Hold-short stops at the last taxi vertex before the runway zone, not the exact painted hold line (`holding_position`)
+- ⬜ Hold-short stops at the last taxi vertex before the runway zone, not the exact painted hold line (`holding_position`) — but a runway destination now routes to the threshold's own-side hold node (not across the runway), so it holds ~0.03–0.06 nm short of the correct departure end
 - ⬜ Taxi routes are shortest-path, not operationally realistic assigned routes
 - ⬜ Graph-routed head-ons now hold at the junction (no overlap), but the degrade cases still pass *through*: a shared corridor that extends into the loser's own approach edge, a ≥3-aircraft occupancy cycle, or non-graph/hand-set paths. Full fix needs parallel-taxiway diversion. Arrivals still spawn stationary rather than rolling off the runway
 - ⬜ Arrivals park at the nearest taxiway node + a straight leg to the gate point, not the real stand geometry

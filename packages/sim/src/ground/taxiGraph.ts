@@ -17,6 +17,8 @@ export interface TaxiGraph {
   nodePoint(key: Key): Point | undefined
   /** Nearest graph node to an arbitrary point, or null if the graph is empty. */
   nearestNode(p: Point): Key | null
+  /** Nearest graph node whose point satisfies `ok`, or null. */
+  nearestNodeWhere(p: Point, ok: (node: Point) => boolean): Key | null
   /** The graph-node key a point sits on (exact match), or null if it's not a node. */
   keyAt(p: Point): Key | null
   /** The taxiway designator of the edge between two adjacent nodes, or undefined. */
@@ -28,10 +30,37 @@ export interface TaxiGraph {
   routeVia(fromKey: Key, toKey: Key, taxiways: readonly string[]): Point[]
 }
 
+/** A taxi edge that crosses a runway costs this many times its length, so shortest paths
+ *  approach a runway threshold along the taxiway instead of cutting across mid-field.
+ *  Crossings are still chosen when there's no reasonable alternative (a real crossing). */
+const RUNWAY_CROSS_PENALTY = 40
+
+const ccwSign = (a: Point, b: Point, c: Point): number =>
+  (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+
 /** Build a routable taxiway graph from an airport's taxiway/taxilane geometry. */
 export function buildTaxiGraph(surface: AirportSurface): TaxiGraph {
   const nodes = new Map<Key, Point>()
   const adj = new Map<Key, Edge[]>()
+
+  // Runway centerline segments, so we can surcharge taxi edges that cross them.
+  const runwaySegs: [Point, Point][] = []
+  for (const f of surface.features) {
+    if (f.kind !== 'runway') continue
+    for (let i = 1; i < f.points.length; i += 1) {
+      const a = f.points[i - 1]
+      const b = f.points[i]
+      if (a && b) runwaySegs.push([a, b])
+    }
+  }
+  const crossesRunway = (a: Point, b: Point): boolean =>
+    runwaySegs.some(([r1, r2]) => {
+      const d1 = ccwSign(r1, r2, a)
+      const d2 = ccwSign(r1, r2, b)
+      const d3 = ccwSign(a, b, r1)
+      const d4 = ccwSign(a, b, r2)
+      return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))
+    })
 
   const addNode = (p: Point): Key => {
     const k = keyOf(p)
@@ -57,7 +86,9 @@ export function buildTaxiGraph(surface: AirportSurface): TaxiGraph {
       if (!p) continue
       const k = addNode(p)
       if (prevKey && prevPoint) {
-        addEdge(prevKey, k, Math.hypot(p[0] - prevPoint[0], p[1] - prevPoint[1]), f.ref)
+        const len = Math.hypot(p[0] - prevPoint[0], p[1] - prevPoint[1])
+        const w = crossesRunway(prevPoint, p) ? len * RUNWAY_CROSS_PENALTY : len
+        addEdge(prevKey, k, w, f.ref)
       }
       prevKey = k
       prevPoint = p
@@ -66,10 +97,11 @@ export function buildTaxiGraph(surface: AirportSurface): TaxiGraph {
 
   const refBetween = (a: Key, b: Key): string | undefined => adj.get(a)?.find((e) => e.to === b)?.ref
 
-  const nearestNode = (p: Point): Key | null => {
+  const nearestNodeWhere = (p: Point, ok: (node: Point) => boolean): Key | null => {
     let best: Key | null = null
     let bestDist = Infinity
     for (const [k, q] of nodes) {
+      if (!ok(q)) continue
       const d = (q[0] - p[0]) ** 2 + (q[1] - p[1]) ** 2
       if (d < bestDist) {
         bestDist = d
@@ -78,6 +110,7 @@ export function buildTaxiGraph(surface: AirportSurface): TaxiGraph {
     }
     return best
   }
+  const nearestNode = (p: Point): Key | null => nearestNodeWhere(p, () => true)
 
   const route = (fromKey: Key, toKey: Key): Point[] => {
     const start = nodes.get(fromKey)
@@ -197,6 +230,7 @@ export function buildTaxiGraph(surface: AirportSurface): TaxiGraph {
     },
     nodePoint: (k) => nodes.get(k),
     nearestNode,
+    nearestNodeWhere,
     keyAt: (p) => {
       const k = keyOf(p)
       return nodes.has(k) ? k : null

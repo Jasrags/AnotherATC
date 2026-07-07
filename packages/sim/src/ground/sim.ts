@@ -106,6 +106,18 @@ function normalizeDeg(d: number): number {
 function dist(a: Point, b: Point): number {
   return Math.hypot(a[0] - b[0], a[1] - b[1])
 }
+/** Signed area of triangle abc — its sign says which side of line ab point c is on. */
+function ccw(a: Point, b: Point, c: Point): number {
+  return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+}
+function pointSegDist(p: Point, a: Point, b: Point): number {
+  const vx = b[0] - a[0]
+  const vy = b[1] - a[1]
+  const l2 = vx * vx + vy * vy
+  let t = l2 > 0 ? ((p[0] - a[0]) * vx + (p[1] - a[1]) * vy) / l2 : 0
+  t = t < 0 ? 0 : t > 1 ? 1 : t
+  return Math.hypot(p[0] - (a[0] + t * vx), p[1] - (a[1] + t * vy))
+}
 
 /**
  * Total right-of-way order between two aircraft: returns `true` when `a` goes first.
@@ -374,13 +386,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     ac.holdShort = stopped && atEnd && ac.held !== null
     if (stopped) {
       ac.groundspeed = 0
-      // Pushback finished on the taxilane — turn to face the alley, ready to taxi.
-      if (ac.pushingBack && atEnd) {
-        ac.pushingBack = false
-        const from = ac.path[0]
-        const to = ac.path[ac.path.length - 1]
-        if (from && to) ac.heading = normalizeDeg(bearing(from[0], from[1], to[0], to[1]))
-      }
+      if (ac.pushingBack && atEnd) ac.pushingBack = false // finished pushing onto the taxilane
       return
     }
 
@@ -407,8 +413,6 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         remaining = 0
       }
     }
-    // During pushback the nose trails: point it opposite the direction of travel.
-    if (ac.pushingBack) ac.heading = normalizeDeg(ac.heading + 180)
   }
 
   /** Assign a freshly computed graph route (node points) to an aircraft. */
@@ -422,15 +426,45 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     ac.held = held
     ac.dwell = -1
     ac.giveWayTo = null // a fresh clearance supersedes any give-way hold
+    ac.pushingBack = false // …and aborts an in-progress pushback
     ac.targetSpeed = TAXI_SPEED_KT
     ac.holding = false
     ac.holdShort = false
   }
 
+  /**
+   * The node to route to for a destination. For a runway threshold, this is the hold-short
+   * node on the *aircraft's own side* of the runway — so a departure taxis to its runway's
+   * threshold rather than routing across the runway to a node that happens to be nearer.
+   */
+  function goalNodeFor(dest: Point, from: Point): string | null {
+    if (!graph) return null
+    if (guard && onRunway(dest, guard)) {
+      let seg: (typeof guard.segments)[number] | null = null
+      let best = Infinity
+      for (const s of guard.segments) {
+        const d = pointSegDist(dest, s.a, s.b)
+        if (d < best) {
+          best = d
+          seg = s
+        }
+      }
+      if (seg) {
+        const side = ccw(seg.a, seg.b, from)
+        const onSide = graph.nearestNodeWhere(
+          dest,
+          (n) => !onRunway(n, guard) && ccw(seg.a, seg.b, n) * side > 0,
+        )
+        if (onSide) return onSide
+      }
+    }
+    return graph.nearestNode(dest)
+  }
+
   function routeTo(ac: Internal, dest: Point, appendExact: boolean): void {
     if (!graph) return
     const startKey = graph.nearestNode([ac.x, ac.y])
-    const goalKey = graph.nearestNode(dest)
+    const goalKey = goalNodeFor(dest, [ac.x, ac.y])
     if (!startKey || !goalKey) return
     applyRoute(ac, graph.route(startKey, goalKey), dest, appendExact)
   }
@@ -440,7 +474,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
   function routeVia(ac: Internal, taxiways: readonly string[], dest: Point, appendExact: boolean): void {
     if (!graph) return
     const startKey = graph.nearestNode([ac.x, ac.y])
-    const goalKey = graph.nearestNode(dest)
+    const goalKey = goalNodeFor(dest, [ac.x, ac.y])
     if (!startKey || !goalKey) return
     const via = graph.routeVia(startKey, goalKey, taxiways)
     applyRoute(ac, via.length > 0 ? via : graph.route(startKey, goalKey), dest, appendExact)
