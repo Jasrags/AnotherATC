@@ -28,6 +28,10 @@ function commandsFor(controller: GroundController, item: StripItem, aircraft: St
   const id = item.id
   const send = controller.dispatch
 
+  if (item.status === 'departing') {
+    return [{ label: 'Rolling — with tower', action: { kind: 'soon' } }]
+  }
+
   if (item.status === 'holdShort') {
     // A departure at its runway is done with Ground — hand it to Tower for takeoff.
     // Anything else holding short is transiting the runway — clear it across.

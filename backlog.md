@@ -50,7 +50,7 @@ The core ground-control loop. Ordered roughly by priority.
 - ✅ **Flight strip bay (ground)** — status-driven strips beside the scope, phase-gated actions, selection synced with the scope. _Next: squawk/route fields, drag-reorder/sequence._
 - ⬜ **HS1 hotspot** — render the KSAN hot spot; incursion-risk awareness
 - ⬜ **Ground conflict / incursion alerts** — two aircraft converging, or one entering an occupied runway
-- 🚧 **Handoff to/from Tower** — **Contact tower** hands off a departure holding short of its runway: released onto the runway (tower's takeoff), completes its ground segment (counted as `departed`) and leaves the ground scope. The proper departure completion (Cross runway is now only for transiting traffic). _Next: real Tower mode (line up & wait, takeoff clearance, wake spacing); Tower→Ground handoff on arrival runway-exit; refuse when Tower is overloaded._
+- 🚧 **Handoff to/from Tower** — **Contact tower** hands off a departure holding short of its runway: it lines up and **rolls for takeoff** (full-power accel to 140 kt, exempt from taxi caps/conflict), lifts off the far runway end, and is counted as `departed` (new `departing`/TAKEOFF phase). Requires a clear runway (single-occupancy). Cross runway is now only for transiting traffic. _Next: real Tower mode (line up & wait, explicit takeoff clearance, wake spacing); Tower→Ground handoff on arrival runway-exit; refuse when Tower is overloaded._
 - 💭 Multiple ground frequencies (N/S) — not needed at KSAN's scale
 - 💭 Progressive taxi / follow-the-greens visualization
 

@@ -74,11 +74,11 @@ describe('traffic flow', () => {
     }
     const sim = createGroundSim([dep], { graph, guard })
     sim.dispatch({ type: 'taxiToGoal', aircraftId: 'd' })
-    // drive ~1.6 nm to hold short, cross, roll onto the runway (long taxi → many steps)
+    // drive ~1.6 nm to hold short, then contact tower to take off (long taxi → many steps)
     for (let i = 0; i < 6000; i += 1) {
       sim.step(0.1)
       const ac = sim.snapshot().aircraft[0]
-      if (ac?.holdShort) sim.dispatch({ type: 'crossRunway', aircraftId: 'd' })
+      if (ac?.holdShort) sim.dispatch({ type: 'contactTower', aircraftId: 'd' })
       if (sim.snapshot().departed > 0) break
     }
     const snap = sim.snapshot()

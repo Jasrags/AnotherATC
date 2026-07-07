@@ -166,6 +166,9 @@ body {
 .strip-pushback {
   border-left-color: #c98be0;
 }
+.strip-departing {
+  border-left-color: #7fd4ff;
+}
 .strip-selected {
   border-color: #ffd24a;
   border-left-color: #ffd24a;
@@ -208,6 +211,10 @@ body {
 .badge-pushback {
   color: #e7c6f4;
   background: #2a1832;
+}
+.badge-departing {
+  color: #041018;
+  background: #7fd4ff;
 }
 
 .strip-row2 {

@@ -35,9 +35,15 @@ describe('contact tower', () => {
     for (let i = 0; i < 1500; i += 1) sim.step(0.1) // taxi up to the hold short
     expect(sim.snapshot().aircraft.find((a) => a.id === 'd')!.holdShort).toBe(true)
 
-    sim.dispatch({ type: 'contactTower', aircraftId: 'd' }) // handoff → rolls onto the runway
-    for (let i = 0; i < 400; i += 1) sim.step(0.1)
-    expect(sim.snapshot().aircraft.find((a) => a.id === 'd')).toBeUndefined() // left the ground scope
+    sim.dispatch({ type: 'contactTower', aircraftId: 'd' }) // handoff → takeoff roll
+    expect(sim.snapshot().aircraft.find((a) => a.id === 'd')!.status).toBe('departing')
+    // Rolling: it accelerates well past taxi speed down the runway.
+    for (let i = 0; i < 100; i += 1) sim.step(0.1)
+    const rolling = sim.snapshot().aircraft.find((a) => a.id === 'd')
+    expect(rolling && rolling.groundspeed).toBeGreaterThan(40)
+    // Lifts off the far end and leaves the ground scope, counted as departed.
+    for (let i = 0; i < 1000; i += 1) sim.step(0.1)
+    expect(sim.snapshot().aircraft.find((a) => a.id === 'd')).toBeUndefined()
     expect(sim.snapshot().departed).toBe(1)
   })
 

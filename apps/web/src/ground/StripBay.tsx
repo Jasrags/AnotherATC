@@ -9,6 +9,7 @@ const STATUS_LABEL: Record<GroundStatus, string> = {
   taxi: 'TAXI',
   holding: 'HOLD',
   holdShort: 'HOLD SHORT',
+  departing: 'TAKEOFF',
 }
 
 function intentLabel(intent: GroundIntent): string {

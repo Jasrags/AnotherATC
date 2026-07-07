@@ -57,6 +57,9 @@ const TAXI_ACCEL = 4
 const TAXI_SPEED_KT = 15
 /** Pushback creep speed (kt) — a tug easing the aircraft off the stand. */
 const PUSHBACK_SPEED_KT = 5
+/** Takeoff roll: full-power acceleration (kt/s) up to the liftoff speed (kt). */
+const TAKEOFF_ACCEL = 12
+const TAKEOFF_SPEED_KT = 140
 /** How close (nm) counts as reaching a gate. */
 const GATE_EPS = 0.02
 /** Seconds an arrival dwells at the gate before it clears the stand. */
@@ -149,6 +152,8 @@ interface Internal extends Omit<GroundAircraft, 'status'> {
   giveWayTo: string | null
   /** Transponder code assigned when IFR clearance is delivered (departures), or null. */
   squawk: string | null
+  /** Rolling for takeoff down the runway toward the far end (after contacting tower). */
+  departing: boolean
 }
 
 /**
@@ -208,13 +213,39 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       pushingBack: false,
       giveWayTo: null,
       squawk: null,
+      departing: false,
     }
+  }
+
+  // The two runway thresholds (farthest-apart centerline endpoints), for takeoff rolls.
+  const runwayEnds: Point[] = (() => {
+    if (!guard) return []
+    const pts = guard.segments.flatMap((s) => [s.a, s.b])
+    let a: Point | null = null
+    let b: Point | null = null
+    let far = -1
+    for (let i = 0; i < pts.length; i += 1) {
+      for (let j = i + 1; j < pts.length; j += 1) {
+        const d = dist(pts[i]!, pts[j]!)
+        if (d > far) {
+          far = d
+          a = pts[i]!
+          b = pts[j]!
+        }
+      }
+    }
+    return a && b ? [a, b] : []
+  })()
+  const farRunwayEnd = (from: Point): Point | null => {
+    if (runwayEnds.length < 2) return null
+    return dist(from, runwayEnds[0]!) >= dist(from, runwayEnds[1]!) ? runwayEnds[0]! : runwayEnds[1]!
   }
 
   const fleet: Internal[] = inits.map(makeInternal)
   const find = (id: string): Internal | undefined => fleet.find((a) => a.id === id)
 
   function statusOf(ac: Internal): GroundStatus {
+    if (ac.departing) return 'departing'
     if (ac.pushingBack) return 'pushback'
     if (ac.holdShort) return 'holdShort'
     if (ac.dwell >= 0) return 'parked'
@@ -374,6 +405,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       for (let j = i + 1; j < fleet.length; j += 1) {
         const a = fleet[i]
         const b = fleet[j]
+        if (a?.departing || b?.departing) continue // a takeoff roll isn't a taxi conflict
         if (a && b && Math.hypot(a.x - b.x, a.y - b.y) < CONFLICT_NM) {
           a.conflict = true
           b.conflict = true
@@ -384,12 +416,14 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
 
   function advance(ac: Internal, dt: number, cap: number): void {
     const atEnd = ac.leg >= ac.path.length - 1
-    const target = Math.min(atEnd ? 0 : ac.targetSpeed, cap)
+    // A takeoff roll accelerates hard and does not slow at the end — it lifts off.
+    const target = ac.departing ? ac.targetSpeed : Math.min(atEnd ? 0 : ac.targetSpeed, cap)
+    const accel = ac.departing ? TAKEOFF_ACCEL : TAXI_ACCEL
 
     if (ac.groundspeed < target) {
-      ac.groundspeed = Math.min(target, ac.groundspeed + TAXI_ACCEL * dt)
+      ac.groundspeed = Math.min(target, ac.groundspeed + accel * dt)
     } else if (ac.groundspeed > target) {
-      ac.groundspeed = Math.max(target, ac.groundspeed - TAXI_ACCEL * dt)
+      ac.groundspeed = Math.max(target, ac.groundspeed - accel * dt)
     }
 
     const stopped = ac.groundspeed <= 0.01 && target === 0
@@ -560,20 +594,23 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         // code. Gates pushback — a gate departure can't push until it's been cleared.
         if (ac.intent === 'departure' && !ac.squawk) ac.squawk = nextSquawk()
         break
-      case 'contactTower':
-        // Ground → Tower handoff: a departure holding short of its runway is released
-        // onto it (tower's takeoff), completing its ground segment via the runway goal.
-        // Requires a clear runway, same as a crossing.
-        if (ac.intent === 'departure' && ac.held && ac.held.length >= 2) {
-          if (guard && fleet.some((o) => o !== ac && onRunway([o.x, o.y], guard))) break
-          ac.path = ac.held
-          ac.leg = 0
-          ac.held = null
-          ac.targetSpeed = TAXI_SPEED_KT
-          ac.holding = false
-          ac.holdShort = false
-        }
+      case 'contactTower': {
+        // Ground → Tower handoff: a departure holding short of its runway lines up and
+        // rolls for takeoff down the runway toward the far end, then lifts off (despawns
+        // as a completed departure). Requires a clear runway.
+        if (ac.intent !== 'departure' || !ac.holdShort) break
+        if (guard && fleet.some((o) => o !== ac && onRunway([o.x, o.y], guard))) break
+        const far = farRunwayEnd([ac.x, ac.y])
+        if (!far) break
+        ac.path = [[ac.x, ac.y], far]
+        ac.leg = 0
+        ac.held = null
+        ac.departing = true
+        ac.targetSpeed = TAKEOFF_SPEED_KT
+        ac.holding = false
+        ac.holdShort = false
         break
+      }
     }
   }
 
@@ -582,7 +619,8 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     const remove: string[] = []
     for (const ac of fleet) {
       if (ac.intent === 'departure') {
-        if (ac.goalPoint !== null && guard && onRunway([ac.x, ac.y], guard)) {
+        // Completed once the takeoff roll reaches the far runway end — it's airborne.
+        if (ac.departing && ac.leg >= ac.path.length - 1) {
           departed += 1
           remove.push(ac.id)
         }
@@ -635,7 +673,9 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
   return {
     step(dt) {
       time += dt
-      const caps = fleet.map((ac) => Math.min(separationCap(ac), reservationCap(ac), giveWayCap(ac)))
+      const caps = fleet.map((ac) =>
+        ac.departing ? Infinity : Math.min(separationCap(ac), reservationCap(ac), giveWayCap(ac)),
+      )
       fleet.forEach((ac, i) => advance(ac, dt, caps[i] ?? Infinity))
       for (const id of resolveGoals(dt)) {
         const i = fleet.findIndex((a) => a.id === id)
