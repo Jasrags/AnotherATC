@@ -148,6 +148,12 @@ function label(ctx: Ctx, text: string, x: number, y: number, color: string): voi
   ctx.fillText(text, Math.round(x), Math.round(y))
 }
 
+/** Per-area label nudges (nm) where the centroid overlaps gates/pavement. */
+const AREA_OFFSET_NM: Record<string, Point> = {
+  'Terminal 2 West': [0, -0.05],
+  'Terminal 2 East': [0, -0.05],
+}
+
 /** Ramp / terminal / apron area names, centered on each named area. */
 export function drawAreaLabels(ctx: Ctx, v: View, surface: AirportSurface): void {
   const groups = new Map<string, { x: number; y: number; n: number }>()
@@ -175,7 +181,8 @@ export function drawAreaLabels(ctx: Ctx, v: View, surface: AirportSurface): void
   ctx.lineJoin = 'round'
   ctx.font = '500 11px ui-sans-serif, system-ui, sans-serif'
   for (const [name, g] of groups) {
-    const [sx, sy] = toScreen(v, g.x / g.n, g.y / g.n)
+    const off = AREA_OFFSET_NM[name] ?? [0, 0]
+    const [sx, sy] = toScreen(v, g.x / g.n + off[0], g.y / g.n + off[1])
     label(ctx, name.toUpperCase(), sx, sy, COLORS.labelArea)
   }
   ctx.textAlign = 'left'
