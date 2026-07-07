@@ -26,7 +26,9 @@ export const COLORS = {
   routeDest: '#8becff',
   labelTaxi: '#d3bd74', // signage yellow — distinct from the green aircraft blocks
   labelRwy: '#aebfce',
+  labelArea: '#6f8493', // muted blue-gray for ramp/terminal area names
   labelHalo: 'rgba(4, 8, 13, 0.92)',
+  hotspot: '#e0932f', // charted hot-spot orange
 } as const
 
 export const DIMS = {

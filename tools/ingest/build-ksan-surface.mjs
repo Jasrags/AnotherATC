@@ -58,7 +58,11 @@ const REF_PATCH = {
   1509583636: 'A3',
   1509583634: 'A2',
   1509583633: 'A1', // east connector (RWY 27 end)
+  625964914: 'North Ramp', // unnamed north-central apron on the chart
 }
+
+// Charted hot spots (not in OSM). HS1 sits by the GA parking / taxiway H area.
+const HOTSPOTS = [{ id: 'HS1', label: 'HS 1', point: [0.507, -0.02], radiusNm: 0.05 }]
 
 const raw = JSON.parse(readFileSync(RAW, 'utf8'))
 const features = []
@@ -114,6 +118,7 @@ const surface = {
   source: 'OpenStreetMap contributors (ODbL) via Overpass API',
   bounds: { minX: round(minX), minY: round(minY), maxX: round(maxX), maxY: round(maxY) },
   features,
+  hotspots: HOTSPOTS,
 }
 
 writeFileSync(OUT, JSON.stringify(surface) + '\n')

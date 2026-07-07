@@ -148,6 +148,60 @@ function label(ctx: Ctx, text: string, x: number, y: number, color: string): voi
   ctx.fillText(text, Math.round(x), Math.round(y))
 }
 
+/** Ramp / terminal / apron area names, centered on each named area. */
+export function drawAreaLabels(ctx: Ctx, v: View, surface: AirportSurface): void {
+  const groups = new Map<string, { x: number; y: number; n: number }>()
+  for (const f of surface.features) {
+    if ((f.kind !== 'terminal' && f.kind !== 'apron') || !f.ref) continue
+    let cx = 0
+    let cy = 0
+    let n = 0
+    for (const p of f.points) {
+      if (!p) continue
+      cx += p[0]
+      cy += p[1]
+      n += 1
+    }
+    if (n === 0) continue
+    const g = groups.get(f.ref) ?? { x: 0, y: 0, n: 0 }
+    g.x += cx / n
+    g.y += cy / n
+    g.n += 1
+    groups.set(f.ref, g)
+  }
+
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.lineJoin = 'round'
+  ctx.font = '500 11px ui-sans-serif, system-ui, sans-serif'
+  for (const [name, g] of groups) {
+    const [sx, sy] = toScreen(v, g.x / g.n, g.y / g.n)
+    label(ctx, name.toUpperCase(), sx, sy, COLORS.labelArea)
+  }
+  ctx.textAlign = 'left'
+}
+
+/** Charted runway-incursion hot spots (dashed orange circle + id). */
+export function drawHotspots(ctx: Ctx, v: View, surface: AirportSurface): void {
+  if (!surface.hotspots) return
+  for (const hs of surface.hotspots) {
+    const [sx, sy] = toScreen(v, hs.point[0], hs.point[1])
+    const r = Math.max(hs.radiusNm * v.scale, 10)
+    ctx.strokeStyle = COLORS.hotspot
+    ctx.lineWidth = 1.6
+    ctx.setLineDash([5, 4])
+    ctx.beginPath()
+    ctx.arc(sx, sy, r, 0, Math.PI * 2)
+    ctx.stroke()
+    ctx.setLineDash([])
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.font = '700 10px ui-monospace, "SF Mono", Menlo, monospace'
+    label(ctx, hs.id, sx, sy - r - 8, COLORS.hotspot)
+    ctx.textAlign = 'left'
+  }
+}
+
 /** Taxiway designator (kept off the runway) + runway numbers, with halos. */
 export function drawLabels(ctx: Ctx, v: View, surface: AirportSurface): void {
   // nm distance from a point to the nearest runway centerline — used to keep labels off the runway

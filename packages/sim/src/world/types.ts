@@ -37,6 +37,14 @@ export interface Bounds {
   maxY: number
 }
 
+/** A charted runway-incursion hot spot. */
+export interface Hotspot {
+  id: string
+  label: string
+  point: Point
+  radiusNm: number
+}
+
 export interface AirportSurface {
   icao: string
   name: string
@@ -45,4 +53,5 @@ export interface AirportSurface {
   source: string
   bounds: Bounds
   features: SurfaceFeature[]
+  hotspots?: Hotspot[]
 }
