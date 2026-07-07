@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      # Fails if pnpm-lock.yaml drifted from the manifests.
+      - run: pnpm install --frozen-lockfile
+      # Known-CVE gate.
+      - run: pnpm audit --audit-level=high
+      - run: pnpm -r typecheck
+      - run: pnpm lint
+      - run: pnpm -r test
+      - run: pnpm --filter @anotheratc/web build
+
+  # Broader supply-chain advisory scan (OSV database) over the lockfile.
+  osv-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google/osv-scanner-action@v2.2.4
+        with:
+          scan-args: |-
+            --lockfile=pnpm-lock.yaml
+
+# NOTE: also install the Socket GitHub app (socket.dev) on this repo for
+# real-time install-script / obfuscation / capability detection on PRs —
+# it catches malicious behavior that CVE scanners miss. See
+# docs/security/dependency-policy.md.

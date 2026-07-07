@@ -1,0 +1,25 @@
+packages:
+  - 'packages/*'
+  - 'apps/*'
+
+# Write exact versions into manifests (no ^/~ ranges). The lockfile is the
+# source of truth; ranges would let a fresh resolve pull an unvetted version.
+saveExact: true
+
+# ─── Supply-chain hardening ───────────────────────────────────────────────
+# See docs/security/dependency-policy.md. Do not weaken these without review.
+
+# A version must be at least this many minutes old before pnpm will install it.
+# 24h cooldown: most malicious npm versions are caught & unpublished within hours.
+minimumReleaseAge: 1440
+
+# Block transitive deps that resolve from git repos / tarball URLs instead of the registry.
+blockExoticSubdeps: true
+
+# Reject a package whose trust level dropped versus a prior release (silent malicious downgrade).
+trustPolicy: no-downgrade
+
+# Install/build (postinstall) scripts are blocked by default. Only these audited
+# packages may run them. Every entry is a reviewed decision — see the policy doc.
+allowBuilds:
+  esbuild: true # native binary fetch; required by vite + vitest

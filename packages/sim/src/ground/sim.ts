@@ -1,0 +1,129 @@
+import type { Point } from '../world/types'
+import type { GroundAircraft, GroundSim, GroundSnapshot, WakeCategory } from './types'
+
+/** Initial definition of one aircraft: a route (nm waypoints) taxied at a target speed. */
+export interface AircraftInit {
+  id: string
+  callsign: string
+  type: string
+  wake: WakeCategory
+  /** Ordered waypoints in local nm. A single point = parked/stationary. */
+  path: readonly Point[]
+  /** Target taxi speed in knots. */
+  targetSpeed: number
+  /** Optional fixed heading (used when the aircraft is parked). */
+  heading?: number
+}
+
+/** Taxi acceleration/deceleration in knots per second. */
+const TAXI_ACCEL = 4
+
+/** Heading (deg true) from point a to point b, where x=east, y=north. */
+function bearing(ax: number, ay: number, bx: number, by: number): number {
+  return (Math.atan2(bx - ax, by - ay) * 180) / Math.PI
+}
+
+function normalizeDeg(d: number): number {
+  return ((d % 360) + 360) % 360
+}
+
+interface Internal extends GroundAircraft {
+  path: readonly Point[]
+  leg: number
+  targetSpeed: number
+}
+
+/**
+ * A deterministic surface-movement simulation. Aircraft follow their route at a
+ * performance-limited speed; heading tracks the current segment. Internal state
+ * is mutated in place each tick (the hot loop); {@link GroundSim.snapshot}
+ * hands consumers fresh immutable objects.
+ */
+export function createGroundSim(inits: readonly AircraftInit[]): GroundSim {
+  let time = 0
+
+  const fleet: Internal[] = inits.map((init) => {
+    const start = init.path[0] ?? ([0, 0] as Point)
+    const next = init.path[1]
+    const heading =
+      init.heading ?? (next ? bearing(start[0], start[1], next[0], next[1]) : 0)
+    return {
+      id: init.id,
+      callsign: init.callsign,
+      type: init.type,
+      wake: init.wake,
+      x: start[0],
+      y: start[1],
+      heading: normalizeDeg(heading),
+      groundspeed: 0,
+      holding: init.path.length < 2,
+      path: init.path,
+      leg: 0,
+      targetSpeed: init.targetSpeed,
+    }
+  })
+
+  function advance(ac: Internal, dt: number): void {
+    const atEnd = ac.leg >= ac.path.length - 1
+    const target = atEnd ? 0 : ac.targetSpeed
+
+    if (ac.groundspeed < target) {
+      ac.groundspeed = Math.min(target, ac.groundspeed + TAXI_ACCEL * dt)
+    } else if (ac.groundspeed > target) {
+      ac.groundspeed = Math.max(target, ac.groundspeed - TAXI_ACCEL * dt)
+    }
+
+    if (atEnd && ac.groundspeed <= 0.01) {
+      ac.groundspeed = 0
+      ac.holding = true
+      return
+    }
+
+    let remaining = (ac.groundspeed * dt) / 3600 // knots·s → nm
+    while (remaining > 1e-9 && ac.leg < ac.path.length - 1) {
+      const to = ac.path[ac.leg + 1]
+      if (!to) break
+      const dx = to[0] - ac.x
+      const dy = to[1] - ac.y
+      const segLen = Math.hypot(dx, dy)
+      if (segLen < 1e-9) {
+        ac.leg += 1
+        continue
+      }
+      ac.heading = normalizeDeg(bearing(ac.x, ac.y, to[0], to[1]))
+      if (remaining >= segLen) {
+        ac.x = to[0]
+        ac.y = to[1]
+        ac.leg += 1
+        remaining -= segLen
+      } else {
+        ac.x += (dx * remaining) / segLen
+        ac.y += (dy * remaining) / segLen
+        remaining = 0
+      }
+    }
+  }
+
+  return {
+    step(dt) {
+      time += dt
+      for (const ac of fleet) advance(ac, dt)
+    },
+    snapshot(): GroundSnapshot {
+      return {
+        time,
+        aircraft: fleet.map((ac) => ({
+          id: ac.id,
+          callsign: ac.callsign,
+          type: ac.type,
+          wake: ac.wake,
+          x: ac.x,
+          y: ac.y,
+          heading: ac.heading,
+          groundspeed: Math.round(ac.groundspeed),
+          holding: ac.holding,
+        })),
+      }
+    },
+  }
+}
