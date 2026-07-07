@@ -14,6 +14,7 @@ export type GroundCommand =
   | { type: 'taxiTo'; aircraftId: string; dest: Point; exact?: boolean }
   | { type: 'taxiToGoal'; aircraftId: string }
   | { type: 'taxiVia'; aircraftId: string; taxiways: string[]; dest: Point; exact?: boolean }
+  | { type: 'taxiViaGoal'; aircraftId: string; taxiways: string[] }
   | { type: 'hold'; aircraftId: string }
   | { type: 'resume'; aircraftId: string }
   | { type: 'crossRunway'; aircraftId: string }

@@ -27,6 +27,7 @@ export const COLORS = {
   selection: '#ffd24a',
   route: '#49d3ff',
   routeDest: '#8becff',
+  routeVia: '#6fe0ff', // taxiways picked while assembling a "taxi via …" clearance
   labelTaxi: '#d3bd74', // signage yellow — distinct from the green aircraft blocks
   labelRwy: '#aebfce',
   labelArea: '#6f8493', // muted blue-gray for ramp/terminal area names

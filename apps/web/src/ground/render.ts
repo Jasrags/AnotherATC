@@ -352,6 +352,60 @@ export function drawLabels(ctx: Ctx, v: View, surface: AirportSurface): void {
 }
 
 /** Highlight the selected aircraft and its remaining route. */
+/** Distance from point (px,py) to segment (a→b), in world units. */
+function distToSegment(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
+  const dx = bx - ax
+  const dy = by - ay
+  const len2 = dx * dx + dy * dy
+  let t = len2 > 0 ? ((px - ax) * dx + (py - ay) * dy) / len2 : 0
+  t = Math.max(0, Math.min(1, t))
+  return Math.hypot(px - (ax + dx * t), py - (ay + dy * t))
+}
+
+/** The designator of the named taxiway nearest a world point, within `maxNm`; null if none. */
+export function nearestTaxiwayRef(
+  surface: AirportSurface,
+  wx: number,
+  wy: number,
+  maxNm: number,
+): string | null {
+  let best: string | null = null
+  let bestD = maxNm
+  for (const f of surface.features) {
+    if ((f.kind !== 'taxiway' && f.kind !== 'taxilane') || !f.ref) continue
+    for (let i = 1; i < f.points.length; i += 1) {
+      const a = f.points[i - 1]
+      const b = f.points[i]
+      if (!a || !b) continue
+      const d = distToSegment(wx, wy, a[0], a[1], b[0], b[1])
+      if (d < bestD) {
+        bestD = d
+        best = f.ref
+      }
+    }
+  }
+  return best
+}
+
+/** Highlight every segment of the taxiways in `via` — the route being assembled by clicks. */
+export function drawRouteDraft(ctx: Ctx, v: View, surface: AirportSurface, via: string[]): void {
+  if (via.length === 0) return
+  const set = new Set(via)
+  ctx.strokeStyle = COLORS.routeVia
+  ctx.lineWidth = 3
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+  ctx.setLineDash([])
+  ctx.globalAlpha = 0.85
+  for (const f of surface.features) {
+    if ((f.kind !== 'taxiway' && f.kind !== 'taxilane') || !f.ref || !set.has(f.ref)) continue
+    ctx.beginPath()
+    trace(ctx, v, f.points)
+    ctx.stroke()
+  }
+  ctx.globalAlpha = 1
+}
+
 export function drawSelection(
   ctx: Ctx,
   v: View,

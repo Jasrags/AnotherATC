@@ -8,14 +8,18 @@ import {
   drawGates,
   drawHotspots,
   drawLabels,
+  drawRouteDraft,
   drawSelection,
   drawSurface,
+  nearestTaxiwayRef,
 } from './render'
 
 /** Fixed simulation timestep (seconds) — decoupled from the render framerate. */
 const FIXED_DT = 0.05
 /** Click must land within this many px of a target to select it. */
 const HIT_PX = 14
+/** Click must land within this many px of a taxiway to add it to a route. */
+const TAXI_HIT_PX = 16
 /** Pointer movement beyond this (px) counts as a pan, not a click. */
 const DRAG_PX = 4
 
@@ -126,8 +130,10 @@ export function GroundScope({ controller }: { controller: GroundController }) {
     }
     const onKey = (e: KeyboardEvent) => {
       const id = controller.selectedId()
-      if (e.key === 'Escape') controller.select(null)
-      else if ((e.key === 'c' || e.key === 'C') && id) {
+      if (e.key === 'Escape') {
+        if (controller.routeDraft()) controller.clearRoute()
+        else controller.select(null)
+      } else if ((e.key === 'c' || e.key === 'C') && id) {
         controller.dispatch({ type: 'crossRunway', aircraftId: id })
       }
     }
@@ -151,8 +157,14 @@ export function GroundScope({ controller }: { controller: GroundController }) {
         }
       }
       const selectedId = controller.selectedId()
+      const draft = controller.routeDraft()
       if (hit) {
         controller.select(hit)
+      } else if (draft) {
+        // Route-building mode: a click on a taxiway appends it to the via-sequence.
+        const [wx, wy] = toWorld(view, sx, sy)
+        const ref = nearestTaxiwayRef(KSAN_SURFACE, wx, wy, TAXI_HIT_PX / view.scale)
+        if (ref) controller.addVia(ref)
       } else if (selectedId) {
         const [wx, wy] = toWorld(view, sx, sy)
         controller.dispatch({ type: 'taxiTo', aircraftId: selectedId, dest: [wx, wy] })
@@ -196,10 +208,12 @@ export function GroundScope({ controller }: { controller: GroundController }) {
         ctx.scale(dpr, dpr)
         const snap = sim.snapshot()
         const selectedId = controller.selectedId()
+        const draft = controller.routeDraft()
         drawSurface(ctx, view, KSAN_SURFACE, width, height)
         drawAreaLabels(ctx, view, KSAN_SURFACE)
         drawGates(ctx, view, KSAN_SURFACE)
         drawHotspots(ctx, view, KSAN_SURFACE)
+        if (draft) drawRouteDraft(ctx, view, KSAN_SURFACE, draft.via)
         drawLabels(ctx, view, KSAN_SURFACE)
         drawAircraft(ctx, view, snap.aircraft)
         const selected = selectedId ? snap.aircraft.find((a) => a.id === selectedId) : undefined
@@ -217,7 +231,10 @@ export function GroundScope({ controller }: { controller: GroundController }) {
           alertRef.current.textContent = inConflict > 0 ? `⚠ CONFLICT` : ''
         }
         if (hintRef.current) {
-          if (selected?.holdShort) {
+          if (draft && selected) {
+            const via = draft.via.length ? `via ${draft.via.join(' · ')}` : '(none yet)'
+            hintRef.current.textContent = `Routing ${selected.callsign} ${via} — click taxiways in order, then a destination in the strip · Esc to cancel`
+          } else if (selected?.holdShort) {
             hintRef.current.textContent = `${selected.callsign} holding short of the runway — press C to clear across · Esc to deselect`
           } else if (selected) {
             hintRef.current.textContent = `${selected.callsign} selected — click a point to assign taxi · right-click to hold · Esc to deselect`

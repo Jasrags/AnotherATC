@@ -29,9 +29,17 @@ export interface StripItem {
   via: string[]
 }
 
+/** An in-progress "taxi via …" clearance the controller is assembling by taxiway clicks. */
+export interface RouteDraft {
+  id: string
+  via: string[]
+}
+
 export interface StripSnapshot {
   aircraft: StripItem[]
   selectedId: string | null
+  /** The route being built for the selected aircraft, if route mode is active. */
+  draft: RouteDraft | null
 }
 
 /**
@@ -48,6 +56,14 @@ export interface GroundController {
   select(id: string | null): void
   dispatch(cmd: GroundCommand): void
   routeOf(id: string): Point[]
+  /** The route currently being assembled by taxiway clicks, or null. */
+  routeDraft(): RouteDraft | null
+  /** Enter route-building mode for an aircraft (starts an empty via-sequence). */
+  beginRoute(id: string): void
+  /** Append a taxiway designator to the active draft (ignores consecutive repeats). */
+  addVia(ref: string): void
+  /** Discard the active draft. */
+  clearRoute(): void
   publish(): void
   subscribe(cb: () => void): () => void
   getSnapshot(): StripSnapshot
@@ -60,19 +76,22 @@ export function createGroundController(): GroundController {
   const sim = createGroundSim(inits, { graph, guard, spawn })
 
   let selected: string | null = null
+  let draft: RouteDraft | null = null
   const listeners = new Set<() => void>()
-  let snapshot: StripSnapshot = { aircraft: [], selectedId: null }
+  let snapshot: StripSnapshot = { aircraft: [], selectedId: null, draft: null }
   let sig = ''
 
   const publish = (): void => {
     const acs = sim.snapshot().aircraft
     const vias = new Map(acs.map((a) => [a.id, sim.taxiwaysOf(a.id)]))
     let nextSig = selected ?? '-'
+    nextSig += draft ? `~${draft.id}:${draft.via.join('.')}` : ''
     for (const a of acs) nextSig += `|${a.id}:${a.status}:${vias.get(a.id)!.join('.')}`
     if (nextSig === sig) return
     sig = nextSig
     snapshot = {
       selectedId: selected,
+      draft: draft ? { id: draft.id, via: [...draft.via] } : null,
       aircraft: acs.map((a) => ({
         id: a.id,
         callsign: a.callsign,
@@ -95,6 +114,7 @@ export function createGroundController(): GroundController {
     selectedId: () => selected,
     select: (id) => {
       selected = id
+      if (draft && draft.id !== id) draft = null // route mode is bound to its aircraft
       publish()
     },
     dispatch: (cmd) => {
@@ -102,6 +122,21 @@ export function createGroundController(): GroundController {
       publish()
     },
     routeOf: (id) => sim.routeOf(id),
+    routeDraft: () => draft,
+    beginRoute: (id) => {
+      draft = { id, via: [] }
+      publish()
+    },
+    addVia: (ref) => {
+      if (!draft || draft.via[draft.via.length - 1] === ref) return
+      draft = { id: draft.id, via: [...draft.via, ref] }
+      publish()
+    },
+    clearRoute: () => {
+      if (!draft) return
+      draft = null
+      publish()
+    },
     publish,
     subscribe: (cb) => {
       listeners.add(cb)

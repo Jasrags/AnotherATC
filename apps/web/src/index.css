@@ -254,6 +254,12 @@ body {
   border-color: #245c43;
 }
 
+.btn-route {
+  color: #9fe4ff;
+  background: #0f2c39;
+  border-color: #276b83;
+}
+
 .clearance {
   display: flex;
   flex-wrap: wrap;

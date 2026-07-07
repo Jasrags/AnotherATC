@@ -409,6 +409,9 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       case 'taxiVia':
         routeVia(ac, command.taxiways, command.dest, command.exact ?? false)
         break
+      case 'taxiViaGoal':
+        if (ac.goalPoint) routeVia(ac, command.taxiways, ac.goalPoint, true)
+        break
       case 'hold':
         ac.targetSpeed = 0
         break
