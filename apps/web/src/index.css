@@ -248,6 +248,13 @@ body {
   color: #8fb3a3;
 }
 
+.strip-giveway {
+  margin-top: 5px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: #f0c06a;
+}
+
 .strip-empty {
   padding: 14px;
   font-size: 11px;

@@ -84,6 +84,14 @@ const HOLD_MARGIN_NM = MIN_GAP_NM
 /** Braking ramp (nm) used to decelerate to a stop at the hold point. */
 const HOLD_RAMP_NM = 0.03
 
+// ─── Give way (manual, to a specific aircraft) ────────────────────────────────
+/** Hold for the named traffic while it is within this range (nm) and not yet behind us. */
+const GIVEWAY_WATCH_NM = 0.1
+/** The traffic counts as "passed" once it is this far (nm) behind our nose. */
+const GIVEWAY_CLEARED_NM = 0.02
+/** Forget the give-way if the traffic wanders this far (nm) away without ever passing. */
+const GIVEWAY_FORGET_NM = 0.35
+
 /** Smallest absolute heading difference in degrees (0–180). */
 function angleDelta(a: number, b: number): number {
   return Math.abs(((((a - b) % 360) + 540) % 360) - 180)
@@ -125,6 +133,8 @@ interface Internal extends Omit<GroundAircraft, 'status'> {
   held: Point[] | null
   /** Backing off the stand onto the taxilane (nose trailing) until it reaches the alley. */
   pushingBack: boolean
+  /** Id of traffic this aircraft has been told to give way to (holds until it passes), or null. */
+  giveWayTo: string | null
 }
 
 /**
@@ -174,6 +184,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       dwell: -1,
       held,
       pushingBack: false,
+      giveWayTo: null,
     }
   }
 
@@ -309,6 +320,31 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     return d <= 0 ? 0 : Math.min(TAXI_SPEED_KT, (d / HOLD_RAMP_NM) * TAXI_SPEED_KT)
   }
 
+  /**
+   * Manual give-way: hold for a specific aircraft the controller named, until it passes.
+   * Holds (cap 0) while the target is within watch range and still ahead/beside; releases
+   * automatically once the target has moved behind us or wandered far off (then it's cleared,
+   * so the aircraft continues on its own). A no-op if the target is already behind us.
+   */
+  function giveWayCap(ac: Internal): number {
+    if (!ac.giveWayTo) return Infinity
+    const o = find(ac.giveWayTo)
+    if (!o || o === ac) {
+      ac.giveWayTo = null
+      return Infinity
+    }
+    const dx = o.x - ac.x
+    const dy = o.y - ac.y
+    const rad = (ac.heading * Math.PI) / 180
+    const forward = dx * Math.sin(rad) + dy * Math.cos(rad)
+    const d = Math.hypot(dx, dy)
+    if (forward < -GIVEWAY_CLEARED_NM || d > GIVEWAY_FORGET_NM) {
+      ac.giveWayTo = null // traffic has passed behind us, or is well clear — done giving way
+      return Infinity
+    }
+    return d <= GIVEWAY_WATCH_NM ? 0 : Infinity // hold only once it's actually near
+  }
+
   function detectConflicts(): void {
     for (const ac of fleet) ac.conflict = false
     for (let i = 0; i < fleet.length; i += 1) {
@@ -385,6 +421,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     ac.leg = 0
     ac.held = held
     ac.dwell = -1
+    ac.giveWayTo = null // a fresh clearance supersedes any give-way hold
     ac.targetSpeed = TAXI_SPEED_KT
     ac.holding = false
     ac.holdShort = false
@@ -450,11 +487,17 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         ac.targetSpeed = 0
         break
       case 'resume':
+        ac.giveWayTo = null // "continue taxi" also cancels a give-way hold
         if (ac.leg < ac.path.length - 1) {
           ac.targetSpeed = TAXI_SPEED_KT
           ac.holding = false
         }
         break
+      case 'giveWay': {
+        const target = find(command.toId)
+        if (target && target !== ac) ac.giveWayTo = command.toId
+        break
+      }
       case 'crossRunway':
         if (ac.held && ac.held.length >= 2) {
           // Don't clear onto an occupied runway.
@@ -528,7 +571,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
   return {
     step(dt) {
       time += dt
-      const caps = fleet.map((ac) => Math.min(separationCap(ac), reservationCap(ac)))
+      const caps = fleet.map((ac) => Math.min(separationCap(ac), reservationCap(ac), giveWayCap(ac)))
       fleet.forEach((ac, i) => advance(ac, dt, caps[i] ?? Infinity))
       for (const id of resolveGoals(dt)) {
         const i = fleet.findIndex((a) => a.id === id)
@@ -560,6 +603,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
           intent: ac.intent,
           gate: ac.gate,
           conflict: ac.conflict,
+          giveWayTo: ac.giveWayTo ? (find(ac.giveWayTo)?.callsign ?? null) : null,
         })),
       }
     },

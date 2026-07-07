@@ -24,7 +24,7 @@ interface MenuCommand {
  * as `soon` (disabled) so the menu still communicates the intended flow. Mirrors the
  * strip state machine — see `docs/atc-flight-strips.md`.
  */
-function commandsFor(controller: GroundController, item: StripItem): MenuCommand[] {
+function commandsFor(controller: GroundController, item: StripItem, aircraft: StripItem[]): MenuCommand[] {
   const id = item.id
   const send = controller.dispatch
 
@@ -60,9 +60,23 @@ function commandsFor(controller: GroundController, item: StripItem): MenuCommand
   cmds.push({ label: 'Route via…', action: { kind: 'run', run: () => controller.beginRoute(id) } })
   if (item.status === 'taxi') {
     cmds.push({ label: 'Hold position', action: { kind: 'run', run: () => send({ type: 'hold', aircraftId: id }) } })
-    cmds.push({ label: 'Give way to…', action: { kind: 'soon' } })
+    const targets = aircraft.filter((o) => o.id !== id && o.status !== 'parked')
+    cmds.push(
+      targets.length > 0
+        ? {
+            label: 'Give way to…',
+            action: {
+              kind: 'submenu',
+              items: targets.map((o) => ({
+                label: o.callsign,
+                run: () => send({ type: 'giveWay', aircraftId: id, toId: o.id }),
+              })),
+            },
+          }
+        : { label: 'Give way to…', action: { kind: 'soon' } },
+    )
   }
-  if (item.status === 'holding') {
+  if (item.status === 'holding' || item.giveWayTo) {
     cmds.push({ label: 'Continue taxi', action: { kind: 'run', run: () => send({ type: 'resume', aircraftId: id }) } })
   }
   cmds.push({ label: 'Contact tower', action: { kind: 'soon' } })
@@ -70,9 +84,17 @@ function commandsFor(controller: GroundController, item: StripItem): MenuCommand
 }
 
 /** Numbered, state-dependent command menu for the selected flight strip. */
-export function StripCommandMenu({ controller, item }: { controller: GroundController; item: StripItem }) {
+export function StripCommandMenu({
+  controller,
+  item,
+  aircraft,
+}: {
+  controller: GroundController
+  item: StripItem
+  aircraft: StripItem[]
+}) {
   const [openSub, setOpenSub] = useState<number | null>(null)
-  const commands = commandsFor(controller, item)
+  const commands = commandsFor(controller, item, aircraft)
 
   const stop = (e: React.MouseEvent) => e.stopPropagation()
   const activate = (i: number): void => {

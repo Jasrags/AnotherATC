@@ -104,11 +104,12 @@ export function StripBay({ controller }: { controller: GroundController }) {
                 </span>
               </div>
               {a.via.length > 0 && <div className="strip-route">VIA {a.via.join(' · ')}</div>}
+              {a.giveWayTo && <div className="strip-giveway">◁ GIVE WAY {a.giveWayTo}</div>}
               {selected &&
                 (snap.draft && snap.draft.id === a.id ? (
                   <RouteBuilderRow controller={controller} item={a} draft={snap.draft} />
                 ) : (
-                  <StripCommandMenu controller={controller} item={a} />
+                  <StripCommandMenu controller={controller} item={a} aircraft={snap.aircraft} />
                 ))}
             </div>
           )

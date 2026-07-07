@@ -19,6 +19,7 @@ export type GroundCommand =
   | { type: 'hold'; aircraftId: string }
   | { type: 'resume'; aircraftId: string }
   | { type: 'crossRunway'; aircraftId: string }
+  | { type: 'giveWay'; aircraftId: string; toId: string }
 
 /** A pickable, named place a controller can clear an aircraft to. */
 export interface NamedDestination {
@@ -54,6 +55,8 @@ export interface GroundAircraft {
   gate: string | null
   /** Too close to another aircraft — a separation conflict. */
   conflict: boolean
+  /** Callsign of the traffic this aircraft has been told to give way to, or null. */
+  giveWayTo: string | null
 }
 
 export interface GroundSnapshot {
