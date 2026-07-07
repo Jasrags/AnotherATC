@@ -12,7 +12,7 @@ export const COLORS = {
   runwayEdge: '#43566a',
   runwayCenter: '#7a90a5',
   holdShort: '#d79a2b',
-  stand: '#2b556e', // gate/parking stand markings
+  stand: '#1f3e4f', // gate/parking guidance lines (subtle — not a dominant feature)
   gateLabel: '#a9d0e2', // gate numbers (shown when zoomed in)
   target: '#f2f9ff',
   targetHalo: '#7fd4ff',

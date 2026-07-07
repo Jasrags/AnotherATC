@@ -14,6 +14,26 @@ function polylineLength(points: SurfaceFeature['points']): number {
   return d
 }
 
+/** The point halfway along a polyline by arc length (consistent regardless of vertex count). */
+function polylineMidpoint(points: SurfaceFeature['points']): Point | null {
+  const total = polylineLength(points)
+  if (total === 0) return points[0] ?? null
+  const half = total / 2
+  let acc = 0
+  for (let i = 1; i < points.length; i += 1) {
+    const a = points[i - 1]
+    const b = points[i]
+    if (!a || !b) continue
+    const seg = Math.hypot(b[0] - a[0], b[1] - a[1])
+    if (acc + seg >= half) {
+      const t = (half - acc) / seg
+      return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]
+    }
+    acc += seg
+  }
+  return points[points.length - 1] ?? null
+}
+
 interface StrokeOpts {
   /** Pavement width in nm (scales with zoom). */
   nm?: number
@@ -78,7 +98,7 @@ export function drawSurface(ctx: Ctx, v: View, surface: AirportSurface, w: numbe
   fillPolys(ctx, v, byKind(surface, 'terminal', 'hangar'), COLORS.buildingFill, COLORS.buildingEdge)
 
   // gate stands
-  strokeFeatures(ctx, v, byKind(surface, 'parking_position'), COLORS.stand, { nm: DIMS.standNm, minPx: 1.2 })
+  strokeFeatures(ctx, v, byKind(surface, 'parking_position'), COLORS.stand, { nm: DIMS.standNm, minPx: 0.85 })
 
   // taxiways: pavement then a thin centerline
   const taxi = byKind(surface, 'taxiway', 'taxilane')
@@ -199,10 +219,10 @@ export function drawGates(ctx: Ctx, v: View, surface: AirportSurface): void {
   ctx.font = '600 9px ui-monospace, "SF Mono", Menlo, monospace'
   for (const f of surface.features) {
     if (f.kind !== 'parking_position' || !f.ref) continue
-    const m = f.points[Math.floor(f.points.length / 2)]
+    const m = polylineMidpoint(f.points)
     if (!m) continue
     const [sx, sy] = toScreen(v, m[0], m[1])
-    label(ctx, f.ref, sx, sy, COLORS.gateLabel)
+    label(ctx, f.ref.toUpperCase(), sx, sy, COLORS.gateLabel)
   }
   ctx.textAlign = 'left'
 }
