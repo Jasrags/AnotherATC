@@ -16,7 +16,7 @@ export type { AircraftInit, GateSlot, SpawnConfig, GroundSimOptions, ServiceSpec
 export { buildKsanGroundScenario } from './ground/ksanScenario'
 export { buildKsanGroundGame } from './ground/ksanGame'
 export { buildTaxiGraph } from './ground/taxiGraph'
-export type { TaxiGraph } from './ground/taxiGraph'
+export type { TaxiGraph, TaxiTopology, TopoNode, TopoEdge } from './ground/taxiGraph'
 export { buildRunwayGuard } from './ground/runwayGuard'
 export type { RunwayGuard } from './ground/runwayGuard'
 export type {

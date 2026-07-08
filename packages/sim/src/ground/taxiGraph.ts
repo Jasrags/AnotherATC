@@ -16,6 +16,37 @@ const keyOf = (p: Point): Key => `${p[0]},${p[1]}`
  *  it stops travel in either direction. */
 export const edgeKey = (a: Key, b: Key): string => (a < b ? `${a}|${b}` : `${b}|${a}`)
 
+/** A contracted taxiway edge: one run between two decision nodes, carrying its full
+ *  polyline so aircraft still drive the real curve (weight is the polyline length, not
+ *  the chord). {@link straight} flags a long dead-straight run to eyeball vs. the chart. */
+export interface TopoEdge {
+  a: Key
+  b: Key
+  ref?: string
+  geom: Point[]
+  length: number
+  straight: boolean
+}
+
+/** A junction/endpoint/hold node kept after contraction, with its raw connectivity degree. */
+export interface TopoNode {
+  key: Key
+  point: Point
+  degree: number
+}
+
+/** The contracted routing topology: decision nodes + geometry-preserving edges. */
+export interface TaxiTopology {
+  nodes: TopoNode[]
+  edges: TopoEdge[]
+}
+
+/** A contracted edge is a "review candidate" when it runs at least this far (nm)… */
+const STRAIGHT_MIN_NM = 0.1
+/** …in a nearly straight chord (chord ÷ polyline length above this): a real straight run,
+ *  or an OSM digitization gap that cuts a corner across pavement. */
+const STRAIGHT_CHORD_RATIO = 0.985
+
 export interface TaxiGraph {
   readonly size: number
   nodePoint(key: Key): Point | undefined
@@ -35,6 +66,9 @@ export interface TaxiGraph {
   /** Shortest path from start to goal that traverses the given taxiways in order,
    *  inclusive of endpoints; [] if no such path exists (caller may fall back to {@link route}). */
   routeVia(fromKey: Key, toKey: Key, taxiways: readonly string[]): Point[]
+  /** Contract pass-through vertices into geometry-preserving runs, leaving only decision
+   *  nodes (junctions, endpoints, taxiway-name changes). See {@link TaxiTopology}. */
+  topology(): TaxiTopology
 }
 
 /** A taxi edge that crosses a runway costs this many times its length, so shortest paths
@@ -169,6 +203,67 @@ export function buildTaxiGraph(surface: AirportSurface): TaxiGraph {
     return out.reverse()
   }
 
+  /**
+   * Contract the raw per-vertex graph into a decision-node topology. A vertex is a
+   * decision node unless it is a pure pass-through (exactly two distinct neighbours joined
+   * by a single taxiway name). Runs of pass-through vertices collapse into one edge that
+   * retains the full polyline (so driving still follows the curve) and the true length.
+   */
+  const topology = (): TaxiTopology => {
+    const neighboursOf = (k: Key): Key[] => [...new Set((adj.get(k) ?? []).map((e) => e.to))]
+    const refsOf = (k: Key): Set<string> => new Set((adj.get(k) ?? []).map((e) => e.ref ?? ''))
+    const isPassThrough = (k: Key): boolean => neighboursOf(k).length === 2 && refsOf(k).size === 1
+    const pointOf = (k: Key): Point => nodes.get(k) ?? [0, 0]
+    const refOf = (a: Key, b: Key): string | undefined => refBetween(a, b)
+
+    const consumed = new Set<string>()
+    const edges: TopoEdge[] = []
+    /** Walk from a decision node `u` toward neighbour `v0` through pass-through vertices. */
+    const walk = (u: Key, v0: Key): void => {
+      if (consumed.has(edgeKey(u, v0))) return
+      const geom: Point[] = [pointOf(u), pointOf(v0)]
+      const ref = refOf(u, v0)
+      let length = Math.hypot(pointOf(v0)[0] - pointOf(u)[0], pointOf(v0)[1] - pointOf(u)[1])
+      consumed.add(edgeKey(u, v0))
+      let prev = u
+      let cur = v0
+      while (isPassThrough(cur) && cur !== u) {
+        const next = neighboursOf(cur).find((k) => k !== prev)
+        if (!next || consumed.has(edgeKey(cur, next))) break
+        consumed.add(edgeKey(cur, next))
+        const cp = pointOf(cur)
+        const np = pointOf(next)
+        length += Math.hypot(np[0] - cp[0], np[1] - cp[1])
+        geom.push(np)
+        prev = cur
+        cur = next
+      }
+      const chord = Math.hypot(pointOf(cur)[0] - pointOf(u)[0], pointOf(cur)[1] - pointOf(u)[1])
+      const straight = length > STRAIGHT_MIN_NM && chord / length > STRAIGHT_CHORD_RATIO
+      edges.push(ref === undefined ? { a: u, b: cur, geom, length, straight } : { a: u, b: cur, ref, geom, length, straight })
+    }
+
+    for (const k of nodes.keys()) {
+      if (isPassThrough(k)) continue
+      for (const v of neighboursOf(k)) walk(k, v)
+    }
+    // Any raw edge still unconsumed belongs to an all-pass-through loop (no decision node);
+    // seed it from an arbitrary vertex so the loop still appears in the topology.
+    for (const k of nodes.keys()) {
+      for (const v of neighboursOf(k)) {
+        if (!consumed.has(edgeKey(k, v))) walk(k, v)
+      }
+    }
+
+    const kept = new Set<Key>()
+    for (const e of edges) {
+      kept.add(e.a)
+      kept.add(e.b)
+    }
+    const topoNodes: TopoNode[] = [...kept].map((k) => ({ key: k, point: pointOf(k), degree: neighboursOf(k).length }))
+    return { nodes: topoNodes, edges }
+  }
+
   const route = (fromKey: Key, toKey: Key): Point[] => dijkstra(fromKey, toKey)
   const routeAvoiding = (fromKey: Key, toKey: Key, blocked: ReadonlySet<string>): Point[] =>
     dijkstra(fromKey, toKey, blocked)
@@ -252,5 +347,6 @@ export function buildTaxiGraph(surface: AirportSurface): TaxiGraph {
     route,
     routeAvoiding,
     routeVia,
+    topology,
   }
 }
