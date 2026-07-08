@@ -758,6 +758,12 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         // as a completed departure). Requires a clear runway.
         if (ac.intent !== 'departure') return refused('only departures contact tower for takeoff')
         if (!ac.holdShort) return refused('not holding short of the runway')
+        // Only launch a takeoff when the runway ahead is this departure's assigned runway.
+        // If the aircraft is merely holding short to *cross* (its route continues past the
+        // runway, so it has no goal on it), contact-tower must not hijack that into a takeoff
+        // — the controller should clear it across instead.
+        if (guard && (!ac.goalPoint || !onRunway(ac.goalPoint, guard)))
+          return refused('route crosses the runway — clear it to cross, not for takeoff')
         if (guard && fleet.some((o) => o !== ac && onRunway([o.x, o.y], guard))) return refused('runway occupied')
         // Wake-turbulence hold: a following departure can't roll until the interval behind
         // the previous departure has elapsed (see docs/wake-turbulence.md).
