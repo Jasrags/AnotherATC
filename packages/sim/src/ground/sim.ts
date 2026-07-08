@@ -159,7 +159,7 @@ function outranks(a: Internal, b: Internal): boolean {
 }
 
 // `status` is derived at snapshot time, so it is not stored here.
-interface Internal extends Omit<GroundAircraft, 'status' | 'wakeHoldSec' | 'serviceSec'> {
+interface Internal extends Omit<GroundAircraft, 'status' | 'holdingForTakeoff' | 'wakeHoldSec' | 'serviceSec'> {
   path: readonly Point[]
   leg: number
   targetSpeed: number
@@ -318,6 +318,15 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       if (ac.services.length === 0 || !atGate(ac)) continue
       for (const s of ac.services) s.remaining = Math.max(0, s.remaining - dt)
     }
+  }
+
+  /** True when this aircraft is holding short of its *own departure runway* (a takeoff hold,
+   *  eligible for a tower handoff) rather than holding short to *cross* the runway. Mirrors the
+   *  contactTower guard, so the UI can offer Contact-tower vs Cross-runway correctly. */
+  function holdingForTakeoff(ac: Internal): boolean {
+    if (!ac.holdShort || ac.intent !== 'departure') return false
+    if (!guard) return true // no runway model → no crossing distinction
+    return ac.goalPoint !== null && onRunway(ac.goalPoint, guard)
   }
 
   /** Seconds of wake separation still owed before this holding-short departure may roll. */
@@ -890,6 +899,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
           groundspeed: Math.round(ac.groundspeed),
           holding: ac.holding,
           holdShort: ac.holdShort,
+          holdingForTakeoff: holdingForTakeoff(ac),
           status: statusOf(ac),
           intent: ac.intent,
           gate: ac.gate,

@@ -12,6 +12,7 @@ function strip(over: Partial<StripItem> = {}): StripItem {
     status: 'taxi',
     intent: 'departure',
     gate: null,
+    holdingForTakeoff: false,
     via: [],
     giveWayTo: null,
     squawk: null,
@@ -46,9 +47,9 @@ describe('commandsFor (strip state machine)', () => {
     expect(cmds[0]!.action.kind).toBe('soon')
   })
 
-  it('holdShort + departure → contact tower (runs), hold position (soon)', () => {
+  it('holdShort for takeoff (own departure runway) → contact tower (runs), hold position (soon)', () => {
     const { controller, dispatched } = fakeController()
-    const cmds = commandsFor(controller, strip({ status: 'holdShort', intent: 'departure' }), [])
+    const cmds = commandsFor(controller, strip({ status: 'holdShort', intent: 'departure', holdingForTakeoff: true }), [])
     expect(labels(cmds)).toEqual(['Contact tower', 'Hold position'])
     const contact = cmds[0]!.action
     if (contact.kind === 'run') contact.run()
@@ -59,6 +60,16 @@ describe('commandsFor (strip state machine)', () => {
   it('holdShort + arrival → cross runway (runs), hold position (soon)', () => {
     const { controller, dispatched } = fakeController()
     const cmds = commandsFor(controller, strip({ status: 'holdShort', intent: 'arrival' }), [])
+    expect(labels(cmds)).toEqual(['Cross runway', 'Hold position'])
+    const cross = cmds[0]!.action
+    if (cross.kind === 'run') cross.run()
+    expect(dispatched).toEqual([{ type: 'crossRunway', aircraftId: 'a' }])
+  })
+
+  it('holdShort + departure that is only crossing (not its runway) → cross runway, not contact tower', () => {
+    const { controller, dispatched } = fakeController()
+    // a departure whose route crosses the runway: holdingForTakeoff is false
+    const cmds = commandsFor(controller, strip({ status: 'holdShort', intent: 'departure', holdingForTakeoff: false }), [])
     expect(labels(cmds)).toEqual(['Cross runway', 'Hold position'])
     const cross = cmds[0]!.action
     if (cross.kind === 'run') cross.run()

@@ -27,6 +27,9 @@ export interface StripItem {
   status: GroundStatus
   intent: GroundIntent
   gate: string | null
+  /** Holding short of its own departure runway (offer Contact tower) vs. to cross (offer
+   *  Cross runway). Only meaningful when status is 'holdShort'. */
+  holdingForTakeoff: boolean
   /** Named taxiways the current route follows, in order (e.g. ["A","B"]). */
   via: string[]
   /** Callsign of the traffic this aircraft is giving way to, or null. */
@@ -211,6 +214,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
         status: a.status,
         intent: a.intent,
         gate: a.gate,
+        holdingForTakeoff: a.holdingForTakeoff,
         via: vias.get(a.id)!,
         giveWayTo: a.giveWayTo,
         squawk: a.squawk,

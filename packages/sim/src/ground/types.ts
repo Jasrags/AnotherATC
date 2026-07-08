@@ -61,6 +61,9 @@ export interface GroundAircraft {
   holding: boolean
   /** Stopped at a runway hold-short line, awaiting a crossing clearance. */
   holdShort: boolean
+  /** Holding short of its *own departure runway* (a takeoff hold, eligible for a tower
+   *  handoff) rather than holding short to cross the runway. False unless holdShort. */
+  holdingForTakeoff: boolean
   /** Coarse ground phase for the flight strip. */
   status: GroundStatus
   /** Departure (heading to the runway) or arrival (heading to a gate). */

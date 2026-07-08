@@ -32,9 +32,10 @@ export function commandsFor(controller: GroundController, item: StripItem, aircr
   }
 
   if (item.status === 'holdShort') {
-    // A departure at its runway is done with Ground — hand it to Tower for takeoff.
-    // Anything else holding short is transiting the runway — clear it across.
-    if (item.intent === 'departure') {
+    // Holding short of its own departure runway → done with Ground, hand to Tower for takeoff.
+    // Holding short to transit (a crossing, incl. a departure whose route continues past the
+    // runway) → clear it across, never a takeoff.
+    if (item.holdingForTakeoff) {
       return [
         { label: 'Contact tower', action: { kind: 'run', run: () => send({ type: 'contactTower', aircraftId: id }) } },
         { label: 'Hold position', action: { kind: 'soon' } },
