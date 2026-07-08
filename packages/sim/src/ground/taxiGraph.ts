@@ -12,6 +12,10 @@ interface Edge {
  *  key doubles as the node identity and connectivity falls out for free. */
 const keyOf = (p: Point): Key => `${p[0]},${p[1]}`
 
+/** Undirected edge identity for two node keys — order-independent, so blocking
+ *  it stops travel in either direction. */
+export const edgeKey = (a: Key, b: Key): string => (a < b ? `${a}|${b}` : `${b}|${a}`)
+
 export interface TaxiGraph {
   readonly size: number
   nodePoint(key: Key): Point | undefined
@@ -25,6 +29,9 @@ export interface TaxiGraph {
   refBetween(a: Key, b: Key): string | undefined
   /** Shortest path of node coordinates from start to goal, inclusive; [] if unreachable. */
   route(fromKey: Key, toKey: Key): Point[]
+  /** Shortest path that avoids the given undirected edges (each an {@link edgeKey}),
+   *  inclusive of endpoints; [] if blocking severs every route. */
+  routeAvoiding(fromKey: Key, toKey: Key, blocked: ReadonlySet<string>): Point[]
   /** Shortest path from start to goal that traverses the given taxiways in order,
    *  inclusive of endpoints; [] if no such path exists (caller may fall back to {@link route}). */
   routeVia(fromKey: Key, toKey: Key, taxiways: readonly string[]): Point[]
@@ -112,12 +119,13 @@ export function buildTaxiGraph(surface: AirportSurface): TaxiGraph {
   }
   const nearestNode = (p: Point): Key | null => nearestNodeWhere(p, () => true)
 
-  const route = (fromKey: Key, toKey: Key): Point[] => {
+  /** Dijkstra (a few hundred nodes; linear-scan frontier is plenty). `blocked`, when
+   *  given, skips any edge whose undirected {@link edgeKey} it contains. */
+  const dijkstra = (fromKey: Key, toKey: Key, blocked?: ReadonlySet<string>): Point[] => {
     const start = nodes.get(fromKey)
     if (!start || !nodes.has(toKey)) return []
     if (fromKey === toKey) return [start]
 
-    // Dijkstra (a few hundred nodes; linear-scan frontier is plenty).
     const dist = new Map<Key, number>([[fromKey, 0]])
     const prev = new Map<Key, Key>()
     const visited = new Set<Key>()
@@ -139,6 +147,7 @@ export function buildTaxiGraph(surface: AirportSurface): TaxiGraph {
       if (u === toKey) break
       for (const e of adj.get(u) ?? []) {
         if (visited.has(e.to)) continue
+        if (blocked && blocked.has(edgeKey(u, e.to))) continue
         const nd = ud + e.w
         if (nd < (dist.get(e.to) ?? Infinity)) {
           dist.set(e.to, nd)
@@ -159,6 +168,10 @@ export function buildTaxiGraph(surface: AirportSurface): TaxiGraph {
     }
     return out.reverse()
   }
+
+  const route = (fromKey: Key, toKey: Key): Point[] => dijkstra(fromKey, toKey)
+  const routeAvoiding = (fromKey: Key, toKey: Key, blocked: ReadonlySet<string>): Point[] =>
+    dijkstra(fromKey, toKey, blocked)
 
   /**
    * Shortest path that traverses `taxiways` in order. Searches a product graph of
@@ -237,6 +250,7 @@ export function buildTaxiGraph(surface: AirportSurface): TaxiGraph {
     },
     refBetween,
     route,
+    routeAvoiding,
     routeVia,
   }
 }

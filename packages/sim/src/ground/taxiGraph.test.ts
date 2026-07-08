@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildTaxiGraph } from './taxiGraph'
+import { buildTaxiGraph, edgeKey } from './taxiGraph'
 import { KSAN_SURFACE } from '../world/ksan'
 import type { AirportSurface } from '../world/types'
 
@@ -96,6 +96,56 @@ describe('buildTaxiGraph', () => {
         [0.4, 0],
       ])
       expect(g.routeVia(s, gg, ['Z'])).toEqual([]) // no such taxiway → no route
+    })
+  })
+
+  describe('routeAvoiding', () => {
+    // A diamond: two equal-length ways S→G, taxiway A over the top, B underneath.
+    const diamond: AirportSurface = {
+      ...toy,
+      features: [
+        { kind: 'taxiway', points: [[0, 0], [0.2, 0.1], [0.4, 0]], ref: 'A' },
+        { kind: 'taxiway', points: [[0, 0], [0.2, -0.1], [0.4, 0]], ref: 'B' },
+      ],
+    }
+
+    it('reroutes around a blocked edge onto the parallel branch', () => {
+      const g = buildTaxiGraph(diamond)
+      const s = g.nearestNode([0, 0])!
+      const gg = g.nearestNode([0.4, 0])!
+      // Block the first edge of the top branch (S → apex-A); the route must take B.
+      const apexA = g.nearestNode([0.2, 0.1])!
+      const path = g.routeAvoiding(s, gg, new Set([edgeKey(s, apexA)]))
+      expect(path).toContainEqual([0.2, -0.1]) // detoured onto B
+      expect(path).not.toContainEqual([0.2, 0.1])
+    })
+
+    it('is the same as route() when nothing is blocked', () => {
+      const g = buildTaxiGraph(diamond)
+      const s = g.nearestNode([0, 0])!
+      const gg = g.nearestNode([0.4, 0])!
+      expect(g.routeAvoiding(s, gg, new Set())).toEqual(g.route(s, gg))
+    })
+
+    it('returns [] when blocking severs the only route', () => {
+      // S ─A─ M ─B─ G : blocking A leaves G unreachable.
+      const chain: AirportSurface = {
+        ...toy,
+        features: [
+          { kind: 'taxiway', points: [[0, 0], [0.2, 0]], ref: 'A' },
+          { kind: 'taxiway', points: [[0.2, 0], [0.4, 0]], ref: 'B' },
+        ],
+      }
+      const g = buildTaxiGraph(chain)
+      const s = g.nearestNode([0, 0])!
+      const m = g.nearestNode([0.2, 0])!
+      const gg = g.nearestNode([0.4, 0])!
+      expect(g.routeAvoiding(s, gg, new Set([edgeKey(s, m)]))).toEqual([])
+    })
+
+    it('edgeKey is order-independent', () => {
+      expect(edgeKey('a', 'b')).toBe(edgeKey('b', 'a'))
+      expect(edgeKey('a', 'b')).not.toBe(edgeKey('a', 'c'))
     })
   })
 
