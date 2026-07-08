@@ -112,11 +112,28 @@ body {
   color: #ff5a4d;
 }
 
-/* Admin routing-graph overlay toggle — the one interactive HUD control, so it opts back
-   into pointer events and gets a real focus ring for keyboard users. */
-.hud-admin {
+/* Admin/dev HUD control bar — the interactive controls, so it opts back into pointer
+   events; the buttons get real focus rings for keyboard users. */
+.hud-controls {
   bottom: 14px;
   left: 18px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dev-tag {
+  pointer-events: none;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  padding: 3px 7px;
+  border-radius: 4px;
+  color: #04080d;
+  background: #ff4d94;
+  font-weight: 600;
+}
+
+.ctl-btn {
   pointer-events: auto;
   cursor: pointer;
   font-size: 11px;
@@ -129,19 +146,28 @@ body {
   transition: color var(--duration-fast, 150ms) ease, border-color var(--duration-fast, 150ms) ease;
 }
 
-.hud-admin:hover {
+.ctl-btn:hover {
   border-color: #4a3f7a;
   color: #d7ccff;
 }
 
-.hud-admin:focus-visible {
+.ctl-btn:focus-visible {
   outline: 2px solid #7c5cff;
   outline-offset: 2px;
 }
 
-.hud-admin[aria-pressed='true'] {
+.ctl-btn[aria-pressed='true'] {
   border-color: #7c5cff;
   color: #efe8ff;
+}
+
+/* Dev readout (probe length / tool hint), just above the control bar. */
+.hud-dev {
+  bottom: 46px;
+  left: 18px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: #38e0c8;
 }
 
 /* ─── Flight strip bay ─────────────────────────────────────────────────── */

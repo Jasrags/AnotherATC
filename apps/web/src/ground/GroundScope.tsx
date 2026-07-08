@@ -9,9 +9,11 @@ import {
   drawGraphOverlay,
   drawHotspots,
   drawLabels,
+  drawProbe,
   drawRouteDraft,
   drawRouteHover,
   drawSelection,
+  drawSpawnPreview,
   drawSurface,
   nearestTaxiwayRef,
   prepareSurface,
@@ -38,6 +40,7 @@ export function GroundScope({ controller }: { controller: GroundController }) {
   const statusRef = useRef<HTMLDivElement>(null)
   const hintRef = useRef<HTMLDivElement>(null)
   const alertRef = useRef<HTMLDivElement>(null)
+  const devRef = useRef<HTMLDivElement>(null)
 
   // Admin routing-graph overlay. The render loop reads a ref (no effect re-run); the state
   // just drives the button's pressed styling. Toggled by the button or the "g" key.
@@ -46,6 +49,18 @@ export function GroundScope({ controller }: { controller: GroundController }) {
   const toggleGraph = () => {
     showGraphRef.current = !showGraphRef.current
     setShowGraph(showGraphRef.current)
+  }
+
+  // Dev sandbox: which surface-click tool is armed. Ref drives the click/render loop;
+  // state drives the toolbar's pressed styling.
+  type DevTool = 'none' | 'spawn' | 'probe'
+  const [devTool, setDevTool] = useState<DevTool>('none')
+  const devToolRef = useRef<DevTool>('none')
+  const armTool = (tool: DevTool) => {
+    const next = devToolRef.current === tool ? 'none' : tool
+    devToolRef.current = next
+    setDevTool(next)
+    if (next !== 'probe') controller.clearProbe()
   }
 
   // Surface-derived draw data (feature buckets, label anchors) is static — compute it once,
@@ -172,8 +187,14 @@ export function GroundScope({ controller }: { controller: GroundController }) {
       const id = controller.selectedId()
       const draft = controller.routeDraft()
       if (e.key === 'Escape') {
-        if (draft) controller.clearRoute()
+        if (controller.dev && devToolRef.current !== 'none') {
+          devToolRef.current = 'none'
+          setDevTool('none')
+          controller.clearProbe()
+        } else if (draft) controller.clearRoute()
         else controller.select(null)
+      } else if (controller.dev && (e.key === 'x' || e.key === 'X' || e.key === 'Delete') && id) {
+        controller.removeSelected()
       } else if (e.key === 'Backspace' && draft) {
         e.preventDefault()
         controller.removeViaAt(draft.via.length - 1) // drop the last taxiway
@@ -193,6 +214,13 @@ export function GroundScope({ controller }: { controller: GroundController }) {
 
     function handleClick(sx: number, sy: number): void {
       if (!view) return
+      // Dev sandbox: an armed tool claims the click before select/taxi.
+      if (controller.dev && devToolRef.current !== 'none') {
+        const [wx, wy] = toWorld(view, sx, sy)
+        if (devToolRef.current === 'spawn') controller.spawnAt([wx, wy])
+        else controller.probeClick([wx, wy])
+        return
+      }
       const snap = sim.snapshot()
       let hit: string | null = null
       let hitDist = HIT_PX
@@ -275,6 +303,15 @@ export function GroundScope({ controller }: { controller: GroundController }) {
         const selected = selectedId ? snap.aircraft.find((a) => a.id === selectedId) : undefined
         drawSelection(ctx, view, selected, selectedId ? sim.routeOf(selectedId) : [])
         if (showGraphRef.current) drawGraphOverlay(ctx, view, controller.topology)
+        if (controller.dev) {
+          const pr = controller.probe()
+          if (pr) drawProbe(ctx, view, pr)
+          if (devToolRef.current === 'spawn' && hovering) {
+            const [wx, wy] = toWorld(view, hoverX, hoverY)
+            const s = controller.snap([wx, wy])
+            if (s) drawSpawnPreview(ctx, view, s)
+          }
+        }
         ctx.restore()
 
         // Only write when the text actually changes: the status/hint/alert nodes are
@@ -288,6 +325,19 @@ export function GroundScope({ controller }: { controller: GroundController }) {
         if (alertRef.current) {
           const inConflict = snap.aircraft.filter((a) => a.conflict).length
           setText(alertRef.current, inConflict > 0 ? `⚠ CONFLICT` : '')
+        }
+        if (devRef.current && controller.dev) {
+          let t = ''
+          if (devToolRef.current === 'spawn') {
+            t = 'SPAWN — click surface to place · X removes selected'
+          } else if (devToolRef.current === 'probe') {
+            const pr = controller.probe()
+            if (!pr || !pr.to) t = 'PROBE — click origin, then destination'
+            else if (pr.path.length >= 2)
+              t = `PROBE ${pr.lengthNm.toFixed(2)} nm (${Math.round(pr.lengthNm * 6076)} ft) · ${pr.taxiways.join(' · ') || '—'}`
+            else t = 'PROBE — no route between those points'
+          }
+          setText(devRef.current, t)
         }
         if (hintRef.current) {
           const notice = controller.notice()
@@ -341,15 +391,49 @@ export function GroundScope({ controller }: { controller: GroundController }) {
         <div className="hud-title">KSAN · SAN DIEGO INTL</div>
         <div className="hud-sub">GND CON 123.9 · D-ATIS 134.8 · SURFACE (ASDE-X)</div>
       </div>
-      <button
-        type="button"
-        className="hud hud-admin mono"
-        aria-pressed={showGraph}
-        onClick={toggleGraph}
-        title="Toggle the routing-graph overlay (g)"
-      >
-        {showGraph ? '◆ GRAPH' : '◇ GRAPH'}
-      </button>
+      <div className="hud hud-controls">
+        {controller.dev && <span className="dev-tag mono">DEV</span>}
+        <button
+          type="button"
+          className="ctl-btn mono"
+          aria-pressed={showGraph}
+          onClick={toggleGraph}
+          title="Toggle the routing-graph overlay (g)"
+        >
+          {showGraph ? '◆ GRAPH' : '◇ GRAPH'}
+        </button>
+        {controller.dev && (
+          <>
+            <button
+              type="button"
+              className="ctl-btn mono"
+              aria-pressed={devTool === 'spawn'}
+              onClick={() => armTool('spawn')}
+              title="Click the surface to place a test aircraft (snaps to the nearest taxiway node)"
+            >
+              SPAWN
+            </button>
+            <button
+              type="button"
+              className="ctl-btn mono"
+              aria-pressed={devTool === 'probe'}
+              onClick={() => armTool('probe')}
+              title="Click two points to draw the routing path between them"
+            >
+              PROBE
+            </button>
+            <button
+              type="button"
+              className="ctl-btn mono"
+              onClick={() => controller.clearAll()}
+              title="Remove all aircraft"
+            >
+              CLEAR
+            </button>
+          </>
+        )}
+      </div>
+      {controller.dev && <div ref={devRef} className="hud hud-dev mono" aria-live="polite" />}
       <div ref={statusRef} className="hud hud-tr mono" />
       <div ref={alertRef} className="hud hud-alert mono" role="alert" />
       <div ref={hintRef} className="hud hud-bc mono" aria-live="polite" />

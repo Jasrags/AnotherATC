@@ -105,3 +105,49 @@ describe('ground controller bridge', () => {
     expect(c.notice()).toBeNull()
   })
 })
+
+// KSAN spans roughly x ∈ [-0.85, 0.75] nm; these are safely inside the field.
+const KSAN_WEST = -0.6
+const KSAN_EAST = 0.6
+
+describe('ground controller — dev sandbox', () => {
+  it('starts empty in dev mode (no seeded aircraft)', () => {
+    expect(createGroundController({ dev: true }).getSnapshot().aircraft).toHaveLength(0)
+    expect(createGroundController().dev).toBe(false)
+    expect(createGroundController({ dev: true }).dev).toBe(true)
+  })
+
+  it('spawnAt places a test aircraft (snapped to the network) and selects it', () => {
+    const c = createGroundController({ dev: true })
+    c.spawnAt([0, 0]) // arbitrary point → snaps to nearest routing node
+    const snap = c.getSnapshot()
+    expect(snap.aircraft).toHaveLength(1)
+    expect(c.selectedId()).toBe(snap.aircraft[0]!.id)
+    expect(snap.aircraft[0]!.callsign).toMatch(/^DEV\d\d$/)
+  })
+
+  it('removeSelected and clearAll empty the surface', () => {
+    const c = createGroundController({ dev: true })
+    c.spawnAt([0, 0])
+    c.spawnAt([0.1, 0])
+    c.removeSelected() // removes the most recently placed (selected) one
+    expect(c.getSnapshot().aircraft).toHaveLength(1)
+    c.clearAll()
+    expect(c.getSnapshot().aircraft).toHaveLength(0)
+    expect(c.selectedId()).toBeNull()
+  })
+
+  it('probe routes between two clicked points and reports length + taxiways', () => {
+    const c = createGroundController({ dev: true })
+    expect(c.probe()).toBeNull()
+    c.probeClick([KSAN_WEST, 0]) // origin
+    expect(c.probe()?.to).toBeNull() // awaiting the second click
+    c.probeClick([KSAN_EAST, 0]) // destination across the field
+    const pr = c.probe()!
+    expect(pr.to).not.toBeNull()
+    expect(pr.path.length).toBeGreaterThan(2)
+    expect(pr.lengthNm).toBeGreaterThan(0)
+    c.clearProbe()
+    expect(c.probe()).toBeNull()
+  })
+})

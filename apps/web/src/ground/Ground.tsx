@@ -7,7 +7,8 @@ import { StripBay } from './StripBay'
  *  sharing one controller (sim + selection). */
 export function Ground() {
   const ref = useRef<GroundController | null>(null)
-  ref.current ??= createGroundController()
+  // Dev/admin sandbox: `?dev` (any value) starts an empty surface with the spawn/probe tools.
+  ref.current ??= createGroundController({ dev: new URLSearchParams(window.location.search).has('dev') })
   const controller = ref.current
 
   return (

@@ -38,6 +38,9 @@ export const COLORS = {
   graphEdgeFlag: '#ff4d94', // long dead-straight run → eyeball vs. the chart
   graphNode: '#b9a3ff', // decision node (endpoint / name-change)
   graphJunction: '#efe8ff', // junction (degree ≥ 3)
+  // Dev sandbox: routing-probe path + placement preview.
+  probePath: '#38e0c8', // shortest-path probe between two clicked points
+  probeBad: '#ff5a4d', // second point set but no route found
 } as const
 
 export const DIMS = {

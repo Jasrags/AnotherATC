@@ -47,6 +47,23 @@ export interface RouteDraft {
   via: string[]
 }
 
+/** A dev-mode routing probe: the shortest graph path between two clicked points, for
+ *  eyeballing taxiway routing without spawning. `to`/`path` are null/empty until the
+ *  second click; an empty `path` after the second click means no route was found. */
+export interface ProbeResult {
+  from: Point
+  to: Point | null
+  path: Point[]
+  taxiways: string[]
+  lengthNm: number
+}
+
+/** Options for the controller. `dev` starts an empty surface (no seeded aircraft, spawner
+ *  off) and unlocks the spawn/probe sandbox tools. */
+export interface GroundControllerOptions {
+  dev?: boolean
+}
+
 export interface StripSnapshot {
   aircraft: StripItem[]
   selectedId: string | null
@@ -66,6 +83,8 @@ export interface GroundController {
   readonly destinations: NamedDestination[]
   /** The contracted routing graph (decision nodes + geometry edges) for the admin overlay. */
   readonly topology: TaxiTopology
+  /** Whether the dev/admin sandbox is active (empty surface + spawn/probe tools). */
+  readonly dev: boolean
   selectedId(): string | null
   select(id: string | null): void
   dispatch(cmd: GroundCommand): void
@@ -86,17 +105,63 @@ export interface GroundController {
   publish(): void
   subscribe(cb: () => void): () => void
   getSnapshot(): StripSnapshot
+  // ── Dev/admin sandbox ──────────────────────────────────────────────────────
+  /** Snap a world point to the nearest routing node (for a placement preview), or null. */
+  snap(point: Point): Point | null
+  /** Place a test aircraft at the nearest routing node to `point` and select it. */
+  spawnAt(point: Point): void
+  /** Remove the selected aircraft, if any. */
+  removeSelected(): void
+  /** Remove every aircraft from the surface. */
+  clearAll(): void
+  /** The active routing probe (or null). First click sets the origin, second routes to it. */
+  probe(): ProbeResult | null
+  /** Feed a click into the probe: set the origin, then route to the destination. */
+  probeClick(point: Point): void
+  /** Discard the active probe. */
+  clearProbe(): void
 }
 
-export function createGroundController(): GroundController {
+export function createGroundController(opts: GroundControllerOptions = {}): GroundController {
+  const dev = opts.dev ?? false
   const graph = buildTaxiGraph(KSAN_SURFACE)
   const topology = graph.topology()
   const guard = buildRunwayGuard(KSAN_SURFACE)
-  const { inits, spawn, destinations, servicing } = buildKsanGroundGame(1)
-  const sim = createGroundSim(inits, { graph, guard, spawn, servicing })
+  const game = buildKsanGroundGame(1)
+  const { destinations } = game
+  // Dev mode starts empty: no seeded aircraft, no auto-spawner, no servicing gate.
+  const sim = dev
+    ? createGroundSim([], { graph, guard })
+    : createGroundSim(game.inits, { graph, guard, spawn: game.spawn, servicing: game.servicing })
 
   let selected: string | null = null
   let draft: RouteDraft | null = null
+  let devSeq = 0
+  let probeState: ProbeResult | null = null
+
+  /** Nearest routing-node point to a world point, or null if the graph is empty. */
+  const snapPoint = (p: Point): Point | null => {
+    const k = graph.nearestNode(p)
+    return k ? (graph.nodePoint(k) ?? null) : null
+  }
+  /** Named taxiways a node-point path traverses, in order (deduped). */
+  const taxiwaysAlong = (pts: Point[]): string[] => {
+    const out: string[] = []
+    let prev: string | null = null
+    for (const p of pts) {
+      const k = graph.keyAt(p)
+      if (!k) {
+        prev = null
+        continue
+      }
+      if (prev) {
+        const ref = graph.refBetween(prev, k)
+        if (ref && out[out.length - 1] !== ref) out.push(ref)
+      }
+      prev = k
+    }
+    return out
+  }
   const listeners = new Set<() => void>()
   let snapshot: StripSnapshot = { aircraft: [], selectedId: null, draft: null }
   let sig = ''
@@ -145,6 +210,56 @@ export function createGroundController(): GroundController {
     sim,
     destinations,
     topology,
+    dev,
+    snap: snapPoint,
+    spawnAt: (point) => {
+      const at = snapPoint(point) ?? point
+      const id = `dev${devSeq}`
+      devSeq += 1
+      sim.add({
+        id,
+        callsign: `DEV${String(devSeq).padStart(2, '0')}`,
+        type: 'B738',
+        wake: 'M',
+        path: [at],
+        targetSpeed: 0,
+        intent: 'departure',
+      })
+      selected = id
+      publish()
+    },
+    removeSelected: () => {
+      if (!selected) return
+      sim.remove(selected)
+      selected = null
+      draft = null
+      publish()
+    },
+    clearAll: () => {
+      sim.clear()
+      selected = null
+      draft = null
+      publish()
+    },
+    probe: () => probeState,
+    probeClick: (point) => {
+      const at = snapPoint(point) ?? point
+      if (!probeState || probeState.to) {
+        probeState = { from: at, to: null, path: [], taxiways: [], lengthNm: 0 }
+        return
+      }
+      const fromKey = graph.nearestNode(probeState.from)
+      const toKey = graph.nearestNode(at)
+      const path = fromKey && toKey ? graph.route(fromKey, toKey) : []
+      let lengthNm = 0
+      for (let i = 1; i < path.length; i += 1) {
+        lengthNm += Math.hypot(path[i]![0] - path[i - 1]![0], path[i]![1] - path[i - 1]![1])
+      }
+      probeState = { from: probeState.from, to: at, path, taxiways: taxiwaysAlong(path), lengthNm }
+    },
+    clearProbe: () => {
+      probeState = null
+    },
     selectedId: () => selected,
     select: (id) => {
       selected = id

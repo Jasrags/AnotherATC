@@ -631,3 +631,53 @@ export function drawGraphOverlay(ctx: Ctx, v: View, topology: TaxiTopology): voi
   }
   ctx.restore()
 }
+
+/** Dev sandbox: draw a routing probe — the shortest graph path between two clicked
+ *  points (solid), or a dashed red line when the second point has no route. */
+export function drawProbe(
+  ctx: Ctx,
+  v: View,
+  probe: { from: Point; to: Point | null; path: Point[] },
+): void {
+  ctx.save()
+  const dot = (p: Point, color: string): void => {
+    const [sx, sy] = toScreen(v, p[0], p[1])
+    ctx.fillStyle = color
+    ctx.beginPath()
+    ctx.arc(sx, sy, 4, 0, Math.PI * 2)
+    ctx.fill()
+  }
+  if (probe.path.length >= 2) {
+    ctx.strokeStyle = COLORS.probePath
+    ctx.lineWidth = 2
+    ctx.beginPath()
+    trace(ctx, v, probe.path)
+    ctx.stroke()
+  } else if (probe.to) {
+    ctx.strokeStyle = COLORS.probeBad
+    ctx.lineWidth = 1.5
+    ctx.setLineDash([6, 5])
+    const [ax, ay] = toScreen(v, probe.from[0], probe.from[1])
+    const [bx, by] = toScreen(v, probe.to[0], probe.to[1])
+    ctx.beginPath()
+    ctx.moveTo(ax, ay)
+    ctx.lineTo(bx, by)
+    ctx.stroke()
+    ctx.setLineDash([])
+  }
+  dot(probe.from, COLORS.probePath)
+  if (probe.to) dot(probe.to, probe.path.length >= 2 ? COLORS.probePath : COLORS.probeBad)
+  ctx.restore()
+}
+
+/** Dev sandbox: a ring at the routing node where a Spawn click would drop an aircraft. */
+export function drawSpawnPreview(ctx: Ctx, v: View, at: Point): void {
+  const [sx, sy] = toScreen(v, at[0], at[1])
+  ctx.save()
+  ctx.strokeStyle = COLORS.probePath
+  ctx.lineWidth = 1.5
+  ctx.beginPath()
+  ctx.arc(sx, sy, 7, 0, Math.PI * 2)
+  ctx.stroke()
+  ctx.restore()
+}
