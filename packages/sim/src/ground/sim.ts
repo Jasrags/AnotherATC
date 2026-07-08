@@ -10,7 +10,7 @@ import type {
   GroundStatus,
   WakeCategory,
 } from './types'
-import type { TaxiGraph } from './taxiGraph'
+import { edgeKey, type TaxiGraph } from './taxiGraph'
 import { wakeSeparationSec, WAKE_TIME_SCALE } from './wake'
 import { onRunway, splitRouteAtRunway, type RunwayGuard } from './runwayGuard'
 
@@ -102,6 +102,13 @@ const HOLD_MARGIN_NM = MIN_GAP_NM
 /** Braking ramp (nm) used to decelerate to a stop at the hold point. */
 const HOLD_RAMP_NM = 0.03
 
+// ─── Parallel-taxiway diversion ──────────────────────────────────────────────
+/** Seconds an aircraft must sit reservation-held before it reroutes around the block. */
+const DIVERT_AFTER_SEC = 6
+/** Accept a diversion only if the detour is at most this multiple of the direct route.
+ *  A modest parallel taxiway diverts; a long way around is worse than just waiting. */
+const DIVERSION_COST_FACTOR = 2
+
 // ─── Give way (manual, to a specific aircraft) ────────────────────────────────
 /** Hold for the named traffic while it is within this range (nm) and not yet behind us. */
 const GIVEWAY_WATCH_NM = 0.1
@@ -171,6 +178,14 @@ interface Internal extends Omit<GroundAircraft, 'status' | 'wakeHoldSec' | 'serv
   departing: boolean
   /** Parallel ground services still counting down while parked at the gate (empty when none). */
   services: { kind: string; total: number; remaining: number }[]
+  /** Undirected edge (key) the reservation is currently making this aircraft hold short of, or null. */
+  blockedEdge: string | null
+  /** Seconds spent continuously reservation-held — once past a threshold, we try to divert. */
+  heldSec: number
+  /** Contested edges a diversion has already routed this aircraft around (kept off reroutes). */
+  avoidEdges: Set<string>
+  /** Blocked edges we already tried and failed to divert around (skip recompute until recleared). */
+  divertTried: Set<string>
 }
 
 /**
@@ -237,6 +252,10 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         servicing && (init.intent ?? 'departure') === 'departure'
           ? servicing.services.map((s) => ({ kind: s.kind, total: s.sec, remaining: s.sec }))
           : [],
+      blockedEdge: null,
+      heldSec: 0,
+      avoidEdges: new Set(),
+      divertTried: new Set(),
     }
   }
 
@@ -403,6 +422,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
    * aircraft never both hold for the same segment. Graph-only (needs edge topology).
    */
   function reservationCap(ac: Internal): number {
+    ac.blockedEdge = null
     const ctx = edgeCtx(ac)
     if (!ctx || !ctx.next || !ctx.after) return Infinity
     if (ctx.distToNext > RESERVE_HORIZON_NM) return Infinity
@@ -423,8 +443,56 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       }
     }
     if (!hold) return Infinity
+    ac.blockedEdge = edgeKey(from, to)
     const d = ctx.distToNext - HOLD_MARGIN_NM
     return d <= 0 ? 0 : Math.min(TAXI_SPEED_KT, (d / HOLD_RAMP_NM) * TAXI_SPEED_KT)
+  }
+
+  /** Summed length (nm) of a node-point path. */
+  function pathLength(pts: readonly Point[]): number {
+    let sum = 0
+    for (let i = 1; i < pts.length; i += 1) sum += dist(pts[i - 1]!, pts[i]!)
+    return sum
+  }
+
+  /**
+   * Parallel-taxiway diversion: an aircraft that has been reservation-held at a junction
+   * for {@link DIVERT_AFTER_SEC} reroutes to its current destination *around* the contested
+   * edge — but only if a path avoiding it exists and the detour stays within
+   * {@link DIVERSION_COST_FACTOR} of the direct route (else waiting is cheaper). This dissolves
+   * the pass-through degrade cases and lets an aircraft leave an occupancy cycle when a
+   * parallel exists. Deterministic: fixed-timestep hold accrual, no randomness.
+   */
+  function maybeDivert(ac: Internal): void {
+    if (!graph || ac.heldSec < DIVERT_AFTER_SEC) return
+    const blocked = ac.blockedEdge
+    if (!blocked || ac.divertTried.has(blocked)) return
+    if (ac.held) return // holding short of a runway is a Tower matter, not a taxi jam
+    if (ac.leg >= ac.path.length - 1) return
+    const dest = ac.path[ac.path.length - 1]
+    if (!dest) return
+    const startKey = graph.nearestNode([ac.x, ac.y])
+    const goalKey = graph.nearestNode(dest)
+    if (!startKey || !goalKey) return
+    const avoid = new Set(ac.avoidEdges)
+    avoid.add(blocked)
+    const alt = graph.routeAvoiding(startKey, goalKey, avoid)
+    if (alt.length === 0) {
+      ac.divertTried.add(blocked)
+      return
+    }
+    const direct = graph.route(startKey, goalKey)
+    if (direct.length > 0 && pathLength(alt) > DIVERSION_COST_FACTOR * pathLength(direct)) {
+      ac.divertTried.add(blocked)
+      return
+    }
+    // Preserve an exact appended goal (e.g. a stand point that isn't a graph node).
+    const goalPt = graph.nodePoint(goalKey)
+    const appendExact = !goalPt || dist(goalPt, dest) > 1e-6
+    ac.avoidEdges = avoid
+    applyRoute(ac, alt, dest, appendExact)
+    ac.heldSec = 0
+    ac.blockedEdge = null
   }
 
   /**
@@ -528,6 +596,14 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     ac.targetSpeed = TAXI_SPEED_KT
     ac.holding = false
     ac.holdShort = false
+    ac.heldSec = 0
+    ac.blockedEdge = null
+  }
+
+  /** Forget accumulated diversion state — a fresh player clearance supersedes it. */
+  function clearDiversion(ac: Internal): void {
+    ac.avoidEdges = new Set()
+    ac.divertTried = new Set()
   }
 
   /**
@@ -571,6 +647,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     if (!startKey || !goalKey) return false
     const route = graph.route(startKey, goalKey)
     if (route.length === 0) return false
+    clearDiversion(ac)
     applyRoute(ac, route, dest, appendExact)
     return true
   }
@@ -586,6 +663,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     const via = graph.routeVia(startKey, goalKey, taxiways)
     const route = via.length > 0 ? via : graph.route(startKey, goalKey)
     if (route.length === 0) return false
+    clearDiversion(ac)
     applyRoute(ac, route, dest, appendExact)
     return true
   }
@@ -628,6 +706,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         const alleyKey = graph.nearestNode([ac.x, ac.y])
         const alley = alleyKey ? graph.nodePoint(alleyKey) : undefined
         if (!alley || dist([ac.x, ac.y], alley) < GATE_EPS) return refused('no alley to push onto')
+        clearDiversion(ac)
         ac.path = [[ac.x, ac.y], alley]
         ac.leg = 0
         ac.held = null
@@ -658,6 +737,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         if (!ac.held || ac.held.length < 2) return refused('not holding short of a runway')
         // Don't clear onto an occupied runway.
         if (guard && fleet.some((o) => o !== ac && onRunway([o.x, o.y], guard))) return refused('runway occupied')
+        clearDiversion(ac)
         ac.path = ac.held
         ac.leg = 0
         ac.held = null
@@ -767,6 +847,16 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       const caps = fleet.map((ac) =>
         ac.departing ? Infinity : Math.min(separationCap(ac), reservationCap(ac), giveWayCap(ac)),
       )
+      // reservationCap set each aircraft's blockedEdge; accrue continuous hold time and,
+      // once it's sustained, reroute around the block if a viable parallel exists.
+      for (const ac of fleet) {
+        if (ac.blockedEdge) {
+          ac.heldSec += dt
+          maybeDivert(ac)
+        } else {
+          ac.heldSec = 0
+        }
+      }
       fleet.forEach((ac, i) => advance(ac, dt, caps[i] ?? Infinity))
       for (const id of resolveGoals(dt)) {
         const i = fleet.findIndex((a) => a.id === id)
