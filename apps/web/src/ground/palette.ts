@@ -33,6 +33,11 @@ export const COLORS = {
   labelArea: '#6f8493', // muted blue-gray for ramp/terminal area names
   labelHalo: 'rgba(4, 8, 13, 0.92)',
   hotspot: '#e0932f', // charted hot-spot orange
+  // Admin routing-graph overlay (debug layer, deliberately off-palette from gameplay).
+  graphEdge: '#7c5cff', // contracted taxiway run
+  graphEdgeFlag: '#ff4d94', // long dead-straight run → eyeball vs. the chart
+  graphNode: '#b9a3ff', // decision node (endpoint / name-change)
+  graphJunction: '#efe8ff', // junction (degree ≥ 3)
 } as const
 
 export const DIMS = {

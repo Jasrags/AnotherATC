@@ -1,6 +1,15 @@
 import { describe, it, expect } from 'vitest'
-import type { AirportSurface, Point, SurfaceFeature } from '@anotheratc/sim'
-import { polylineLength, polylineMidpoint, distToSeg, nearestTaxiwayRef, prepareSurface } from './render'
+import type { AirportSurface, Point, SurfaceFeature, TaxiTopology } from '@anotheratc/sim'
+import {
+  polylineLength,
+  polylineMidpoint,
+  distToSeg,
+  drawGraphOverlay,
+  nearestTaxiwayRef,
+  prepareSurface,
+} from './render'
+import { COLORS } from './palette'
+import { fitView } from './view'
 
 /** Build a minimal surface from taxiway/taxilane polylines for hit-testing. */
 function surfaceOf(features: SurfaceFeature[]): AirportSurface {
@@ -127,5 +136,53 @@ describe('prepareSurface', () => {
     const twoSeven = prep.runwayNumbers.find((r) => r.text === '27')
     expect(nine?.at[0]).toBe(-1)
     expect(twoSeven?.at[0]).toBe(1)
+  })
+})
+
+describe('drawGraphOverlay', () => {
+  // A canvas 2D stub that records the strokeStyle in effect at each stroke() call.
+  function recordingCtx() {
+    const strokes: string[] = []
+    let strokeStyle = ''
+    const ctx = {
+      get strokeStyle() {
+        return strokeStyle
+      },
+      set strokeStyle(v: string) {
+        strokeStyle = v
+      },
+      fillStyle: '',
+      lineWidth: 0,
+      lineJoin: '',
+      save() {},
+      restore() {},
+      beginPath() {},
+      moveTo() {},
+      lineTo() {},
+      arc() {},
+      fill() {},
+      stroke() {
+        strokes.push(strokeStyle)
+      },
+    }
+    return { ctx: ctx as unknown as CanvasRenderingContext2D, strokes }
+  }
+
+  it('strokes flagged straight edges in the flag color and normal edges in the edge color', () => {
+    const topology: TaxiTopology = {
+      nodes: [
+        { key: 'a', point: [0, 0], degree: 3 },
+        { key: 'b', point: [1, 0], degree: 1 },
+        { key: 'c', point: [0, 1], degree: 1 },
+      ],
+      edges: [
+        { a: 'a', b: 'b', ref: 'STR', geom: [[0, 0], [1, 0]], length: 1, straight: true },
+        { a: 'a', b: 'c', ref: 'CRV', geom: [[0, 0], [0, 1]], length: 1, straight: false },
+      ],
+    }
+    const { ctx, strokes } = recordingCtx()
+    drawGraphOverlay(ctx, fitView({ minX: 0, minY: 0, maxX: 1, maxY: 1 }, 200, 200), topology)
+    expect(strokes).toContain(COLORS.graphEdgeFlag)
+    expect(strokes).toContain(COLORS.graphEdge)
   })
 })

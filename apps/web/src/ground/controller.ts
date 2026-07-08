@@ -13,6 +13,7 @@ import type {
   NamedDestination,
   Point,
   ServiceProgress,
+  TaxiTopology,
   WakeCategory,
 } from '@anotheratc/sim'
 
@@ -63,6 +64,8 @@ export interface StripSnapshot {
 export interface GroundController {
   readonly sim: GroundSim
   readonly destinations: NamedDestination[]
+  /** The contracted routing graph (decision nodes + geometry edges) for the admin overlay. */
+  readonly topology: TaxiTopology
   selectedId(): string | null
   select(id: string | null): void
   dispatch(cmd: GroundCommand): void
@@ -87,6 +90,7 @@ export interface GroundController {
 
 export function createGroundController(): GroundController {
   const graph = buildTaxiGraph(KSAN_SURFACE)
+  const topology = graph.topology()
   const guard = buildRunwayGuard(KSAN_SURFACE)
   const { inits, spawn, destinations, servicing } = buildKsanGroundGame(1)
   const sim = createGroundSim(inits, { graph, guard, spawn, servicing })
@@ -140,6 +144,7 @@ export function createGroundController(): GroundController {
   return {
     sim,
     destinations,
+    topology,
     selectedId: () => selected,
     select: (id) => {
       selected = id

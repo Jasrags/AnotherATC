@@ -1,4 +1,11 @@
-import type { AirportSurface, GroundAircraft, Point, SurfaceFeature, SurfaceKind } from '@anotheratc/sim'
+import type {
+  AirportSurface,
+  GroundAircraft,
+  Point,
+  SurfaceFeature,
+  SurfaceKind,
+  TaxiTopology,
+} from '@anotheratc/sim'
 import { COLORS, DIMS } from './palette'
 import { toScreen, type View } from './view'
 
@@ -595,4 +602,32 @@ export function drawAircraft(ctx: Ctx, v: View, aircraft: GroundAircraft[]): voi
       ctx.fillText(`${ac.type}  ${speed}`, bx, by + DIMS.blockFont + 1)
     }
   }
+}
+
+/**
+ * Admin debug layer: the routing graph the sim actually navigates, drawn over the
+ * surface. Contracted edges follow their real polyline; long dead-straight runs are
+ * flagged (they're either legitimate straight taxiway or an OSM digitization gap that
+ * cuts a corner). Junction nodes are emphasized over plain endpoints. Toggle with the
+ * Graph control (or "g"); use it to eyeball where routing geometry diverges from the chart.
+ */
+export function drawGraphOverlay(ctx: Ctx, v: View, topology: TaxiTopology): void {
+  ctx.save()
+  ctx.lineJoin = 'round'
+  for (const e of topology.edges) {
+    ctx.strokeStyle = e.straight ? COLORS.graphEdgeFlag : COLORS.graphEdge
+    ctx.lineWidth = e.straight ? 2 : 1
+    ctx.beginPath()
+    trace(ctx, v, e.geom)
+    ctx.stroke()
+  }
+  for (const n of topology.nodes) {
+    const [sx, sy] = toScreen(v, n.point[0], n.point[1])
+    const junction = n.degree >= 3
+    ctx.fillStyle = junction ? COLORS.graphJunction : COLORS.graphNode
+    ctx.beginPath()
+    ctx.arc(sx, sy, junction ? 3.2 : 2, 0, Math.PI * 2)
+    ctx.fill()
+  }
+  ctx.restore()
 }

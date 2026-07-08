@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { KSAN_SURFACE } from '@anotheratc/sim'
 import type { GroundController } from './controller'
 import { fitView, pan, reframe, toWorld, zoomAt, type View } from './view'
@@ -6,6 +6,7 @@ import {
   drawAircraft,
   drawAreaLabels,
   drawGates,
+  drawGraphOverlay,
   drawHotspots,
   drawLabels,
   drawRouteDraft,
@@ -37,6 +38,15 @@ export function GroundScope({ controller }: { controller: GroundController }) {
   const statusRef = useRef<HTMLDivElement>(null)
   const hintRef = useRef<HTMLDivElement>(null)
   const alertRef = useRef<HTMLDivElement>(null)
+
+  // Admin routing-graph overlay. The render loop reads a ref (no effect re-run); the state
+  // just drives the button's pressed styling. Toggled by the button or the "g" key.
+  const [showGraph, setShowGraph] = useState(false)
+  const showGraphRef = useRef(false)
+  const toggleGraph = () => {
+    showGraphRef.current = !showGraphRef.current
+    setShowGraph(showGraphRef.current)
+  }
 
   // Surface-derived draw data (feature buckets, label anchors) is static — compute it once,
   // not every animation frame (WEB-1). KSAN_SURFACE is a constant, so this never recomputes.
@@ -169,6 +179,10 @@ export function GroundScope({ controller }: { controller: GroundController }) {
         controller.removeViaAt(draft.via.length - 1) // drop the last taxiway
       } else if ((e.key === 'c' || e.key === 'C') && id) {
         controller.dispatch({ type: 'crossRunway', aircraftId: id })
+      } else if (e.key === 'g' || e.key === 'G') {
+        // admin: toggle the routing-graph overlay (ref drives the loop; state drives the button)
+        showGraphRef.current = !showGraphRef.current
+        setShowGraph(showGraphRef.current)
       }
     }
 
@@ -260,6 +274,7 @@ export function GroundScope({ controller }: { controller: GroundController }) {
         drawAircraft(ctx, view, snap.aircraft)
         const selected = selectedId ? snap.aircraft.find((a) => a.id === selectedId) : undefined
         drawSelection(ctx, view, selected, selectedId ? sim.routeOf(selectedId) : [])
+        if (showGraphRef.current) drawGraphOverlay(ctx, view, controller.topology)
         ctx.restore()
 
         // Only write when the text actually changes: the status/hint/alert nodes are
@@ -326,6 +341,15 @@ export function GroundScope({ controller }: { controller: GroundController }) {
         <div className="hud-title">KSAN · SAN DIEGO INTL</div>
         <div className="hud-sub">GND CON 123.9 · D-ATIS 134.8 · SURFACE (ASDE-X)</div>
       </div>
+      <button
+        type="button"
+        className="hud hud-admin mono"
+        aria-pressed={showGraph}
+        onClick={toggleGraph}
+        title="Toggle the routing-graph overlay (g)"
+      >
+        {showGraph ? '◆ GRAPH' : '◇ GRAPH'}
+      </button>
       <div ref={statusRef} className="hud hud-tr mono" />
       <div ref={alertRef} className="hud hud-alert mono" role="alert" />
       <div ref={hintRef} className="hud hud-bc mono" aria-live="polite" />

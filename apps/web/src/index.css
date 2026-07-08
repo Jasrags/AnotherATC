@@ -112,6 +112,38 @@ body {
   color: #ff5a4d;
 }
 
+/* Admin routing-graph overlay toggle — the one interactive HUD control, so it opts back
+   into pointer events and gets a real focus ring for keyboard users. */
+.hud-admin {
+  bottom: 14px;
+  left: 18px;
+  pointer-events: auto;
+  cursor: pointer;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  padding: 4px 9px;
+  border-radius: 5px;
+  border: 1px solid #2a2350;
+  background: rgba(12, 10, 26, 0.72);
+  color: #b9a3ff;
+  transition: color var(--duration-fast, 150ms) ease, border-color var(--duration-fast, 150ms) ease;
+}
+
+.hud-admin:hover {
+  border-color: #4a3f7a;
+  color: #d7ccff;
+}
+
+.hud-admin:focus-visible {
+  outline: 2px solid #7c5cff;
+  outline-offset: 2px;
+}
+
+.hud-admin[aria-pressed='true'] {
+  border-color: #7c5cff;
+  color: #efe8ff;
+}
+
 /* ─── Flight strip bay ─────────────────────────────────────────────────── */
 
 .strip-bay {
