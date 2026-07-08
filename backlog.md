@@ -174,6 +174,7 @@ The game models four positions (see `docs/atc-flight-strips.md`). Ground first, 
 
 ## Testing / infra
 
+- ✅ **Dev/admin sandbox** (`?dev`) — empty surface, spawner off, plus a control bar. **SPAWN**: click the surface to drop a test aircraft (snaps to the nearest routing node, auto `DEVnn`); drive it with the normal commands; **X** removes the selected, **CLEAR** wipes all. **PROBE**: click two points to draw the shortest graph path between them with a live length + taxiway-sequence readout (no route → dashed red). Works alongside the **GRAPH** overlay. Sim gained `add`/`remove`/`clear`. _Next: param picker (type/wake/intent), exact (off-network) placement, step/pause, save/replay._
 - ⬜ Playwright E2E for the interaction flows (needs dependency vetting per policy)
 - ⬜ Socket.dev GitHub app on the repo (CI already runs audit + osv-scanner)
 - ⬜ Coverage reporting + targets
