@@ -904,6 +904,19 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       if (ac.held && ac.held.length >= 2) return [[ac.x, ac.y], ...ac.held.slice(1)]
       return []
     },
+    add(init: AircraftInit): string {
+      fleet.push(makeInternal(init))
+      return init.id
+    },
+    remove(aircraftId: string): boolean {
+      const i = fleet.findIndex((a) => a.id === aircraftId)
+      if (i < 0) return false
+      fleet.splice(i, 1)
+      return true
+    },
+    clear(): void {
+      fleet.length = 0
+    },
     taxiwaysOf(aircraftId: string): string[] {
       const ac = find(aircraftId)
       if (!ac || !graph) return []

@@ -1,4 +1,5 @@
 import type { Point } from '../world/types'
+import type { AircraftInit } from './sim'
 
 /** ICAO wake turbulence category: Light / Medium / Heavy / Super. */
 export type WakeCategory = 'L' | 'M' | 'H' | 'J'
@@ -106,4 +107,10 @@ export interface GroundSim {
   routeOf(aircraftId: string): Point[]
   /** The named taxiways the aircraft's current route follows, in order (e.g. ["A","B"]). */
   taxiwaysOf(aircraftId: string): string[]
+  /** Insert an aircraft at runtime (dev/admin sandbox); returns its id. */
+  add(init: AircraftInit): string
+  /** Remove an aircraft by id; returns whether one was removed. */
+  remove(aircraftId: string): boolean
+  /** Remove every aircraft from the surface. */
+  clear(): void
 }
