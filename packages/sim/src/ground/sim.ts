@@ -49,10 +49,23 @@ export interface SpawnConfig {
   identity: (rng: Rng, intent: GroundIntent) => { callsign: string; type: string; wake: WakeCategory }
 }
 
+/** One parallel ground service and how long it takes (game seconds). */
+export interface ServiceSpec {
+  kind: string
+  sec: number
+}
+
+/** Ground-servicing model: the parallel services a parked departure must complete before it
+ *  may push back (fueling is usually the long pole). Omit to disable servicing entirely. */
+export interface ServicingConfig {
+  services: readonly ServiceSpec[]
+}
+
 export interface GroundSimOptions {
   graph?: TaxiGraph
   guard?: RunwayGuard
   spawn?: SpawnConfig
+  servicing?: ServicingConfig
 }
 
 const TAXI_ACCEL = 4
@@ -156,6 +169,8 @@ interface Internal extends Omit<GroundAircraft, 'status' | 'wakeHoldSec'> {
   squawk: string | null
   /** Rolling for takeoff down the runway toward the far end (after contacting tower). */
   departing: boolean
+  /** Parallel ground services still counting down while parked at the gate (empty when none). */
+  services: { kind: string; total: number; remaining: number }[]
 }
 
 /**
@@ -165,7 +180,7 @@ interface Internal extends Omit<GroundAircraft, 'status' | 'wakeHoldSec'> {
  * in place each tick; {@link GroundSim.snapshot} hands out fresh immutable objects.
  */
 export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimOptions = {}): GroundSim {
-  const { graph, guard, spawn } = opts
+  const { graph, guard, spawn, servicing } = opts
   let time = 0
   let departed = 0
   let arrived = 0
@@ -218,6 +233,10 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       giveWayTo: null,
       squawk: null,
       departing: false,
+      services:
+        servicing && (init.intent ?? 'departure') === 'departure'
+          ? servicing.services.map((s) => ({ kind: s.kind, total: s.sec, remaining: s.sec }))
+          : [],
     }
   }
 
@@ -260,6 +279,26 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     if (!ac.holding) return 'taxi'
     if (ac.path.length < 2 && ac.held === null) return 'parked'
     return 'holding'
+  }
+
+  /** True while a departure is still parked at its gate (not pushed back or rolling). */
+  function atGate(ac: Internal): boolean {
+    return ac.intent === 'departure' && !ac.pushingBack && !ac.departing && ac.path.length < 2
+  }
+
+  /** Seconds until the longest remaining ground service completes (0 = ready / none). */
+  function serviceRemaining(ac: Internal): number {
+    let m = 0
+    for (const s of ac.services) if (s.remaining > m) m = s.remaining
+    return m
+  }
+
+  /** Drain each parked departure's parallel services by dt. */
+  function tickServices(dt: number): void {
+    for (const ac of fleet) {
+      if (ac.services.length === 0 || !atGate(ac)) continue
+      for (const s of ac.services) s.remaining = Math.max(0, s.remaining - dt)
+    }
   }
 
   /** Seconds of wake separation still owed before this holding-short departure may roll. */
@@ -584,6 +623,8 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         if (!graph) return refused('no taxi graph')
         if (ac.pushingBack) return refused('already pushing back')
         if (ac.groundspeed > 0.1 || ac.path.length > 1) return refused('already moving or routed')
+        const svc = serviceRemaining(ac)
+        if (svc > 0) return refused(`ground servicing in progress — ${Math.ceil(svc)}s to pushback`)
         const alleyKey = graph.nearestNode([ac.x, ac.y])
         const alley = alleyKey ? graph.nodePoint(alleyKey) : undefined
         if (!alley || dist([ac.x, ac.y], alley) < GATE_EPS) return refused('no alley to push onto')
@@ -722,6 +763,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
   return {
     step(dt) {
       time += dt
+      tickServices(dt)
       const caps = fleet.map((ac) =>
         ac.departing ? Infinity : Math.min(separationCap(ac), reservationCap(ac), giveWayCap(ac)),
       )
@@ -759,6 +801,8 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
           giveWayTo: ac.giveWayTo ? (find(ac.giveWayTo)?.callsign ?? null) : null,
           squawk: ac.squawk,
           wakeHoldSec: wakeHoldFor(ac),
+          services: ac.services.map((s) => ({ kind: s.kind, total: s.total, remaining: s.remaining })),
+          serviceSec: Math.ceil(serviceRemaining(ac)),
         })),
       }
     },

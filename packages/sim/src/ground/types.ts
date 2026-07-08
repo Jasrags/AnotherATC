@@ -23,6 +23,16 @@ export type GroundCommand =
   | { type: 'contactTower'; aircraftId: string }
   | { type: 'clearance'; aircraftId: string }
 
+/** Progress of one parallel ground service (fuel, cargo, cabin, …) on a parked departure. */
+export interface ServiceProgress {
+  /** Service name, e.g. "fuel". */
+  kind: string
+  /** Total service duration in seconds. */
+  total: number
+  /** Seconds of work still remaining (0 = complete). */
+  remaining: number
+}
+
 /** A pickable, named place a controller can clear an aircraft to. */
 export interface NamedDestination {
   id: string
@@ -65,6 +75,10 @@ export interface GroundAircraft {
   /** Seconds of wake-turbulence separation still required before this holding-short
    *  departure can be released for takeoff; 0 when none applies. */
   wakeHoldSec: number
+  /** Parallel ground services on a parked departure (fuel/cargo/…); empty when none apply. */
+  services: readonly ServiceProgress[]
+  /** Seconds until the longest ground service finishes and pushback unlocks; 0 when ready/none. */
+  serviceSec: number
 }
 
 export interface GroundSnapshot {

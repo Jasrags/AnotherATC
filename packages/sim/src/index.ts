@@ -12,7 +12,7 @@ export type {
 } from './world/types'
 
 export { createGroundSim } from './ground/sim'
-export type { AircraftInit, GateSlot, SpawnConfig, GroundSimOptions } from './ground/sim'
+export type { AircraftInit, GateSlot, SpawnConfig, GroundSimOptions, ServiceSpec, ServicingConfig } from './ground/sim'
 export { buildKsanGroundScenario } from './ground/ksanScenario'
 export { buildKsanGroundGame } from './ground/ksanGame'
 export { buildTaxiGraph } from './ground/taxiGraph'
@@ -28,5 +28,6 @@ export type {
   GroundStatus,
   GroundIntent,
   NamedDestination,
+  ServiceProgress,
   WakeCategory,
 } from './ground/types'
