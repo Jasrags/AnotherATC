@@ -139,11 +139,29 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
   let devSeq = 0
   let probeState: ProbeResult | null = null
 
-  /** Nearest routing-node point to a world point, or null if the graph is empty. */
-  const snapPoint = (p: Point): Point | null => {
+  // Gate stands aren't routing nodes (they sit off the taxiway network), so include them as
+  // snap targets — otherwise a click on a gate jumps to the nearest taxiway node instead.
+  const gatePoints: { ref: string; point: Point }[] = KSAN_SURFACE.features
+    .filter((f) => f.kind === 'gate' && f.ref && f.points[0])
+    .map((f) => ({ ref: f.ref as string, point: f.points[0] as Point }))
+  const dist2 = (a: Point, b: Point): number => (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2
+
+  /** Nearest placeable spot to a world point: a routing node or a gate stand, whichever is
+   *  closer. `gate` is set when the spot is a gate. Falls back to the point itself. */
+  const nearestPlace = (p: Point): { point: Point; gate: string | null } => {
     const k = graph.nearestNode(p)
-    return k ? (graph.nodePoint(k) ?? null) : null
+    const nodePt = k ? graph.nodePoint(k) : undefined
+    let best: { point: Point; gate: string | null; d: number } | null = nodePt
+      ? { point: nodePt, gate: null, d: dist2(nodePt, p) }
+      : null
+    for (const g of gatePoints) {
+      const d = dist2(g.point, p)
+      if (!best || d < best.d) best = { point: g.point, gate: g.ref, d }
+    }
+    return best ? { point: best.point, gate: best.gate } : { point: p, gate: null }
   }
+  /** Nearest placeable spot's point (for the placement/probe preview), or null. */
+  const snapPoint = (p: Point): Point | null => nearestPlace(p).point
   /** Named taxiways a node-point path traverses, in order (deduped). */
   const taxiwaysAlong = (pts: Point[]): string[] => {
     const out: string[] = []
@@ -213,18 +231,19 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
     dev,
     snap: snapPoint,
     spawnAt: (point) => {
-      const at = snapPoint(point) ?? point
+      const place = nearestPlace(point)
       const id = `dev${devSeq}`
       devSeq += 1
-      sim.add({
+      const base = {
         id,
         callsign: `DEV${String(devSeq).padStart(2, '0')}`,
         type: 'B738',
-        wake: 'M',
-        path: [at],
+        wake: 'M' as const,
+        path: [place.point],
         targetSpeed: 0,
-        intent: 'departure',
-      })
+        intent: 'departure' as const,
+      }
+      sim.add(place.gate ? { ...base, gate: place.gate } : base)
       selected = id
       publish()
     },

@@ -126,6 +126,15 @@ describe('ground controller — dev sandbox', () => {
     expect(snap.aircraft[0]!.callsign).toMatch(/^DEV\d\d$/)
   })
 
+  it('spawns onto a gate stand when clicking near one (gates are not routing nodes)', () => {
+    const c = createGroundController({ dev: true })
+    c.spawnAt([-0.711, 0.041]) // gate 41's stand point
+    const ac = c.sim.snapshot().aircraft[0]!
+    expect(ac.gate).toBe('41')
+    // placed at the stand (~0 away), not snapped to the nearest taxiway node (~0.06 nm off)
+    expect(Math.hypot(ac.x - -0.711, ac.y - 0.041)).toBeLessThan(2e-3)
+  })
+
   it('removeSelected and clearAll empty the surface', () => {
     const c = createGroundController({ dev: true })
     c.spawnAt([0, 0])
