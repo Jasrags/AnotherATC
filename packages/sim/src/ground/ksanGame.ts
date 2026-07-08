@@ -1,8 +1,20 @@
 import { KSAN_SURFACE } from '../world/ksan'
 import { createRng, type Rng } from '../random'
 import type { Point } from '../world/types'
-import type { AircraftInit, GateSlot, SpawnConfig } from './sim'
+import type { AircraftInit, GateSlot, ServicingConfig, SpawnConfig } from './sim'
 import type { NamedDestination, WakeCategory } from './types'
+
+/** Pre-push ground services, run in parallel (game seconds). Fueling is the long pole, so it
+ *  sets when pushback unlocks; the shorter services finish earlier. Tuned for surface pacing. */
+const SERVICING: ServicingConfig = {
+  services: [
+    { kind: 'fuel', sec: 45 },
+    { kind: 'cargo', sec: 34 },
+    { kind: 'catering', sec: 28 },
+    { kind: 'water', sec: 20 },
+    { kind: 'cabin', sec: 13 },
+  ],
+}
 
 const AIRLINES = ['AAL', 'UAL', 'DAL', 'SWA', 'ASA', 'NKS', 'JBU', 'SKW']
 const TYPES: readonly [string, WakeCategory][] = [
@@ -79,6 +91,7 @@ export function buildKsanGroundGame(seed = 1): {
   inits: AircraftInit[]
   spawn: SpawnConfig
   destinations: NamedDestination[]
+  servicing: ServicingConfig
 } {
   const slots = gates()
   const { west, east } = runwayEnds()
@@ -119,5 +132,5 @@ export function buildKsanGroundGame(seed = 1): {
     })
   })
 
-  return { inits, spawn, destinations }
+  return { inits, spawn, destinations, servicing: SERVICING }
 }

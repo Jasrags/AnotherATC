@@ -113,6 +113,25 @@ export function StripBay({ controller }: { controller: GroundController }) {
                 {a.via.length > 0 && <div className="strip-route">VIA {a.via.join(' · ')}</div>}
                 {a.giveWayTo && <div className="strip-giveway">◁ GIVE WAY {a.giveWayTo}</div>}
                 {a.wakeHoldSec > 0 && <div className="strip-wake">⚠ WAKE HOLD {a.wakeHoldSec}s</div>}
+                {a.serviceSec > 0 && (
+                  <div className="strip-svc">
+                    <span className="svc-label">SVC {a.serviceSec}s</span>
+                    <span className="svc-bars">
+                      {a.services.map((s) => (
+                        <span
+                          key={s.kind}
+                          className="svc-bar"
+                          title={`${s.kind} · ${Math.ceil(s.remaining)}s`}
+                        >
+                          <span
+                            className="svc-fill"
+                            style={{ transform: `scaleX(${s.total > 0 ? 1 - s.remaining / s.total : 1})` }}
+                          />
+                        </span>
+                      ))}
+                    </span>
+                  </div>
+                )}
               </button>
               {selected &&
                 (snap.draft && snap.draft.id === a.id ? (

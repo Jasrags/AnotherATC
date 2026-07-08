@@ -12,6 +12,7 @@ import type {
   GroundStatus,
   NamedDestination,
   Point,
+  ServiceProgress,
   WakeCategory,
 } from '@anotheratc/sim'
 
@@ -33,6 +34,10 @@ export interface StripItem {
   squawk: string | null
   /** Seconds of wake-turbulence separation still owed before takeoff release; 0 when none. */
   wakeHoldSec: number
+  /** Parallel ground services still running before pushback unlocks; empty when ready/none. */
+  services: readonly ServiceProgress[]
+  /** Seconds until the long-pole service finishes and pushback unlocks; 0 when ready/none. */
+  serviceSec: number
 }
 
 /** An in-progress "taxi via …" clearance the controller is assembling by taxiway clicks. */
@@ -83,8 +88,8 @@ export interface GroundController {
 export function createGroundController(): GroundController {
   const graph = buildTaxiGraph(KSAN_SURFACE)
   const guard = buildRunwayGuard(KSAN_SURFACE)
-  const { inits, spawn, destinations } = buildKsanGroundGame(1)
-  const sim = createGroundSim(inits, { graph, guard, spawn })
+  const { inits, spawn, destinations, servicing } = buildKsanGroundGame(1)
+  const sim = createGroundSim(inits, { graph, guard, spawn, servicing })
 
   let selected: string | null = null
   let draft: RouteDraft | null = null
@@ -105,7 +110,7 @@ export function createGroundController(): GroundController {
     let nextSig = selected ?? '-'
     nextSig += draft ? `~${draft.id}:${draft.via.join('.')}` : ''
     for (const a of acs)
-      nextSig += `|${a.id}:${a.status}:${vias.get(a.id)!.join('.')}:${a.giveWayTo ?? ''}:${a.squawk ?? ''}:${a.wakeHoldSec}`
+      nextSig += `|${a.id}:${a.status}:${vias.get(a.id)!.join('.')}:${a.giveWayTo ?? ''}:${a.squawk ?? ''}:${a.wakeHoldSec}:${a.serviceSec}`
     if (nextSig === sig) return
     sig = nextSig
     snapshot = {
@@ -123,6 +128,8 @@ export function createGroundController(): GroundController {
         giveWayTo: a.giveWayTo,
         squawk: a.squawk,
         wakeHoldSec: a.wakeHoldSec,
+        services: a.services,
+        serviceSec: a.serviceSec,
       })),
     }
     for (const cb of listeners) cb()

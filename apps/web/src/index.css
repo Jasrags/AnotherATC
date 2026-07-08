@@ -295,6 +295,45 @@ body {
   color: #ff8a5c;
 }
 
+/* Ground-servicing row: a long-pole countdown + one progress bar per parallel service. */
+.strip-svc {
+  margin-top: 5px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.svc-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #6fb0d8;
+  white-space: nowrap;
+}
+
+.svc-bars {
+  display: flex;
+  gap: 3px;
+  flex: 1;
+}
+
+.svc-bar {
+  position: relative;
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: #16242f;
+  overflow: hidden;
+}
+
+.svc-fill {
+  position: absolute;
+  inset: 0;
+  transform-origin: left center;
+  background: #5b93c4;
+  border-radius: 2px;
+}
+
 .strip-empty {
   padding: 14px;
   font-size: 11px;

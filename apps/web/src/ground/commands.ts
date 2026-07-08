@@ -54,10 +54,12 @@ export function commandsFor(controller: GroundController, item: StripItem, aircr
         { label: 'Contact tower', action: { kind: 'soon' } },
       ]
     }
-    return [
-      { label: 'Pushback approved', action: { kind: 'run', run: () => send({ type: 'pushback', aircraftId: id }) } },
-      { label: 'Contact tower', action: { kind: 'soon' } },
-    ]
+    // Cleared, but pushback stays gated until ground servicing (fuel/cargo/…) finishes.
+    const pushback: MenuCommand =
+      item.serviceSec > 0
+        ? { label: `Pushback — servicing ${item.serviceSec}s`, action: { kind: 'soon' } }
+        : { label: 'Pushback approved', action: { kind: 'run', run: () => send({ type: 'pushback', aircraftId: id }) } }
+    return [pushback, { label: 'Contact tower', action: { kind: 'soon' } }]
   }
   if (item.status === 'pushback') {
     return [{ label: 'Contact tower', action: { kind: 'soon' } }]

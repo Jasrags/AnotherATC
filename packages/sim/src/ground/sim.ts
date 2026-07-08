@@ -152,7 +152,7 @@ function outranks(a: Internal, b: Internal): boolean {
 }
 
 // `status` is derived at snapshot time, so it is not stored here.
-interface Internal extends Omit<GroundAircraft, 'status' | 'wakeHoldSec'> {
+interface Internal extends Omit<GroundAircraft, 'status' | 'wakeHoldSec' | 'serviceSec'> {
   path: readonly Point[]
   leg: number
   targetSpeed: number

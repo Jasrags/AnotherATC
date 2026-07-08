@@ -16,6 +16,8 @@ function strip(over: Partial<StripItem> = {}): StripItem {
     giveWayTo: null,
     squawk: null,
     wakeHoldSec: 0,
+    services: [],
+    serviceSec: 0,
     ...over,
   }
 }
@@ -72,13 +74,20 @@ describe('commandsFor (strip state machine)', () => {
     expect(dispatched).toEqual([{ type: 'clearance', aircraftId: 'a' }])
   })
 
-  it('parked departure with a squawk → pushback approved', () => {
+  it('cleared departure, servicing done → pushback approved (enabled)', () => {
     const { controller, dispatched } = fakeController()
-    const cmds = commandsFor(controller, strip({ status: 'parked', intent: 'departure', squawk: '4231' }), [])
+    const cmds = commandsFor(controller, strip({ status: 'parked', intent: 'departure', squawk: '4231', serviceSec: 0 }), [])
     expect(labels(cmds)).toEqual(['Pushback approved', 'Contact tower'])
     const push = cmds[0]!.action
     if (push.kind === 'run') push.run()
     expect(dispatched).toEqual([{ type: 'pushback', aircraftId: 'a' }])
+  })
+
+  it('cleared departure still servicing → pushback disabled with a countdown', () => {
+    const { controller } = fakeController()
+    const cmds = commandsFor(controller, strip({ status: 'parked', intent: 'departure', squawk: '4231', serviceSec: 30 }), [])
+    expect(labels(cmds)).toEqual(['Pushback — servicing 30s', 'Contact tower'])
+    expect(cmds[0]!.action.kind).toBe('soon') // gated until services complete
   })
 
   it('pushback → only a soon "contact tower"', () => {
