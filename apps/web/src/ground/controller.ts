@@ -205,6 +205,9 @@ export interface GroundController {
   spawnArrival(): void
   /** Remove the selected aircraft, if any. */
   removeSelected(): void
+  /** Remove a specific aircraft by id (for click-to-delete). Clears the selection if it was
+   *  the one removed. */
+  remove(id: string): void
   /** Remove every aircraft from the surface. */
   clearAll(): void
   /** The active routing probe (or null). First click sets the origin, second routes to it. */
@@ -467,6 +470,14 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
       sim.remove(selected)
       selected = null
       draft = null
+      publish()
+    },
+    remove: (id) => {
+      if (!sim.remove(id)) return
+      if (selected === id) {
+        selected = null
+        draft = null
+      }
       publish()
     },
     clearAll: () => {

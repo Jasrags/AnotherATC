@@ -197,6 +197,24 @@ describe('ground controller — dev sandbox', () => {
     expect(c.selectedId()).toBeNull()
   })
 
+  it('remove(id) deletes a specific aircraft, not just the selected one (click-to-delete)', () => {
+    const c = createGroundController({ dev: true })
+    c.spawnAt([0, 0])
+    const first = c.selectedId()!
+    c.spawnAt([0.1, 0]) // this one is now selected
+    const second = c.selectedId()!
+
+    // Remove the *unselected* one directly — the selection stays put.
+    c.remove(first)
+    expect(c.getSnapshot().aircraft.map((a) => a.id)).toEqual([second])
+    expect(c.selectedId()).toBe(second)
+
+    // Removing the selected one clears the selection.
+    c.remove(second)
+    expect(c.getSnapshot().aircraft).toHaveLength(0)
+    expect(c.selectedId()).toBeNull()
+  })
+
   it('probe routes between two clicked points and reports length + taxiways', () => {
     const c = createGroundController({ dev: true })
     expect(c.probe()).toBeNull()

@@ -58,4 +58,19 @@ describe('dev spawn/remove/clear', () => {
     sim.clear()
     expect(sim.snapshot().aircraft).toHaveLength(0)
   })
+
+  it('clear() also wipes the transcript — the calls belong to aircraft that are gone', () => {
+    const sim = createGroundSim([{ ...dev('a', [0, 0]), gate: '1' }])
+    sim.dispatch({ type: 'clearance', aircraftId: 'a' })
+    expect(sim.snapshot().comms.length).toBeGreaterThan(0)
+
+    sim.clear()
+    expect(sim.snapshot().comms).toHaveLength(0)
+
+    // The sequence counter resets with it, so a fresh call after clearing starts clean rather
+    // than carrying a large number the empty panel could never explain.
+    const id = sim.add({ ...dev('b', [0, 0]), gate: '1' })
+    sim.dispatch({ type: 'clearance', aircraftId: id })
+    expect(sim.snapshot().comms[0]!.seq).toBe(1)
+  })
 })

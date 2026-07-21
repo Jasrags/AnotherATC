@@ -22,7 +22,9 @@ import {
   nearestTaxiwayRef,
   prepareSurface,
 } from './render'
+import { COLORS, DIMS } from './palette'
 import { isTypingTarget } from './keyboard'
+import type { GroundAircraft } from '@anotheratc/sim'
 
 /** Fixed simulation timestep (seconds) — decoupled from the render framerate. */
 const FIXED_DT = 0.05
@@ -79,7 +81,7 @@ export function GroundScope({ controller }: { controller: GroundController }) {
 
   // Dev sandbox: which surface-click tool is armed. Ref drives the click/render loop;
   // state drives the toolbar's pressed styling.
-  type DevTool = 'none' | 'spawn' | 'probe'
+  type DevTool = 'none' | 'spawn' | 'delete' | 'probe'
   const [devTool, setDevTool] = useState<DevTool>('none')
   const devToolRef = useRef<DevTool>('none')
   const armTool = (tool: DevTool) => {
@@ -246,23 +248,36 @@ export function GroundScope({ controller }: { controller: GroundController }) {
     function handleClick(sx: number, sy: number): void {
       if (!view) return
       // Dev sandbox: an armed tool claims the click before select/taxi.
+      const nearestAircraft = (): string | null => {
+        const snap = sim.snapshot()
+        let hit: string | null = null
+        let hitDist = HIT_PX
+        for (const a of snap.aircraft) {
+          const [ax, ay] = toScreenSafe(a.x, a.y)
+          const d = Math.hypot(ax - sx, ay - sy)
+          if (d < hitDist) {
+            hitDist = d
+            hit = a.id
+          }
+        }
+        return hit
+      }
       if (controller.dev && devToolRef.current !== 'none') {
-        const [wx, wy] = toWorld(view, sx, sy)
-        if (devToolRef.current === 'spawn') controller.spawnAt([wx, wy])
-        else controller.probeClick([wx, wy])
+        if (devToolRef.current === 'delete') {
+          // Stays armed: cleaning up after an over-eager SPAWN means clicking several away, and
+          // toggling the mode back on between each would be exactly the friction this removes.
+          const target = nearestAircraft()
+          if (target) controller.remove(target)
+        } else if (devToolRef.current === 'spawn') {
+          const [wx, wy] = toWorld(view, sx, sy)
+          controller.spawnAt([wx, wy])
+        } else {
+          const [wx, wy] = toWorld(view, sx, sy)
+          controller.probeClick([wx, wy])
+        }
         return
       }
-      const snap = sim.snapshot()
-      let hit: string | null = null
-      let hitDist = HIT_PX
-      for (const a of snap.aircraft) {
-        const [ax, ay] = toScreenSafe(a.x, a.y)
-        const d = Math.hypot(ax - sx, ay - sy)
-        if (d < hitDist) {
-          hitDist = d
-          hit = a.id
-        }
-      }
+      const hit = nearestAircraft()
       const selectedId = controller.selectedId()
       const draft = controller.routeDraft()
       if (hit) {
@@ -364,6 +379,28 @@ export function GroundScope({ controller }: { controller: GroundController }) {
             const s = controller.snap([wx, wy])
             if (s) drawSpawnPreview(ctx, view, s)
           }
+          // Delete mode: ring the aircraft the next click would remove, so you never guess which
+          // target in a cluster is about to go.
+          if (devToolRef.current === 'delete' && hovering) {
+            let target: GroundAircraft | null = null
+            let best = HIT_PX
+            for (const a of snap.aircraft) {
+              const [ax, ay] = toScreenSafe(a.x, a.y)
+              const d = Math.hypot(ax - hoverX, ay - hoverY)
+              if (d < best) {
+                best = d
+                target = a
+              }
+            }
+            if (target) {
+              const [tx, ty] = toScreenSafe(target.x, target.y)
+              ctx.strokeStyle = COLORS.conflict
+              ctx.lineWidth = 1.5
+              ctx.beginPath()
+              ctx.arc(tx, ty, DIMS.targetR + 5, 0, Math.PI * 2)
+              ctx.stroke()
+            }
+          }
         }
         ctx.restore()
 
@@ -386,6 +423,8 @@ export function GroundScope({ controller }: { controller: GroundController }) {
           let t = ''
           if (devToolRef.current === 'spawn') {
             t = 'SPAWN — click surface to place · X removes selected'
+          } else if (devToolRef.current === 'delete') {
+            t = 'DELETE — click aircraft to remove · Esc when done'
           } else if (devToolRef.current === 'probe') {
             const pr = controller.probe()
             if (!pr || !pr.to) t = 'PROBE — click origin, then destination'
@@ -488,6 +527,15 @@ export function GroundScope({ controller }: { controller: GroundController }) {
               title="Click the surface to place a test aircraft (snaps to the nearest taxiway node)"
             >
               SPAWN
+            </button>
+            <button
+              type="button"
+              className="ctl-btn mono"
+              aria-pressed={devTool === 'delete'}
+              onClick={() => armTool('delete')}
+              title="Click aircraft to remove them (stays armed for repeated cleanup)"
+            >
+              DELETE
             </button>
             <button
               type="button"

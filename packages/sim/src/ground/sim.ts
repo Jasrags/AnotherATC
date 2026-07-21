@@ -2222,6 +2222,12 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     },
     clear(): void {
       fleet.length = 0
+      // Wipe the transcript with the fleet: every call in it came from an aircraft that no
+      // longer exists, so leaving it makes the panel a list of ghosts. The sequence counter
+      // resets too — nothing survives to collide with a low number.
+      comms.length = 0
+      commsSeq = 0
+      commsDirty = true
     },
     standOccupied(ref: string): boolean {
       return standOccupant(ref) !== undefined
