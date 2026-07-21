@@ -41,6 +41,10 @@ function fakeController() {
   const controller = {
     dispatch: (cmd: GroundCommand) => dispatched.push(cmd),
     beginRoute: (id: string) => beganRoute.push(id),
+    holdShortSpots: () => [
+      { id: 'hs-B4', label: 'RWY @ B4', kind: 'spot', point: [0.5, 0] },
+      { id: 'hs-B2', label: 'RWY @ B2', kind: 'spot', point: [0.9, 0] },
+    ],
     destinations: [
       { id: 'rwy27', label: 'RWY 27', kind: 'runway', point: [1, 0] },
       { id: 'rwy09', label: 'RWY 9', kind: 'runway', point: [-1, 0] },
@@ -212,7 +216,8 @@ describe('commandsFor (strip state machine)', () => {
     const taxiTo = cmds[0]!.action
     expect(taxiTo.kind).toBe('submenu')
     if (taxiTo.kind === 'submenu') {
-      expect(taxiTo.items.map((l) => l.label)).toEqual(['RWY 27', 'RWY 9'])
+      // Thresholds first, then every runway intersection a departure could hold short at.
+      expect(taxiTo.items.map((l) => l.label)).toEqual(['RWY 27', 'RWY 9', 'RWY @ B4', 'RWY @ B2'])
       taxiTo.items[0]!.run()
       expect(dispatched).toContainEqual({ type: 'taxiTo', aircraftId: 'a', dest: [1, 0], exact: true })
     }
@@ -392,5 +397,30 @@ describe('commandsFor — an aircraft parked away from a stand', () => {
     const { controller } = fakeController()
     const cmds = commandsFor(controller, strip({ status: 'parked', intent: 'departure', gate: '41' }), [])
     expect(labels(cmds)).toEqual(['Deliver clearance'])
+  })
+})
+
+describe('commandsFor — intersection departures', () => {
+  it('offers every runway intersection as a taxi destination for a departure', () => {
+    const { controller, dispatched } = fakeController()
+    const cmds = commandsFor(controller, strip({ status: 'holding', intent: 'departure' }), [])
+    const taxi = cmds.find((c) => c.label === 'Taxi to…')!.action
+    expect(taxi.kind).toBe('submenu')
+    if (taxi.kind !== 'submenu') return
+    const labels = taxi.items.map((i) => i.label)
+    expect(labels).toContain('RWY @ B4')
+    expect(labels).toContain('RWY @ B2')
+    taxi.items.find((i) => i.label === 'RWY @ B4')!.run()
+    expect(dispatched).toEqual([
+      { type: 'taxiTo', aircraftId: 'a', dest: [0.5, 0], exact: true },
+    ])
+  })
+
+  it('does not offer them to an arrival, which has no reason to hold short mid-runway', () => {
+    const { controller } = fakeController()
+    const cmds = commandsFor(controller, strip({ status: 'holding', intent: 'arrival', gate: '41' }), [])
+    const taxi = cmds.find((c) => c.label === 'Taxi to…')!.action
+    if (taxi.kind !== 'submenu') throw new Error('expected a submenu')
+    expect(taxi.items.map((i) => i.label)).not.toContain('RWY @ B4')
   })
 })

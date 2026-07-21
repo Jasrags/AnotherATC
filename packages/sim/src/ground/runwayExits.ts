@@ -456,3 +456,55 @@ export function profileCap(
   }
   return cap
 }
+
+/** A named taxiway where it meets the runway — an intersection a departure can be taxied to and
+ *  hold short of, for an intersection departure. */
+export interface RunwayIntersection {
+  /** Taxiway designator, e.g. "B4". */
+  ref: string
+  /** Where it meets the runway. */
+  point: Point
+  /** Distance (nm) along the runway from `from`. */
+  distanceNm: number
+}
+
+/**
+ * Every named taxiway that meets the runway, with the point at which it does.
+ *
+ * Deliberately *not* {@link buildRunwayExits}: that answers "which turnoffs can a landing
+ * aircraft use", so it is filtered to one direction and to the far half of the runway. A
+ * departure can be taxied to any intersection at all — that is what an intersection departure
+ * is — so this keeps them all, on both sides and both halves.
+ */
+export function buildRunwayIntersections(
+  topology: TaxiTopology,
+  guard: RunwayGuard,
+  from: Point,
+  toward: Point,
+): RunwayIntersection[] {
+  const dx = toward[0] - from[0]
+  const dy = toward[1] - from[1]
+  const len = Math.hypot(dx, dy)
+  if (len < 1e-6) return []
+  const ux = dx / len
+  const uy = dy / len
+
+  const nodePoint = new Map(topology.nodes.map((n) => [n.key, n.point]))
+  const best = new Map<string, RunwayIntersection>()
+  for (const edge of topology.edges) {
+    if (!edge.ref) continue
+    const a = nodePoint.get(edge.a)
+    const b = nodePoint.get(edge.b)
+    if (!a || !b) continue
+    const aOn = onRunway(a, guard)
+    if (aOn === onRunway(b, guard)) continue
+    const point = aOn ? a : b
+    const distanceNm = dot(point[0] - from[0], point[1] - from[1], ux, uy)
+    if (distanceNm < 0 || distanceNm > len) continue
+    // A connector can touch the runway at more than one node (the fillet); keep the one
+    // furthest along, which is the one an aircraft holding short of it is aiming at.
+    const prev = best.get(edge.ref)
+    if (!prev || distanceNm > prev.distanceNm) best.set(edge.ref, { ref: edge.ref, point, distanceNm })
+  }
+  return [...best.values()].sort((p, q) => p.distanceNm - q.distanceNm)
+}

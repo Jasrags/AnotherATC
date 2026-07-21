@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { buildKsanGroundGame, KSAN_RUNWAYS, KSAN_RUNWAY_LAYOUT } from './ksanGame'
 import { createGroundSim } from './sim'
-import { buildRunwayExits, chooseExit } from './runwayExits'
+import { buildRunwayExits, buildRunwayIntersections, chooseExit } from './runwayExits'
 import { buildTaxiGraph } from './taxiGraph'
 import { buildRunwayGuard } from './runwayGuard'
 import { KSAN_SURFACE } from '../world/ksan'
@@ -638,5 +638,68 @@ describe('reciprocalIdent', () => {
 
   it('keeps a parallel-runway suffix', () => {
     expect(reciprocalIdent('09L')).toBe('27L')
+  })
+})
+
+describe('runway intersections (for intersection departures)', () => {
+  const guard = buildRunwayGuard(KSAN_SURFACE)
+  const topo = buildTaxiGraph(KSAN_SURFACE).topology()
+
+  it('finds every named taxiway that meets the runway, on both sides and both halves', () => {
+    const r = KSAN_RUNWAYS['27']
+    const ix = buildRunwayIntersections(topo, guard, r.departureStart, r.farEnd)
+    const refs = ix.map((i) => i.ref)
+    // The ones asked for by name, plus both parallels and both halves of the field.
+    expect(refs).toContain('B4')
+    expect(refs).toContain('B2')
+    expect(refs.filter((x) => x.startsWith('B')).length).toBeGreaterThan(4)
+    expect(refs.filter((x) => x.startsWith('C')).length).toBeGreaterThan(4)
+    expect(ix.some((i) => i.distanceNm < 0.5)).toBe(true)
+    expect(ix.some((i) => i.distanceNm > 1)).toBe(true)
+  })
+
+  it('is a different question from "where can a landing turn off"', () => {
+    // Landing exits are one direction and the far half only; a departure may use any of them.
+    const r = KSAN_RUNWAYS['27']
+    const ix = buildRunwayIntersections(topo, guard, r.departureStart, r.farEnd)
+    const exits = buildRunwayExits(topo, guard, r.threshold, r.farEnd)
+    expect(ix.length).toBeGreaterThan(exits.length)
+    for (const e of exits) expect(ix.map((i) => i.ref)).toContain(e.ref)
+  })
+
+  it('orders along the runway in use, and flips when the configuration does', () => {
+    const on27 = buildRunwayIntersections(topo, guard, KSAN_RUNWAYS['27'].departureStart, KSAN_RUNWAYS['27'].farEnd)
+    const on09 = buildRunwayIntersections(topo, guard, KSAN_RUNWAYS['09'].departureStart, KSAN_RUNWAYS['09'].farEnd)
+    // Same set of intersections, walked from the other end. (Ties in the middle — a B and a C
+    // connector meeting the runway at the same distance — can order either way.)
+    expect([...on27.map((i) => i.ref)].sort()).toEqual([...on09.map((i) => i.ref)].sort())
+    expect(on09[0]!.ref).toBe(on27[on27.length - 1]!.ref)
+    expect(on09[on09.length - 1]!.ref).toBe(on27[0]!.ref)
+  })
+
+  it('a departure sent to one holds short there and can be released from it', () => {
+    const game = buildKsanGroundGame(1, '27')
+    const graphFull = buildTaxiGraph(KSAN_SURFACE)
+    const r = game.runway
+    const b4 = buildRunwayIntersections(topo, guard, r.departureStart, r.farEnd).find((i) => i.ref === 'B4')!
+    const gate = game.spawn.gates[0]!
+    const sim = createGroundSim(
+      [
+        {
+          id: 'd', callsign: 'UAL7', type: 'B738', wake: 'M',
+          path: [gate.point], targetSpeed: 0, intent: 'departure', gate: gate.ref,
+          goalPoint: r.departureStart,
+        },
+      ],
+      { guard, graph: graphFull, runway: r },
+    )
+    expect(sim.dispatch({ type: 'taxiTo', aircraftId: 'd', dest: b4.point, exact: true })).toEqual({ ok: true })
+    for (let i = 0; i < 6000 && !sim.snapshot().aircraft[0]!.holdShort; i += 1) sim.step(0.1)
+    const d = sim.snapshot().aircraft[0]!
+    expect(d.holdShort).toBe(true)
+    expect(d.holdingForTakeoff).toBe(true) // a takeoff hold, not a crossing
+    // Partway down the runway, but with plenty of it still ahead — a real intersection departure.
+    expect(sim.dispatch({ type: 'contactTower', aircraftId: 'd' })).toEqual({ ok: true })
+    expect(sim.dispatch({ type: 'lineUpAndWait', aircraftId: 'd' })).toEqual({ ok: true })
   })
 })

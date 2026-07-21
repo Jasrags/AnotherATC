@@ -165,6 +165,16 @@ export function commandsFor(controller: GroundController, item: StripItem, aircr
   if (item.intent === 'arrival' && item.gate) {
     dests.push({ label: `Gate ${item.gate}`, run: () => send({ type: 'taxiToGoal', aircraftId: id }) })
   }
+  // Every taxiway/runway intersection, so a departure can be sent to hold short partway down
+  // the runway for an intersection departure rather than only to a threshold.
+  if (item.intent === 'departure') {
+    for (const spot of controller.holdShortSpots()) {
+      dests.push({
+        label: spot.label,
+        run: () => send({ type: 'taxiTo', aircraftId: id, dest: spot.point, exact: true }),
+      })
+    }
+  }
 
   const cmds: MenuCommand[] = []
   cmds.push({ label: 'Taxi to…', action: { kind: 'submenu', items: dests } })

@@ -6,6 +6,7 @@ import {
   createGroundSim,
   APPROACH_SPEED_KT,
   KSAN_RUNWAYS,
+  buildRunwayIntersections,
 } from '@anotheratc/sim'
 import type {
   ApproachConfig,
@@ -132,6 +133,9 @@ export interface GroundController {
    *  the departure end, because they are always the same direction. Refused (with a notice)
    *  while traffic is committed to the runway in use. */
   setRunway(ident: '09' | '27'): void
+  /** Every named taxiway where it meets the runway, ordered along the direction in use — the
+   *  places a departure can be taxied to and hold short of for an intersection departure. */
+  holdShortSpots(): NamedDestination[]
   /** Runway turnoffs this arrival could still be assigned (ahead of it and reachable).
    *  For the canvas only, which draws outside React's render cycle — anything rendered by
    *  React must use `StripItem.exitOptions` off the published snapshot instead. */
@@ -327,6 +331,15 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
     sim,
     destinations,
     approach: () => sim.approach() ?? game.spawn.approach,
+    holdShortSpots: () => {
+      const r = sim.runway() ?? game.runway
+      return buildRunwayIntersections(topology, guard, r.departureStart, r.farEnd).map((i) => ({
+        id: `hs-${i.ref}`,
+        label: `RWY @ ${i.ref}`,
+        kind: 'spot' as const,
+        point: i.point,
+      }))
+    },
     activeRunway: () => sim.runway()?.ident ?? game.runway.ident,
     setRunway: (ident) => {
       const res = sim.setRunway(KSAN_RUNWAYS[ident])

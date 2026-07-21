@@ -46,6 +46,8 @@ function RouteBuilderRow({
   draft: RouteDraft
 }) {
   const stop = (e: React.MouseEvent) => e.stopPropagation()
+  const lastVia = draft.via[draft.via.length - 1]
+  const holdShort = lastVia ? controller.holdShortSpots().find((s) => s.label === `RWY @ ${lastVia}`) : undefined
   const issueVia = (dest: Point) => (e: React.MouseEvent) => {
     stop(e)
     controller.dispatch({ type: 'taxiVia', aircraftId: item.id, taxiways: draft.via, dest, exact: true })
@@ -82,6 +84,14 @@ function RouteBuilderRow({
       {item.intent === 'arrival' && item.gate && (
         <button className="strip-btn btn-taxi" onClick={issueViaGoal}>
           Gate {item.gate}
+        </button>
+      )}
+      {/* Where the last taxiway picked meets the runway — the destination for an intersection
+          departure, which is otherwise unreachable: a via-route has to *end* somewhere, and the
+          thresholds are the wrong end of the field. */}
+      {holdShort && (
+        <button className="strip-btn btn-taxi" onClick={issueVia(holdShort.point)}>
+          Hold short {holdShort.label.replace('RWY @ ', '@ ')}
         </button>
       )}
       <button className="strip-btn" onClick={(e) => { stop(e); controller.clearRoute() }}>
