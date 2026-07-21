@@ -53,7 +53,22 @@ The core ground-control loop. Ordered roughly by priority.
 - ⬜ **Auto-route + tap-to-edit** (assigned-routes UX enhancement) — instead of building a via-sequence from scratch, show the auto shortest-path as editable "VIA" chips; tapping a taxiway in the sequence offers alternatives to swap/insert, and the rest re-derives. Lower-friction path assignment; complements the scope-click builder.
 - 🚧 **Clearance Delivery** — the "Clearance" half of the position. **Shipped:** a parked departure's menu starts at **Deliver clearance**, which assigns a deterministic **squawk** (4-digit octal, shown on the strip) and unlocks **Pushback approved**. Departure flow is now clearance → pushback → taxi → hold short → contact tower. _Next: route/SID + initial altitude + departure frequency on the clearance; read-back verification; slot/EDCT time._
 - ✅ **Ground servicing → pushback readiness** — parked departures run parallel ground services (fuel 45s long pole, cargo/catering/water/cabin shorter) that must all finish before pushback unlocks. Opt-in `ServicingConfig` on the sim (backwards-compatible); `pushback` refuses with "ground servicing in progress — Ns" until the long pole completes; snapshot exposes per-service progress + an aggregate `serviceSec`. Strip shows an "SVC Ns" countdown + one progress bar per service; the menu gates "Pushback approved" → "Pushback — servicing Ns" until ready. _Next: per-aircraft duration jitter (seeded); tie into turnaround (arrival services → same aircraft's next departure); gate on a handling-agent resource._
-- 🚧 **Pushback from gate** — **shipped:** "Pushback approved" (menu) eases a parked gate departure off the stand onto the nearest taxilane node at creep speed (nose trailing), new `pushback` phase; ~35 s at KSAN gate 39, then it's `holding` (ready) and Taxi/Route unlock. A parked departure now must push back before it can taxi. _Next: gate by servicing readiness; adjacent-gate/alley-traffic coordination; pick a push direction/left-right when the alley has two exits._
+- 🚧 **Pushback from gate** — **shipped:** "Pushback approved" reverses the aircraft down its own
+  painted lead-in line (nose trailing, creep speed) to where that line meets the taxilane, then
+  it's `holding` (ready) and Taxi/Route unlock. Previously it pushed toward the nearest graph
+  node, which is why aircraft backed off stands in directions the paint never goes. _Next:
+  adjacent-gate/alley-traffic coordination; pick a push direction when the alley has two exits._
+- ✅ **Stand geometry (lead-in / lead-out lines)** — a stand is a line, not a point
+  (`ground/stands.ts`): the painted lead-in ordered taxilane→nose-stop, from OSM
+  `parking_position` ways (all 32 T2 stands, some genuinely curved). Their direction is
+  inconsistent (28 one way, 4 the other) so the stand end is resolved per line against the gate
+  node; they are matched **by designator, never by proximity** (nearest-endpoint matching picks a
+  neighbour's line for a third of the field). T1 (101–119) has none mapped, so those are derived
+  off the nearest taxi pavement and flagged `source: 'derived'`. Arrivals route to the line's
+  entry then follow the paint; pushback reverses along it; aircraft creep at marshalling pace
+  within the line's length of the stop. Drawn on the scope with a stop bar, derived ones dashed.
+  _Next: real stand occupancy (one aircraft per stand at a time); AGNIS/PAPA-style docking cue;
+  hand-digitise T1's lead-ins from the airport diagram (see `docs/airport-data-pipeline.md`)._
 - ✅ **Flight strip bay (ground)** — status-driven strips beside the scope, phase-gated actions, selection synced with the scope. _Next: squawk/route fields, drag-reorder/sequence._
 - ✅ **Routing-graph contraction + admin overlay** — the OSM surface gave the router ~1157 vertices when the network has only ~159 real decision points (junctions, endpoints, name changes). `graph.topology()` contracts pass-through vertices into geometry-preserving edges (edges keep the full polyline + true length, so driving still follows the curve) and flags long dead-straight runs for chart review. Admin overlay (GRAPH button / `g` key) draws the graph over the surface — junctions emphasized, flagged straight edges in pink — to spot geometry issues fast. _Next (**#2**): eyeball the ~4 flagged 2-point chords (taxiway C 936ft past the North Ramp is the "drove through the terminal" one) against the airport diagram and patch missing centerline vertices in `tools/ingest`. Later: optionally migrate routing itself onto the contracted graph (needs edge-snapping so gate stubs don't regress)._
 - ⬜ **HS1 hotspot** — render the KSAN hot spot; incursion-risk awareness
@@ -281,7 +296,8 @@ is switched on.
 - ⬜ Scale bar / range rings
 - ⬜ Pan/zoom clamping (don't lose the airport off-screen)
 - ✅ Runway turnoffs drawn along their real geometry for the selected arrival, assigned one emphasized
-- ⬜ Gate docking guidance on arrival (AGNIS/PAPA-style stop/center cue), park on the painted stop mark
+- ⬜ Gate docking guidance on arrival (AGNIS/PAPA-style stop/center cue) — the aircraft now parks
+  on the painted stop mark, but there is no docking-guidance display
 - ⬜ Aircraft symbology by category/phase; selected-target emphasis
 - ⬜ Data-block declutter (leader-line direction, overlap avoidance)
 - ⬜ Theme polish; light/dark intentional (currently dark-only, correct for a scope)
@@ -295,7 +311,9 @@ is switched on.
 - ⬜ Hold-short stops at the last taxi vertex before the runway zone, not the exact painted hold line (`holding_position`) — but a runway destination now routes to the threshold's own-side hold node (not across the runway), so it holds ~0.03–0.06 nm short of the correct departure end
 - ⬜ Taxi routes are shortest-path, not operationally realistic assigned routes
 - ⬜ Graph-routed head-ons hold at the junction (no overlap) and now **divert** onto a parallel taxiway when one exists within the cost cap. Residual: non-graph/hand-set paths (no edge topology → no reservation/diversion), and a contrived no-parallel ≥3-aircraft cycle (see Gridlock hardening — deferred)
-- ⬜ Arrivals park at the nearest taxiway node + a straight leg to the gate point, not the real stand geometry
+- ✅ ~~Arrivals park at the nearest taxiway node + a straight leg to the gate point~~ — they now
+  follow the stand's painted lead-in line (`ground/stands.ts`). Residual: KSAN Terminal 1 has no
+  lines in OSM, so its 19 stands run on a derived straight lead-in (drawn dashed to say so)
 - ⬜ Surface redrawn every frame; consider offscreen-canvas caching if perf needs it
 - ⬜ Scenario stitches arbitrary long taxiways for demo traffic — replace with real gate→runway flows
 - ℹ️ Headless screenshots show T+00:00 (Chrome virtual-time doesn't drive rAF) — motion is fine live
