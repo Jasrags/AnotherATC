@@ -13,22 +13,19 @@ turns into a refactor, that test is where the leak will show up first.
 
 ## 1. The data you need
 
-| What | Where from | Notes |
-|---|---|---|
-| Surface geometry | OpenStreetMap via Overpass → `tools/ingest` | Runways, taxiways, aprons, terminals, **gate nodes with refs** |
-| Runway geometry & declared distances | FAA NASR 28-day subscription | `APT_RWY.csv`, `APT_RWY_END.csv`, `APT_RMK.csv` — see below |
-| Taxiway names | The FAA airport diagram | To validate, and to patch what OSM has left untagged |
-| Frequencies | Chart Supplement or NASR `APT_CON.csv` | Ground / Tower / ATIS |
+**Sources, exact commands and what each one does *not* carry:
+[airport-data-pipeline.md](airport-data-pipeline.md).** Read it first — most of the mistakes in
+`docs/SAN/` came from asking the wrong source.
 
-NASR is the one that matters most, and it is not on any chart:
+| What | Where from |
+|---|---|
+| Surface geometry | OpenStreetMap via Overpass → `tools/ingest` |
+| Displaced thresholds, declared distances, glide paths, EMAS | **FAA NASR** — on no chart |
+| Which procedures exist | d-TPP metafile — never guess from filenames |
+| Taxiway names, hot spots | FAA airport diagram |
 
-```
-https://nfdc.faa.gov/webContent/28DaySub/extra/<DD_Mon_YYYY>_APT_CSV.zip   (~8 MB)
-```
-
-It carries displaced thresholds, TORA/TODA/ASDA/LDA, glide path angles, traffic pattern
-direction, arresting systems (EMAS) and surveyed threshold coordinates. `docs/SAN/runway-9-27.md`
-is the worked example — copy its shape.
+`docs/SAN/runway-9-27.md` is the worked example of the write-up NASR should produce — copy its
+shape before writing any code.
 
 **Two risks worth checking before you commit to a field:**
 
@@ -38,8 +35,16 @@ is the worked example — copy its shape.
    by endpoint topology against the airport diagram. Could be zero, could be a day. Pull the
    Overpass extract and count unnamed ways touching the movement area before estimating.
 
-## 2. The steps
+## 2. Before you start: read the post-mortem
 
+**[lessons-from-ksan.md](lessons-from-ksan.md)** lists twenty things that went wrong building the
+first airport, each written as a check to run on the next one. Several shipped, two survived a
+green test suite and were caught by review, and most of the geometry ones were invisible until
+the code met real OSM data. It is the highest-value ten minutes in this folder.
+
+## 3. The steps
+
+0. **Read the post-mortem** above, and the pipeline doc.
 1. **Ingest the surface.** Copy `tools/ingest/build-ksan-surface.mjs`, set the reference point
    (the airport reference point) and the Overpass query, run it, and check the validator passes.
    Patch untagged taxiway ways by id as needed, documenting the mapping the way
@@ -53,7 +58,7 @@ is the worked example — copy its shape.
    the web layer needs touching — it reads the field off `controller.airport`.
 5. **Copy `world/airport.test.ts`** for the new field and make it play.
 
-## 3. Cross-check the derived geometry
+## 4. Cross-check the derived geometry
 
 The ingest is trustworthy but not infallible. Verify against the survey:
 
@@ -63,7 +68,7 @@ The ingest is trustworthy but not infallible. Verify against the survey:
   sides and rapid-vs-standard classification
 - `buildRunwayIntersections` naming every connector the diagram shows
 
-## 4. What is *not* ready: more than one runway
+## 5. What is *not* ready: more than one runway
 
 **The model assumes a single runway.** Adding a multi-runway field is not a data exercise. The
 places that assume it, each flagged in the source:
@@ -74,12 +79,22 @@ places that assume it, each flagged in the source:
 - **runway occupancy is field-wide** — `blocksRunway` means a departure on one runway blocks a
   landing on another
 
-The last is a model change rather than a refactor: occupancy has to become per-runway, and the
-configuration becomes a *set* of active runways with dependencies between them (intersecting
-runways, LAHSO, simultaneous approaches). Budget one to two weeks, not two days, and expect it
-to churn predicates that much of the Tower test suite leans on.
+…plus wake separation, which tracks a single `lastDeparture` for the whole field.
 
-## 5. Rough effort
+The last is a model change rather than a refactor: occupancy has to become per-runway, and the
+configuration becomes a *set* of active runways with dependencies between them.
+
+**And there are two distinct flavours**, measured from NASR:
+
+| | Shape | What it demands |
+|---|---|---|
+| **Intersecting** (e.g. KBUR) | 08/26 × 15/33 cross at 66% / 79% along | A time-and-position conflict model at the crossing; hold-short-of-the-intersecting-runway, timed departures between arrivals, LAHSO |
+| **Parallel** (e.g. KOAK) | 10L/28R and 10R/28L are **1,001 ft** apart | Two runways active at once, and dependency rules — under the ~2,500 ft threshold they are not independent, so arrivals must be staggered |
+
+Shared foundation ≈ 1 week; intersecting adds ~3–5 days; parallel adds ~5–8 days. Do an
+intersecting two-runway field first: it forces the whole foundation and adds exactly one new rule.
+
+## 6. Rough effort
 
 | | |
 |---|---|

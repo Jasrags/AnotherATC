@@ -63,6 +63,9 @@ These are called out repeatedly as the interesting/hard parts and should be firs
 
 - `docs/atc-flight-cycle.md` — full operational sequence (departure + arrival), handoff table, gameplay design notes.
 - `docs/atc-flight-strips.md` — controller modes, flight-strip layouts/fields per mode, strip-as-state-machine notes.
+- `docs/airport-data-pipeline.md` — where every airport fact comes from (NASR, d-TPP, OSM, the airport diagram), the exact commands, and what each source does **not** carry. Read before sourcing any airport data.
+- `docs/adding-an-airport.md` — the process for building a new field, and what is not ready (multi-runway).
+- `docs/lessons-from-ksan.md` — twenty things that went wrong on the first airport, written as checks for the next one.
 - `docs/SAN/` — FAA charts for San Diego International (KSAN) as PDFs (airport diagram, STARs, SIDs, approach plates), indexed by `docs/SAN/README.md`. These are **reference material** for building the first real airport: use them to validate nav-fix positions, runway 9/27 setup, taxiway network, and hot spot HS1. `docs/SAN/README.md` also lists charts still "to acquire."
 
 KSAN is the intended first airport. Charts are on the SW-3 cycle (19 MAR 2026 – 16 APR 2026).
