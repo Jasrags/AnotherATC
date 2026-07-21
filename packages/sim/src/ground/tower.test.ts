@@ -129,6 +129,38 @@ describe('tower — departures', () => {
     expect(A(sim, 'd').status).toBe('holdShort')
   })
 
+  it('allows line up and wait behind a departing aircraft, but not takeoff until it clears', () => {
+    // The reported scenario: #1 is rolling for takeoff, #2 should still be able to line up
+    // behind it (anticipated separation) — but can't be cleared for takeoff until #1 is gone.
+    const lead = departure('lead', -0.3)
+    const foll = departure('foll', -0.6)
+    const sim = createGroundSim([lead, foll], { guard })
+    taxiToHoldShort(sim)
+    // Line lead up (onto the runway centerline) then send it — so its roll runs *along* the
+    // runway and it genuinely occupies it, rather than cutting a diagonal from hold-short.
+    sim.dispatch({ type: 'contactTower', aircraftId: 'lead' })
+    sim.dispatch({ type: 'lineUpAndWait', aircraftId: 'lead' })
+    for (let i = 0; i < 400; i += 1) sim.step(0.1)
+    sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'lead' })
+    for (let i = 0; i < 30; i += 1) sim.step(0.1) // lead is rolling, on the runway
+    expect(A(sim, 'lead').status).toBe('departing')
+
+    sim.dispatch({ type: 'contactTower', aircraftId: 'foll' })
+    // #2 may line up behind the rolling #1 — the departing aircraft doesn't block it.
+    expect(sim.dispatch({ type: 'lineUpAndWait', aircraftId: 'foll' })).toEqual({ ok: true })
+    expect(A(sim, 'foll').status).toBe('lineUpWait')
+    // …but a takeoff clearance is still refused while #1 occupies the runway.
+    const early = sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'foll' })
+    expect(early.ok).toBe(false)
+    if (!early.ok) expect(early.reason).toMatch(/occupied/i)
+
+    // Once #1 lifts off and clears, #2 (lined up) can be cleared for takeoff (Medium → no wake).
+    for (let i = 0; i < 2000 && sim.snapshot().departed < 1; i += 1) sim.step(0.1)
+    expect(sim.snapshot().departed).toBe(1)
+    expect(sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'foll' })).toEqual({ ok: true })
+    expect(A(sim, 'foll').status).toBe('departing')
+  })
+
   it('refuses line-up and takeoff while another aircraft occupies the runway', () => {
     const onRwy: AircraftInit = { id: 'occ', callsign: 'O', type: 'B738', wake: 'M', path: [[0.3, 0]], targetSpeed: 0 }
     const sim = createGroundSim([onRwy, departure('d')], { guard })

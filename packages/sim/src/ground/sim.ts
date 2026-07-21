@@ -815,7 +815,11 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         if (!ac.holdShort) return refused('not holding short of the runway')
         if (guard && (!ac.goalPoint || !onRunway(ac.goalPoint, guard)))
           return refused('route crosses the runway — clear it to cross, not to line up')
-        if (guard && fleet.some((o) => o !== ac && onRunway([o.x, o.y], guard))) return refused('runway occupied')
+        // A departure already rolling down the runway (departing) does NOT block a line-up
+        // behind it — that's precisely what "line up and wait" is for (anticipated separation).
+        // A *stationary* occupant (another aircraft lined up, or one crossing) still blocks it.
+        if (guard && fleet.some((o) => o !== ac && !o.departing && onRunway([o.x, o.y], guard)))
+          return refused('runway occupied')
         // Line up onto the runway centerline in front of the aircraft (nearest point), not at
         // its far departure-runway goal — so it lines up where it's holding, at either end.
         const lineup: Point = nearestRunwayPoint([ac.x, ac.y]) ?? ac.goalPoint ?? [ac.x, ac.y]
