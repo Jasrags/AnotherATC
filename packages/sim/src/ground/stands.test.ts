@@ -56,6 +56,17 @@ describe('buildStands — KSAN', () => {
     expect(g21.headingDeg).toBeLessThan(200)
   })
 
+  // The orientation rule (nearest endpoint to the gate node wins) is only as good as the gate
+  // nodes. This checks the *result* against independent geometry — the terminal buildings — so
+  // a bad ingest or a re-tagged OSM way shows up here rather than as aircraft parking backwards.
+  it('faces every stand at a terminal, including the lines mapped back to front', () => {
+    const terminals = KSAN_SURFACE.features.filter((f) => f.kind === 'terminal')
+    const toTerminal = (p: Point): number =>
+      Math.min(...terminals.flatMap((t) => t.points.map((q) => dist(p, q as Point))))
+    const backwards = stands.filter((s) => toTerminal(s.stop) > toTerminal(s.entry))
+    expect(backwards.map((s) => s.ref)).toEqual([])
+  })
+
   it('matches lines to stands by designator, not by proximity', () => {
     // Adjacent stands sit closer together than a gate node sits from its own line, so nearest
     // -endpoint matching picks the wrong line for a third of the field. Ref matching is exact.
