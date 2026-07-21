@@ -182,12 +182,60 @@ body {
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
 }
 
-.strip-bay-title {
-  padding: 12px 14px;
+/* Position switch: Ground | Tower. One fleet, two projections — each tab shows only the
+   aircraft that position controls (see docs/atc-tower.md). */
+.strip-tabs {
+  display: flex;
+  border-bottom: 1px solid #12202c;
+}
+
+.strip-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 11px 10px;
+  font: inherit;
   font-size: 12px;
   letter-spacing: 0.14em;
-  color: #6fa98c;
-  border-bottom: 1px solid #12202c;
+  color: #4c6b5c;
+  background: #060b12;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: color 120ms, background 120ms, border-color 120ms;
+}
+
+.strip-tab:hover {
+  color: #8fc7ab;
+  background: #08101a;
+}
+
+.strip-tab:focus-visible {
+  outline: 2px solid #2f6df6;
+  outline-offset: -2px;
+}
+
+.strip-tab-active {
+  color: #aee8c9;
+  background: #0a1520;
+  border-bottom-color: #3fa877;
+}
+
+.strip-tab-count {
+  min-width: 16px;
+  padding: 0 5px;
+  font-size: 11px;
+  line-height: 16px;
+  text-align: center;
+  color: #0a1520;
+  background: #33513f;
+  border-radius: 8px;
+}
+
+.strip-tab-active .strip-tab-count {
+  background: #3fa877;
 }
 
 .strip-list {

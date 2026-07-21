@@ -1,5 +1,5 @@
-import { useSyncExternalStore } from 'react'
-import type { GroundIntent, GroundStatus, Point } from '@anotheratc/sim'
+import { useState, useSyncExternalStore } from 'react'
+import type { ControllerPosition, GroundIntent, GroundStatus, Point } from '@anotheratc/sim'
 import type { GroundController, RouteDraft, StripItem } from './controller'
 import { StripCommandMenu } from './StripCommandMenu'
 
@@ -74,15 +74,45 @@ function RouteBuilderRow({
   )
 }
 
+/** The two controller positions and their strip-bay labels. */
+const POSITIONS: { key: ControllerPosition; label: string; title: string }[] = [
+  { key: 'ground', label: 'GND', title: 'Ground / Clearance' },
+  { key: 'tower', label: 'TWR', title: 'Tower / Local Control' },
+]
+
 export function StripBay({ controller }: { controller: GroundController }) {
   const snap = useSyncExternalStore(controller.subscribe, controller.getSnapshot)
+  const [position, setPosition] = useState<ControllerPosition>('ground')
+
+  // One flight object, mode-specific projections: each position sees only the aircraft it
+  // controls. Handoffs move a strip from one bay to the other (see docs/atc-tower.md).
+  const counts: Record<ControllerPosition, number> = { ground: 0, tower: 0 }
+  for (const a of snap.aircraft) counts[a.controlledBy] += 1
+  const visible = snap.aircraft.filter((a) => a.controlledBy === position)
 
   return (
     <aside className="strip-bay">
-      <div className="strip-bay-title">FLIGHT STRIPS · GND</div>
-      <div className="strip-list">
-        {snap.aircraft.length === 0 && <div className="strip-empty">no traffic</div>}
-        {snap.aircraft.map((a) => {
+      <div className="strip-tabs" role="tablist" aria-label="Controller position">
+        {POSITIONS.map((p) => (
+          <button
+            key={p.key}
+            type="button"
+            role="tab"
+            id={`strip-tab-${p.key}`}
+            aria-selected={position === p.key}
+            aria-controls="strip-list"
+            className={`strip-tab${position === p.key ? ' strip-tab-active' : ''}`}
+            title={p.title}
+            onClick={() => setPosition(p.key)}
+          >
+            {p.label}
+            <span className="strip-tab-count">{counts[p.key]}</span>
+          </button>
+        ))}
+      </div>
+      <div className="strip-list" id="strip-list" role="tabpanel" aria-labelledby={`strip-tab-${position}`}>
+        {visible.length === 0 && <div className="strip-empty">no traffic</div>}
+        {visible.map((a) => {
           const wake = a.wake === 'H' ? ' H' : a.wake === 'J' ? ' J' : ''
           const selected = a.id === snap.selectedId
           return (
