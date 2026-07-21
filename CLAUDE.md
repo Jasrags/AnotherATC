@@ -66,9 +66,11 @@ These are called out repeatedly as the interesting/hard parts and should be firs
 - `docs/airport-data-pipeline.md` — where every airport fact comes from (NASR, d-TPP, OSM, the airport diagram), the exact commands, and what each source does **not** carry. Read before sourcing any airport data.
 - `docs/adding-an-airport.md` — the process for building a new field, and what is not ready (multi-runway).
 - `docs/lessons-from-ksan.md` — twenty things that went wrong on the first airport, written as checks for the next one.
-- `docs/SAN/` — FAA charts for San Diego International (KSAN) as PDFs (airport diagram, STARs, SIDs, approach plates), indexed by `docs/SAN/README.md`. These are **reference material** for building the first real airport: use them to validate nav-fix positions, runway 9/27 setup, taxiway network, and hot spot HS1. `docs/SAN/README.md` also lists charts still "to acquire."
+- `docs/SAN/` — every chart the FAA publishes for KSAN, indexed by `docs/SAN/README.md` from the d-TPP metafile (not guessed from filenames). Reference material for validating the taxiway network, nav fixes and hot spot HS1. **The PDFs are on an expired cycle** (SW-3, 19 MAR – 16 APR 2026); the README says so and how to refresh.
+- `docs/SAN/runway-9-27.md` — the surveyed runway facts (displaced thresholds, declared distances, EMAS, glide paths). The source of truth for runway geometry, ahead of both the airport diagram and OSM.
 
-KSAN is the intended first airport. Charts are on the SW-3 cycle (19 MAR 2026 – 16 APR 2026).
+KSAN is the first airport. It is now expressed as data (`world/ksanAirport.ts`) behind the
+generic `Airport` bundle, so the engine and the web layer carry no airport specifics.
 
 ## Working with Claude (development harness)
 
