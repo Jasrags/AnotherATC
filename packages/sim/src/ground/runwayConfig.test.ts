@@ -345,3 +345,55 @@ describe('switching the airport configuration', () => {
     expect(sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'd' })).toEqual({ ok: true })
   })
 })
+
+describe('departures use the pavement before the threshold', () => {
+  const guard = buildRunwayGuard(KSAN_SURFACE)
+  const graph = buildTaxiGraph(KSAN_SURFACE)
+
+  it('a 27 departure gets the whole TORA, not the shorter LDA', () => {
+    // The point of a displaced threshold: 1,810 ft of pavement a landing may not touch down on
+    // is still the departure's to roll on. Sending departures to the *threshold* instead of the
+    // pavement end would quietly cost them that.
+    const game = buildKsanGroundGame(1, '27')
+    const r = game.runway
+    expect(game.spawn.departureTarget).toEqual(r.departureStart)
+    const runFromDepartureEnd = ft(Math.hypot(
+      r.farEnd[0] - r.departureStart[0],
+      r.farEnd[1] - r.departureStart[1],
+    ))
+    const runFromThreshold = ft(Math.hypot(r.farEnd[0] - r.threshold[0], r.farEnd[1] - r.threshold[1]))
+    expect(runFromDepartureEnd).toBeCloseTo(9378, -2) // ≈ the declared TORA of 9,401
+    expect(runFromDepartureEnd - runFromThreshold).toBeGreaterThan(1700) // the displaced portion
+  })
+
+  it('lines up at the departure end and rolls the full length', () => {
+    const game = buildKsanGroundGame(1, '27')
+    const r = game.runway
+    const off = 0.08
+    const l = Math.hypot(r.farEnd[0] - r.departureStart[0], r.farEnd[1] - r.departureStart[1])
+    const ux = (r.farEnd[0] - r.departureStart[0]) / l
+    const uy = (r.farEnd[1] - r.departureStart[1]) / l
+    const sim = createGroundSim(
+      [
+        {
+          id: 'd', callsign: 'AAL9', type: 'B738', wake: 'M',
+          path: [
+            [r.departureStart[0] + uy * off, r.departureStart[1] - ux * off],
+            [r.departureStart[0], r.departureStart[1]],
+            [r.departureStart[0] - uy * off, r.departureStart[1] + ux * off],
+          ],
+          targetSpeed: 15, intent: 'departure', goalPoint: [r.departureStart[0], r.departureStart[1]],
+        },
+      ],
+      { guard, graph, runway: r },
+    )
+    sim.dispatch({ type: 'contactTower', aircraftId: 'd' })
+    sim.dispatch({ type: 'lineUpAndWait', aircraftId: 'd' })
+    for (let i = 0; i < 400; i += 1) sim.step(0.1)
+    const lined = sim.snapshot().aircraft[0]!
+    // Lined up behind the landing threshold — on the pavement only a departure may use.
+    const toThreshold = ft(Math.hypot(lined.x - r.threshold[0], lined.y - r.threshold[1]))
+    expect(toThreshold).toBeGreaterThan(1200)
+    expect(lined.status).toBe('lineUpWait')
+  })
+})
