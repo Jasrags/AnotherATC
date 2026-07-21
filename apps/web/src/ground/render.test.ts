@@ -195,6 +195,9 @@ describe('drawRunwayMarkings', () => {
     let pending: [number, number][] = []
     let strokeStyle = ''
     let fillStyle = ''
+    let dash: number[] = []
+    let unbalanced = false
+    const stack: { strokeStyle: string; fillStyle: string; lineCap: string; font: string; dash: number[] }[] = []
     const ctx = {
       get strokeStyle() {
         return strokeStyle
@@ -214,11 +217,28 @@ describe('drawRunwayMarkings', () => {
       font: '',
       textAlign: '',
       textBaseline: '',
-      save() {},
-      restore() {},
+      // A real save/restore stack, so an unbalanced pair (or a style left dirty for the next
+      // draw pass in the same frame) is caught rather than silently passing.
+      save() {
+        stack.push({ strokeStyle, fillStyle, lineCap: ctx.lineCap, font: ctx.font, dash })
+      },
+      restore() {
+        const prev = stack.pop()
+        if (!prev) {
+          unbalanced = true
+          return
+        }
+        strokeStyle = prev.strokeStyle
+        fillStyle = prev.fillStyle
+        ctx.lineCap = prev.lineCap
+        ctx.font = prev.font
+        dash = prev.dash
+      },
       translate() {},
       rotate() {},
-      setLineDash() {},
+      setLineDash(d: number[]) {
+        dash = d
+      },
       beginPath() {
         pending = []
       },
@@ -238,7 +258,11 @@ describe('drawRunwayMarkings', () => {
         ops.push({ style: strokeStyle, pts: [...pending] })
       },
     }
-    return { ctx: ctx as unknown as CanvasRenderingContext2D, ops }
+    return {
+      ctx: ctx as unknown as CanvasRenderingContext2D,
+      ops,
+      state: () => ({ depth: stack.length, unbalanced, strokeStyle, fillStyle, dash, lineCap: ctx.lineCap }),
+    }
   }
 
   // Runway along y=0 from x=0 to x=2, with end "A" displaced 0.3 and an EMAS bed beyond it.
@@ -289,6 +313,24 @@ describe('drawRunwayMarkings', () => {
         expect(nearA || nearB).toBe(true)
       }
     }
+  })
+
+  it('leaves the canvas exactly as it found it', () => {
+    // Anything left dirty — a butt line cap, a dash pattern, the designator's font — bleeds
+    // into every later pass of the same frame (hotspots, approach course, aircraft).
+    const { ctx, state } = tracingCtx()
+    ctx.strokeStyle = 'sentinel-stroke'
+    ctx.fillStyle = 'sentinel-fill'
+    ctx.lineCap = 'round'
+    ctx.setLineDash([9, 9])
+    drawRunwayMarkings(ctx, view, layout)
+    const after = state()
+    expect(after.unbalanced).toBe(false)
+    expect(after.depth).toBe(0) // every save() was matched by a restore()
+    expect(after.strokeStyle).toBe('sentinel-stroke')
+    expect(after.fillStyle).toBe('sentinel-fill')
+    expect(after.lineCap).toBe('round')
+    expect(after.dash).toEqual([9, 9])
   })
 
   it('draws nothing when zoomed too far out to read', () => {

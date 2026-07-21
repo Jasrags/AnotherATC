@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { KSAN_SURFACE, KSAN_RUNWAY_LAYOUT } from '@anotheratc/sim'
 import type { GroundController } from './controller'
 import { fitPoints, fitView, pan, reframe, toWorld, zoomAt, type View } from './view'
@@ -64,14 +64,11 @@ export function GroundScope({ controller }: { controller: GroundController }) {
   }
 
   // Airport configuration. KSAN is single-runway, so this moves the arrival final *and* the
-  // departure end together — you cannot land one way and depart the other.
-  const [activeRunway, setActiveRunway] = useState(controller.activeRunway())
-  const toggleRunway = () => {
-    controller.setRunway(controller.activeRunway() === '27' ? '09' : '27')
-    // The sim refuses a change while traffic is committed to the runway, so read back what it
-    // actually is rather than assuming the toggle took.
-    setActiveRunway(controller.activeRunway())
-  }
+  // departure end together — you cannot land one way and depart the other. Read off the
+  // published snapshot, not mirrored in local state: the sim can refuse a change, and anything
+  // else that switches the runway has to be reflected here too.
+  const activeRunway = useSyncExternalStore(controller.subscribe, controller.getSnapshot).activeRunway
+  const toggleRunway = () => controller.setRunway(activeRunway === '27' ? '09' : '27')
 
   // Dev sandbox: which surface-click tool is armed. Ref drives the click/render loop;
   // state drives the toolbar's pressed styling.

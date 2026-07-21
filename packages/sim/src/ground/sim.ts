@@ -16,7 +16,9 @@ import { onRunway, splitRouteAtRunway, type RunwayGuard } from './runwayGuard'
 import {
   finalFix,
   glideAltitudeFt,
+  landingEnd,
   reciprocalIdent,
+  takeoffEnd,
   FINAL_APPROACH_NM,
   type ActiveRunway,
 } from './runway'
@@ -467,7 +469,10 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     const key = `${threshold[0]},${threshold[1]}`
     const hit = exitCache.get(key)
     if (hit) return hit
-    const far = farRunwayEnd(threshold)
+    // Turnoffs are bounded by the *declared* landing distance, not by the pavement: on KSAN 09
+    // the last ~1,100 ft is physically there but is not landing distance available.
+    const far =
+      runway && dist(threshold, runway.threshold) < 1e-6 ? landingEnd(runway) : farRunwayEnd(threshold)
     const exits = graph && guard && far ? buildRunwayExits(graph.topology(), guard, threshold, far) : []
     exitCache.set(key, exits)
     return exits
@@ -622,7 +627,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
    * far end — i.e. lined up facing the wrong way for the runway in use.
    */
   function takeoffRunRemaining(ac: Internal): number {
-    const far = farRunwayEnd([ac.x, ac.y])
+    const far = runway ? takeoffEnd(runway) : farRunwayEnd([ac.x, ac.y])
     if (!far) return Infinity
     // Without a configuration `farRunwayEnd` answers "whichever end is further away", so this
     // measures toward that end by construction and effectively never trips — the legacy path
@@ -1186,7 +1191,9 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
             return refused(`wake turbulence — ${Math.ceil(remaining)}s behind ${category}`)
           }
         }
-        const far = farRunwayEnd([ac.x, ac.y])
+        // The roll ends where the declared takeoff run does, which on RWY 09 is 1,121 ft short
+        // of the pavement — that distance is not available in that direction.
+        const far = runway ? takeoffEnd(runway) : farRunwayEnd([ac.x, ac.y])
         if (!far) return refused('no runway end found')
         clearDiversion(ac)
         ac.path = [[ac.x, ac.y], far]
@@ -1545,7 +1552,11 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       // on it, or on short final above it — has to finish first; the controller stops the flow,
       // lets it land or go, and then turns the airport around.
       if (runway && next.ident === runway.ident) return refused(`RWY ${next.ident} already in use`)
-      const committed = fleet.find((a) => blocksRunway(a))
+      // Deliberately stricter than `blocksRunway`: that predicate lets a departure past
+      // ROTATE_KT stop blocking, which is safe only because everything rolls the *same* way.
+      // A direction change breaks exactly that assumption, so anything physically on the
+      // pavement counts — a jet at 130 kt is still very much on the runway.
+      const committed = fleet.find((a) => blocksRunway(a) || onRunwayNow(a))
       if (committed)
         return refused(`runway in use — ${committed.callsign} is committed to RWY ${runway?.ident ?? ''}`.trim())
 

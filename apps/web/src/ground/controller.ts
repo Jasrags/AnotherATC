@@ -103,6 +103,9 @@ export interface GroundControllerOptions {
 
 export interface StripSnapshot {
   aircraft: StripItem[]
+  /** Designator of the runway direction in use. Published rather than mirrored in component
+   *  state so it cannot drift from the sim, whatever changes it. */
+  activeRunway: string
   selectedId: string | null
   /** The active controller position (which strip bay is shown). */
   position: ControllerPosition
@@ -250,7 +253,13 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
     return out
   }
   const listeners = new Set<() => void>()
-  let snapshot: StripSnapshot = { aircraft: [], selectedId: null, position: 'ground', draft: null }
+  let snapshot: StripSnapshot = {
+    aircraft: [],
+    selectedId: null,
+    position: 'ground',
+    draft: null,
+    activeRunway: game.runway.ident,
+  }
   let sig = ''
 
   /** How long a refusal/error message stays on the HUD (ms). */
@@ -269,7 +278,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
         .filter((a) => a.intent === 'arrival' && a.controlledBy === 'tower')
         .map((a) => [a.id, sim.exitOptions(a.id)] as const),
     )
-    let nextSig = `${position}|${selected ?? '-'}`
+    let nextSig = `${position}|${selected ?? '-'}|${sim.runway()?.ident ?? '-'}`
     nextSig += draft ? `~${draft.id}:${draft.via.join('.')}` : ''
     // Range-to-threshold is continuous, so it enters the signature at display precision
     // (0.1 nm ≈ one re-render every ~2.5 s on final) rather than every frame.
@@ -280,6 +289,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
     snapshot = {
       selectedId: selected,
       position,
+      activeRunway: sim.runway()?.ident ?? game.runway.ident,
       draft: draft ? { id: draft.id, via: [...draft.via] } : null,
       aircraft: acs.map((a) => ({
         id: a.id,
@@ -320,7 +330,10 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
     activeRunway: () => sim.runway()?.ident ?? game.runway.ident,
     setRunway: (ident) => {
       const res = sim.setRunway(KSAN_RUNWAYS[ident])
-      if (!res.ok) flashNotice(res.reason)
+      // Announce either way. A successful change silently moves every arrival's final and every
+      // departure's roll direction, so it needs saying as much as a refusal does — and the
+      // notice lands in an aria-live region, which is the only announcement a screen reader gets.
+      flashNotice(res.ok ? `RWY ${ident} now in use — arrivals and departures` : res.reason)
       publish()
     },
     exitOptions: (id) => sim.exitOptions(id),

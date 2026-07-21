@@ -27,7 +27,9 @@ export {
   finalFix,
   glideAltitudeFt,
   landingDistanceNm,
+  landingEnd,
   pavementAfterThresholdNm,
+  takeoffEnd,
   takeoffRunNm,
   FT_PER_NM,
 } from './ground/runway'

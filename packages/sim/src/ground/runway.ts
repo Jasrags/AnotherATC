@@ -73,6 +73,30 @@ export function takeoffRunNm(r: ActiveRunway): number {
   return r.toraFt / FT_PER_NM
 }
 
+/** Unit vector along the runway in the direction of use. */
+function heading(r: ActiveRunway): [number, number] {
+  const dx = r.farEnd[0] - r.departureStart[0]
+  const dy = r.farEnd[1] - r.departureStart[1]
+  const len = Math.hypot(dx, dy) || 1
+  return [dx / len, dy / len]
+}
+
+/** Where the takeoff run runs out — `toraFt` from the departure end, which is *not* always the
+ *  end of the pavement (KSAN 09 declares 8,280 ft of a 9,401 ft runway). */
+export function takeoffEnd(r: ActiveRunway): Point {
+  const [ux, uy] = heading(r)
+  const tora = takeoffRunNm(r)
+  return [r.departureStart[0] + ux * tora, r.departureStart[1] + uy * tora]
+}
+
+/** Where the landing distance runs out — `ldaFt` from the threshold. Turnoffs beyond this are
+ *  past the declared landing distance even though the pavement continues. */
+export function landingEnd(r: ActiveRunway): Point {
+  const [ux, uy] = heading(r)
+  const lda = landingDistanceNm(r)
+  return [r.threshold[0] + ux * lda, r.threshold[1] + uy * lda]
+}
+
 /** Distance (nm) of pavement actually between the threshold and the far end. Exceeds the LDA
  *  where the declared distance stops short of the physical end. */
 export function pavementAfterThresholdNm(r: ActiveRunway): number {

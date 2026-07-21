@@ -11,6 +11,8 @@ import {
   finalFix,
   glideAltitudeFt,
   landingDistanceNm,
+  landingEnd,
+  takeoffEnd,
   pavementAfterThresholdNm,
   reciprocalIdent,
   takeoffRunNm,
@@ -118,13 +120,37 @@ describe('exits follow the configuration', () => {
 
   it('are measured from the displaced threshold, so the usable half is the LDA half', () => {
     const r = KSAN_RUNWAYS['27']
-    const exits = buildRunwayExits(topo, guard, r.threshold, r.farEnd)
+    const exits = buildRunwayExits(topo, guard, r.threshold, landingEnd(r))
     expect(exits.length).toBeGreaterThan(0)
-    const usable = pavementAfterThresholdNm(r)
+    const lda = landingDistanceNm(r)
     for (const e of exits) {
-      expect(e.distanceNm).toBeGreaterThanOrEqual(usable / 2 - 1e-9)
-      expect(e.distanceNm).toBeLessThanOrEqual(usable)
+      expect(e.distanceNm).toBeGreaterThanOrEqual(lda / 2 - 1e-9)
+      expect(e.distanceNm).toBeLessThanOrEqual(lda)
     }
+  })
+
+  it('stop at the declared landing distance, not at the end of the pavement', () => {
+    // On 09 the two differ by ~1,100 ft: pavement continues past where the LDA runs out.
+    const r = KSAN_RUNWAYS['09']
+    expect(ft(pavementAfterThresholdNm(r)) - r.ldaFt).toBeGreaterThan(900)
+    const declared = buildRunwayExits(topo, guard, r.threshold, landingEnd(r))
+    const wholePavement = buildRunwayExits(topo, guard, r.threshold, r.farEnd)
+    for (const e of declared) expect(ft(e.distanceNm)).toBeLessThanOrEqual(r.ldaFt + 1)
+    // The looser bound really would have admitted turnoffs the declared distance does not.
+    expect(wholePavement.length).toBeGreaterThanOrEqual(declared.length)
+  })
+
+  it('a takeoff roll ends at the declared TORA, not at the end of the pavement', () => {
+    const r09 = KSAN_RUNWAYS['09']
+    const rollEnd = takeoffEnd(r09)
+    const toPavementEnd = ft(Math.hypot(r09.farEnd[0] - r09.departureStart[0], r09.farEnd[1] - r09.departureStart[1]))
+    const toRollEnd = ft(Math.hypot(rollEnd[0] - r09.departureStart[0], rollEnd[1] - r09.departureStart[1]))
+    expect(toRollEnd).toBeCloseTo(8280, -2) // the declared TORA
+    expect(toPavementEnd - toRollEnd).toBeGreaterThan(1000) // pavement it may not use
+    // 27 declares the lot, so there its roll does reach the pavement end.
+    const r27 = KSAN_RUNWAYS['27']
+    const end27 = takeoffEnd(r27)
+    expect(ft(Math.hypot(end27[0] - r27.farEnd[0], end27[1] - r27.farEnd[1]))).toBeLessThan(50)
   })
 
   it('a landing on 27 turns off on the west half of the field', () => {
