@@ -76,7 +76,12 @@ const PUSHBACK_SPEED_KT = 5
 const TAKEOFF_ACCEL = 12
 const TAKEOFF_SPEED_KT = 140
 /** Groundspeed (kt) at which a departure has "rotated" — effectively airborne, so it no longer
- *  blocks the next departure's takeoff clearance (anticipated separation). */
+ *  blocks the next departure's takeoff clearance (anticipated separation).
+ *  SAFETY NOTE: clearing #2 once #1 passes this speed is collision-free only because takeoff
+ *  acceleration is uniform across all aircraft (TAKEOFF_ACCEL) — #2 is then a pure time-shifted
+ *  replay of #1, so the gap can only grow. If per-type/wake-category acceleration is ever added,
+ *  a slower-accelerating leader followed by a faster follower could close the gap; revisit this
+ *  gate (add a distance floor) then, since detectConflicts() excludes departing pairs. */
 const ROTATE_KT = 120
 /** How close (nm) counts as reaching a gate. */
 const GATE_EPS = 0.02
@@ -833,10 +838,18 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         if (!ac.holdShort) return refused('not holding short of the runway')
         if (guard && (!ac.goalPoint || !onRunway(ac.goalPoint, guard)))
           return refused('route crosses the runway — clear it to cross, not to line up')
-        // A departure already rolling down the runway (departing) does NOT block a line-up
+        // A departure actually ROLLING down the runway (moving away) does NOT block a line-up
         // behind it — that's precisely what "line up and wait" is for (anticipated separation).
-        // A *stationary* occupant (another aircraft lined up, or one crossing) still blocks it.
-        if (guard && fleet.some((o) => o !== ac && !o.departing && onRunway([o.x, o.y], guard)))
+        // But one merely *cleared and not yet moving* (departing, still at its spot), any
+        // stationary occupant, or an aircraft crossing, still blocks it: #2 must not taxi onto
+        // an occupied spot. (Line-up uses the "rolling" bar; takeoff clearance uses the stricter
+        // "rotated" bar — see clearedForTakeoff.)
+        if (
+          guard &&
+          fleet.some(
+            (o) => o !== ac && onRunway([o.x, o.y], guard) && !(o.departing && o.groundspeed > ROLLING_KT),
+          )
+        )
           return refused('runway occupied')
         // Line up onto the runway centerline in front of the aircraft (nearest point), not at
         // its far departure-runway goal — so it lines up where it's holding, at either end.

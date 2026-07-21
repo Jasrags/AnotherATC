@@ -167,6 +167,30 @@ describe('tower — departures', () => {
     expect(A(sim, 'foll').status).toBe('departing')
   })
 
+  it('will not line up #2 onto a just-cleared #1 that has not started moving yet', () => {
+    // Regression (review HIGH): between clearedForTakeoff and the next step(), #1 is flagged
+    // 'departing' but is still stationary on its lineup spot. A line-up must stay refused until
+    // #1 is actually rolling away — otherwise #2 taxis straight onto #1.
+    const lead = departure('lead', -0.3)
+    const foll = departure('foll', -0.6)
+    const sim = createGroundSim([lead, foll], { guard })
+    taxiToHoldShort(sim)
+    sim.dispatch({ type: 'contactTower', aircraftId: 'lead' })
+    sim.dispatch({ type: 'lineUpAndWait', aircraftId: 'lead' })
+    for (let i = 0; i < 400; i += 1) sim.step(0.1) // lead lined up, stationary on the runway
+    sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'lead' }) // departing = true, groundspeed still 0
+    sim.dispatch({ type: 'contactTower', aircraftId: 'foll' })
+
+    // No step yet — lead is departing but hasn't moved → still blocks a line-up.
+    const blocked = sim.dispatch({ type: 'lineUpAndWait', aircraftId: 'foll' })
+    expect(blocked.ok).toBe(false)
+    if (!blocked.ok) expect(blocked.reason).toMatch(/occupied/i)
+
+    // Once lead is actually rolling away, the line-up behind it is allowed.
+    for (let i = 0; i < 20; i += 1) sim.step(0.1)
+    expect(sim.dispatch({ type: 'lineUpAndWait', aircraftId: 'foll' }).ok).toBe(true)
+  })
+
   it('refuses line-up and takeoff while another aircraft occupies the runway', () => {
     const onRwy: AircraftInit = { id: 'occ', callsign: 'O', type: 'B738', wake: 'M', path: [[0.3, 0]], targetSpeed: 0 }
     const sim = createGroundSim([onRwy, departure('d')], { guard })

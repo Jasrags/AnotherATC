@@ -98,6 +98,18 @@ describe('commandsFor (strip state machine)', () => {
     expect(cmds[0]!.action.kind).toBe('soon')
   })
 
+  it('a lined-up aircraft does not gate its own takeoff (self-exclusion)', () => {
+    // A lineUpWait aircraft is itself onRunway + blocksTakeoff; the o.id !== id guard must
+    // exclude it so it can be cleared when the runway is otherwise clear.
+    const { controller, dispatched } = fakeController()
+    const self = strip({ id: 'a', status: 'lineUpWait', controlledBy: 'tower', onRunway: true, blocksTakeoff: true })
+    const cmds = commandsFor(controller, self, [self])
+    expect(cmds[0]!.label).toBe('Cleared for takeoff')
+    const cto = cmds[0]!.action
+    if (cto.kind === 'run') cto.run()
+    expect(dispatched).toEqual([{ type: 'clearedForTakeoff', aircraftId: 'a' }])
+  })
+
   it('a rotated departure (blocksTakeoff false) does not gate the next takeoff', () => {
     const { controller } = fakeController()
     const self = strip({ id: 'a', status: 'lineUpWait', controlledBy: 'tower', onRunway: true })

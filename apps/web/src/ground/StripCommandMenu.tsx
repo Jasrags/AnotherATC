@@ -70,7 +70,7 @@ export function StripCommandMenu({
         const disabled = c.action.kind === 'soon'
         const isSub = c.action.kind === 'submenu'
         return (
-          <div key={c.label}>
+          <div key={c.key ?? c.label}>
             <button
               type="button"
               className={`cmd-item${disabled ? ' cmd-disabled' : ''}${openSub === i ? ' cmd-open' : ''}`}

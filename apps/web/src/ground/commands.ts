@@ -15,6 +15,9 @@ export type MenuAction =
 export interface MenuCommand {
   label: string
   action: MenuAction
+  /** Stable identity for React keying, for commands whose label changes with state (e.g. a
+   *  takeoff gated to "— runway busy"). Defaults to the label when omitted. */
+  key?: string
 }
 
 /**
@@ -39,20 +42,22 @@ export function commandsFor(controller: GroundController, item: StripItem, aircr
     // A takeoff needs the runway clear of anything not yet rotated (self excluded).
     const runwayBlockedForTakeoff = aircraft.some((o) => o.id !== id && o.blocksTakeoff)
 
-    const takeoff: MenuCommand =
-      item.wakeHoldSec > 0
-        ? { label: `Cleared for takeoff — wake ${item.wakeHoldSec}s`, action: { kind: 'soon' } }
-        : runwayBlockedForTakeoff
-          ? { label: 'Cleared for takeoff — runway busy', action: { kind: 'soon' } }
-          : { label: 'Cleared for takeoff', action: { kind: 'run', run: () => send({ type: 'clearedForTakeoff', aircraftId: id }) } }
+    // Reason order mirrors the sim's dispatch guards (runway-occupied is checked before wake),
+    // so the disabled label names the reason the sim would actually refuse with. `key` stays
+    // stable across the label changes so the button doesn't remount (and lose focus) when gated.
+    const takeoff: MenuCommand = runwayBlockedForTakeoff
+      ? { key: 'takeoff', label: 'Cleared for takeoff — runway busy', action: { kind: 'soon' } }
+      : item.wakeHoldSec > 0
+        ? { key: 'takeoff', label: `Cleared for takeoff — wake ${item.wakeHoldSec}s`, action: { kind: 'soon' } }
+        : { key: 'takeoff', label: 'Cleared for takeoff', action: { kind: 'run', run: () => send({ type: 'clearedForTakeoff', aircraftId: id }) } }
 
     if (item.status === 'lineUpWait') {
       return [takeoff, { label: 'Hold position', action: { kind: 'soon' } }]
     }
     if (item.status === 'holdShort') {
       const lineup: MenuCommand = runwayBlockedForLineup
-        ? { label: 'Line up and wait — runway busy', action: { kind: 'soon' } }
-        : { label: 'Line up and wait', action: { kind: 'run', run: () => send({ type: 'lineUpAndWait', aircraftId: id }) } }
+        ? { key: 'lineup', label: 'Line up and wait — runway busy', action: { kind: 'soon' } }
+        : { key: 'lineup', label: 'Line up and wait', action: { kind: 'run', run: () => send({ type: 'lineUpAndWait', aircraftId: id }) } }
       return [lineup, takeoff, { label: 'Hold position', action: { kind: 'soon' } }]
     }
     // Defensive net: today a Tower-owned aircraft is only ever holdShort / lineUpWait /
