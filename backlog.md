@@ -332,8 +332,14 @@ is switched on.
   arrival whose stand is already occupied), so the strip warning and the scope alert read one
   source. The scope names the gates on its own advisory line — amber and `aria-live="polite"`,
   deliberately quieter than the red separation CONFLICT above it, because that one is happening
-  now and this one has not happened yet. _Next: the alert says *which* gates, not what to do
-  about it — reassigning an arrival to a different stand isn't a command yet._
+  now and this one has not happened yet.
+- ✅ **Reassign an arrival's gate** (`assignStand`) — the lever the alert needed. Offered in every
+  phase before the arrival parks, on both frequencies, labelled with the conflict when there is
+  one. Only free *and unclaimed* stands are offered (a stand another arrival is already heading
+  for is a conflict that hasn't arrived yet), nearest first, capped at six. Validated before
+  mutating, with the reroute rolled back on failure; an arrival already taxiing is re-routed on
+  the spot. _Next: nothing forces the choice to be sensible — reassigning to a stand on the far
+  side of the field is legal and free. Terminal/airline affinity would make it a real tradeoff._
 - ⬜ Aircraft symbology by category/phase; selected-target emphasis
 - ⬜ Data-block declutter (leader-line direction, overlap avoidance)
 - ⬜ Theme polish; light/dark intentional (currently dark-only, correct for a scope)
