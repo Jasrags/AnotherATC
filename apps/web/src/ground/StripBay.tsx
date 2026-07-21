@@ -1,4 +1,4 @@
-import { useState, useSyncExternalStore } from 'react'
+import { useRef, useState, useSyncExternalStore } from 'react'
 import type { ControllerPosition, GroundIntent, GroundStatus, Point } from '@anotheratc/sim'
 import type { GroundController, RouteDraft, StripItem } from './controller'
 import { StripCommandMenu } from './StripCommandMenu'
@@ -83,6 +83,17 @@ const POSITIONS: { key: ControllerPosition; label: string; title: string }[] = [
 export function StripBay({ controller }: { controller: GroundController }) {
   const snap = useSyncExternalStore(controller.subscribe, controller.getSnapshot)
   const [position, setPosition] = useState<ControllerPosition>('ground')
+  const tablistRef = useRef<HTMLDivElement>(null)
+
+  // WAI-ARIA tabs pattern: Left/Right move selection + focus between the two positions.
+  const onTabKey = (e: React.KeyboardEvent, index: number): void => {
+    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return
+    e.preventDefault()
+    const dir = e.key === 'ArrowRight' ? 1 : -1
+    const next = (index + dir + POSITIONS.length) % POSITIONS.length
+    setPosition(POSITIONS[next]!.key)
+    tablistRef.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus()
+  }
 
   // One flight object, mode-specific projections: each position sees only the aircraft it
   // controls. Handoffs move a strip from one bay to the other (see docs/atc-tower.md).
@@ -92,8 +103,8 @@ export function StripBay({ controller }: { controller: GroundController }) {
 
   return (
     <aside className="strip-bay">
-      <div className="strip-tabs" role="tablist" aria-label="Controller position">
-        {POSITIONS.map((p) => (
+      <div className="strip-tabs" role="tablist" aria-label="Controller position" ref={tablistRef}>
+        {POSITIONS.map((p, i) => (
           <button
             key={p.key}
             type="button"
@@ -101,9 +112,11 @@ export function StripBay({ controller }: { controller: GroundController }) {
             id={`strip-tab-${p.key}`}
             aria-selected={position === p.key}
             aria-controls="strip-list"
+            tabIndex={position === p.key ? 0 : -1}
             className={`strip-tab${position === p.key ? ' strip-tab-active' : ''}`}
             title={p.title}
             onClick={() => setPosition(p.key)}
+            onKeyDown={(e) => onTabKey(e, i)}
           >
             {p.label}
             <span className="strip-tab-count">{counts[p.key]}</span>

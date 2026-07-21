@@ -50,6 +50,9 @@ export function commandsFor(controller: GroundController, item: StripItem, aircr
         { label: 'Hold position', action: { kind: 'soon' } },
       ]
     }
+    // Defensive net: today a Tower-owned aircraft is only ever holdShort / lineUpWait /
+    // departing (departing is handled above), so this is unreachable — but if the sim grows a
+    // new tower-owned status it degrades to a harmless disabled item instead of an empty menu.
     return [{ label: 'With tower', action: { kind: 'soon' } }]
   }
 
