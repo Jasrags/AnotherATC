@@ -371,7 +371,9 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
       devSeq += 1
       // Stagger successive test arrivals down the final so they don't stack on one point —
       // deterministic (driven by the spawn counter, not a clock or RNG).
-      const { fix, threshold } = game.spawn.approach
+      // The *active* runway's final, not whichever was configured at startup — otherwise a
+      // test arrival keeps appearing on 27's approach after the airport has turned round.
+      const { fix, threshold } = sim.approach() ?? game.spawn.approach
       const back = (devSeq - 1) * DEV_ARRIVAL_SPACING_NM
       const len = Math.hypot(fix[0] - threshold[0], fix[1] - threshold[1]) || 1
       const start: Point = [
@@ -406,6 +408,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
       sim.clear()
       selected = null
       draft = null
+      probeState = null // the probe outlives the fleet otherwise, drawn over an empty surface
       publish()
     },
     probe: () => probeState,

@@ -221,7 +221,7 @@ export function GroundScope({ controller }: { controller: GroundController }) {
         controller.dispatch({ type: 'crossRunway', aircraftId: id })
       } else if (e.key === 'f' || e.key === 'F') {
         refitRef.current = true // frame the field + all traffic (incl. aircraft on final)
-      } else if (e.key === 'g' || e.key === 'G') {
+      } else if (controller.dev && (e.key === 'g' || e.key === 'G')) {
         // admin: toggle the routing-graph overlay (ref drives the loop; state drives the button)
         showGraphRef.current = !showGraphRef.current
         setShowGraph(showGraphRef.current)
@@ -343,7 +343,9 @@ export function GroundScope({ controller }: { controller: GroundController }) {
         }
         drawSelection(ctx, view, selected, selectedId ? sim.routeOf(selectedId) : [])
         drawOffscreenTraffic(ctx, view, snap.aircraft, width, height)
-        if (showGraphRef.current) drawGraphOverlay(ctx, view, controller.topology)
+        // Dev-only overlay: the toggle is gone outside the sandbox, so make sure a stale ref
+        // can't leave it painted over a normal game.
+        if (controller.dev && showGraphRef.current) drawGraphOverlay(ctx, view, controller.topology)
         if (controller.dev) {
           const pr = controller.probe()
           if (pr) drawProbe(ctx, view, pr)
@@ -453,17 +455,17 @@ export function GroundScope({ controller }: { controller: GroundController }) {
         >
           ⤢ FIT
         </button>
-        <button
-          type="button"
-          className="ctl-btn mono"
-          aria-pressed={showGraph}
-          onClick={toggleGraph}
-          title="Toggle the routing-graph overlay (g)"
-        >
-          {showGraph ? '◆ GRAPH' : '◇ GRAPH'}
-        </button>
         {controller.dev && (
-          <>
+          <span className="ctl-group" role="group" aria-label="Developer tools">
+            <button
+              type="button"
+              className="ctl-btn mono"
+              aria-pressed={showGraph}
+              onClick={toggleGraph}
+              title="Toggle the routing-graph overlay (g)"
+            >
+              {showGraph ? '◆ GRAPH' : '◇ GRAPH'}
+            </button>
             <button
               type="button"
               className="ctl-btn mono"
@@ -498,7 +500,7 @@ export function GroundScope({ controller }: { controller: GroundController }) {
             >
               CLEAR
             </button>
-          </>
+          </span>
         )}
         {/* Shares the control bar's row so the two can't collide as the bar grows. */}
         <div ref={hintRef} className="hud-hint mono" aria-live="polite" />

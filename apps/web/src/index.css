@@ -167,6 +167,16 @@ body {
   color: #efe8ff;
 }
 
+/* The developer tools, set off from the two gameplay controls beside them. */
+.ctl-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 10px;
+  margin-left: 4px;
+  border-left: 1px solid #2a2350;
+}
+
 /* Dev readout (probe length / tool hint), just above the control bar. */
 .hud-dev {
   bottom: 48px;
