@@ -167,7 +167,8 @@ Design note: `docs/atc-tower.md` (one sim, two projections; Ground and Tower own
 - ✅ Gate stands: clean gate-node markers + zoom-gated numbers (T2 20–51, T1 101–119 from OSM gate nodes, matching the researched scheme); spawn from terminal gate nodes
 - ✅ Mobile: pinch-zoom / touch pan / tap-select, responsive stacked layout, LAN dev hosting
 - ⬜ Label density control (show major spines when zoomed out, exits when zoomed in) + collision avoidance
-- ⬜ Scale bar / range rings; recenter + zoom-to-fit control
+- ✅ **Zoom-to-fit + off-screen traffic** — **FIT** button / `f` frames the airport *and* all traffic (`fitPoints` takes arbitrary world points, so it generalizes to climb-outs and TRACON). The final approach course is drawn as the extended centerline with 1-nm range ticks, and airborne traffic outside the viewport gets an edge chevron labelled callsign + range. _Next: scale bar / range rings._
+- ⬜ Scale bar / range rings
 - ⬜ Pan/zoom clamping (don't lose the airport off-screen)
 - ⬜ Gate docking guidance on arrival (AGNIS/PAPA-style stop/center cue), park on the painted stop mark
 - ⬜ Aircraft symbology by category/phase; selected-target emphasis
@@ -192,7 +193,7 @@ Design note: `docs/atc-tower.md` (one sim, two projections; Ground and Tower own
 
 ## Testing / infra
 
-- ✅ **Dev/admin sandbox** (`?dev`) — empty surface, spawner off, plus a control bar. **SPAWN**: click the surface to drop a test aircraft (snaps to the nearest routing node, auto `DEVnn`); drive it with the normal commands; **X** removes the selected, **CLEAR** wipes all. **PROBE**: click two points to draw the shortest graph path between them with a live length + taxiway-sequence readout (no route → dashed red). Works alongside the **GRAPH** overlay. Sim gained `add`/`remove`/`clear`. _Next: param picker (type/wake/intent), exact (off-network) placement, step/pause, save/replay._
+- ✅ **Dev/admin sandbox** (`?dev`) — empty surface, spawner off, plus a control bar. **SPAWN**: click the surface to drop a test aircraft (snaps to the nearest routing node, auto `DEVnn`); drive it with the normal commands; **ARRIVAL** puts a test arrival on the final approach (airborne — it can't be placed by clicking the surface) and switches to the Tower bay; successive spawns stagger 1.2 nm down the final. **X** removes the selected, **CLEAR** wipes all. **PROBE**: click two points to draw the shortest graph path between them with a live length + taxiway-sequence readout (no route → dashed red). Works alongside the **GRAPH** overlay. Sim gained `add`/`remove`/`clear`. _Next: param picker (type/wake/intent), exact (off-network) placement, step/pause, save/replay._
 - ⬜ Playwright E2E for the interaction flows (needs dependency vetting per policy)
 - ⬜ Socket.dev GitHub app on the repo (CI already runs audit + osv-scanner)
 - ⬜ Coverage reporting + targets
