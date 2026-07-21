@@ -3,6 +3,7 @@ import type { AircraftInit } from './sim'
 import type { RunwayExit } from './runwayExits'
 import type { ActiveRunway } from './runway'
 import type { ApproachConfig } from './sim'
+import type { Transmission } from './comms'
 
 /** ICAO wake turbulence category: Light / Medium / Heavy / Super. */
 export type WakeCategory = 'L' | 'M' | 'H' | 'J'
@@ -146,6 +147,8 @@ export interface GroundSnapshot {
   departed: number
   /** Arrivals completed (reached a gate). */
   arrived: number
+  /** Radio transcript, oldest first, capped at `COMMS_LOG_LIMIT`. */
+  comms: readonly Transmission[]
 }
 
 /** Outcome of a dispatched command: accepted, or refused with a controller-facing reason. */

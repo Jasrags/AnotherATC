@@ -38,6 +38,8 @@ export {
 } from './ground/runway'
 export { displacedNm } from './ground/runway'
 export type { ActiveRunway, RunwayLayout, RunwayEndLayout } from './ground/runway'
+export { phonetic, COMMS_LOG_LIMIT } from './ground/comms'
+export type { Transmission, TransmissionFrom } from './ground/comms'
 export { buildTaxiGraph } from './ground/taxiGraph'
 export type { TaxiGraph, TaxiTopology, TopoNode, TopoEdge } from './ground/taxiGraph'
 export { buildRunwayGuard } from './ground/runwayGuard'

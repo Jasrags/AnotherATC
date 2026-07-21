@@ -1,6 +1,7 @@
 import { createRng, type Rng } from '../random'
 import type { Point } from '../world/types'
 import type {
+  ControllerPosition,
   DispatchResult,
   GroundAircraft,
   GroundCommand,
@@ -11,6 +12,13 @@ import type {
   WakeCategory,
 } from './types'
 import { edgeKey, type TaxiGraph } from './taxiGraph'
+import {
+  COMMS_LOG_LIMIT,
+  phraseFor,
+  type PhraseContext,
+  type Transmission,
+  type TransmissionFrom,
+} from './comms'
 import { wakeSeparationSec, WAKE_TIME_SCALE } from './wake'
 import { onRunway, splitRouteAtRunway, type RunwayGuard } from './runwayGuard'
 import {
@@ -97,6 +105,9 @@ export interface GroundSimOptions {
   guard?: RunwayGuard
   spawn?: SpawnConfig
   servicing?: ServicingConfig
+  /** Published controller frequencies, quoted in handoff phraseology ("contact tower 118.3").
+   *  Omit and the transcript simply says "contact tower". */
+  frequencies?: { ground: string; tower: string }
   /** The runway direction in use. Supplies the real landing threshold (which is *not* the end
    *  of the pavement where the threshold is displaced) and the far end a takeoff rolls toward,
    *  instead of guessing both from the polyline endpoints. */
@@ -316,7 +327,7 @@ interface Internal
  * in place each tick; {@link GroundSim.snapshot} hands out fresh immutable objects.
  */
 export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimOptions = {}): GroundSim {
-  const { graph, guard, spawn, servicing } = opts
+  const { graph, guard, spawn, servicing, frequencies } = opts
   /** The runway direction in use. Mutable: an airport changes configuration. */
   let runway: ActiveRunway | undefined = opts.runway
   /** Where arrivals are established, derived from the active runway when there is one. */
@@ -339,6 +350,59 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     const code = (0o4201 + squawkSeq * 0o27) % 0o10000
     squawkSeq += 1
     return code.toString(8).padStart(4, '0')
+  }
+
+  // ─── Communications log ────────────────────────────────────────────────────
+  // The transcript is written by the sim, not the UI, so it can only ever say what actually
+  // happened: a call is logged at the moment the command is applied, never when it is offered
+  // and never when it is refused (a refused clearance was never transmitted).
+  const comms: Transmission[] = []
+  let commsSeq = 0
+  function transmit(from: TransmissionFrom, position: ControllerPosition, ac: Internal, text: string): void {
+    commsSeq += 1
+    comms.push({ seq: commsSeq, time, from, position, aircraftId: ac.id, callsign: ac.callsign, text })
+    if (comms.length > COMMS_LOG_LIMIT) comms.splice(0, comms.length - COMMS_LOG_LIMIT)
+  }
+
+  /** Runway designator as spoken: no leading zero ("09" → "9"). */
+  const runwayIdent = (): string | null => runway?.ident.replace(/^0/, '') ?? null
+
+  function phraseContext(ac: Internal): PhraseContext {
+    const rwy = runwayIdent()
+    return {
+      callsign: ac.callsign,
+      runway: rwy,
+      squawk: ac.squawk,
+      taxiways: taxiwaysFor(ac),
+      destination:
+        ac.intent === 'departure' ? (rwy ? `runway ${rwy}` : null) : ac.gate ? `gate ${ac.gate}` : null,
+      giveWayTo: ac.giveWayTo ? (find(ac.giveWayTo)?.callsign ?? null) : null,
+      exitRef: ac.exit?.ref ?? ac.assignedExitRef,
+      towerFreq: frequencies?.tower ?? null,
+      groundFreq: frequencies?.ground ?? null,
+      vacated: ac.rollingOut ? ac.vacated : true,
+    }
+  }
+
+  /** Log the exchange for a command that was just applied. `position` is who *issued* it —
+   *  captured before the command ran, since a handoff changes the owner mid-command. */
+  function logExchange(cmd: GroundCommand, ac: Internal, position: ControllerPosition): void {
+    const ex = phraseFor(cmd, phraseContext(ac))
+    if (!ex) return
+    transmit('controller', position, ac, ex.instruction)
+    transmit('pilot', position, ac, ex.readback)
+  }
+
+  /** The pilot's first call on a new frequency, right after a handoff. */
+  function checkIn(ac: Internal): void {
+    const rwy = runwayIdent()
+    if (ac.controlledBy === 'tower') {
+      const where = rwy ? `holding short runway ${rwy}` : 'holding short'
+      transmit('pilot', 'tower', ac, `Tower, ${ac.callsign}, ${where}.`)
+    } else {
+      const exit = ac.exit?.ref ?? ac.assignedExitRef
+      transmit('pilot', 'ground', ac, `Ground, ${ac.callsign}, clear of the runway${exit ? ` at ${exit}` : ''}.`)
+    }
   }
 
   const plan = (route: readonly Point[]): { path: Point[]; held: Point[] | null } => {
@@ -1020,6 +1084,26 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
   const ACCEPTED: DispatchResult = { ok: true }
   const refused = (reason: string): DispatchResult => ({ ok: false, reason })
 
+  /** The named taxiways an aircraft's current route follows, in order. */
+  function taxiwaysFor(ac: Internal): string[] {
+    if (!graph) return []
+    const out: string[] = []
+    let prevKey: string | null = null
+    for (const p of ac.path) {
+      const k = graph.keyAt(p)
+      if (!k) {
+        prevKey = null
+        continue
+      }
+      if (prevKey) {
+        const ref = graph.refBetween(prevKey, k)
+        if (ref && out[out.length - 1] !== ref) out.push(ref)
+      }
+      prevKey = k
+    }
+    return out
+  }
+
   /** Surface-movement commands. Dispatched to an aircraft in the air they are not merely
    *  meaningless but destructive — `hold` would stop it dead on final (never landing, never
    *  going around, blocking the runway forever) and a taxi clearance would drive an aircraft
@@ -1035,7 +1119,26 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     'giveWay',
   ])
 
+  /**
+   * Apply a command, then — only if it was accepted — put it on the air. Logging here rather
+   * than at each `return ACCEPTED` means a new command cannot be added without a transcript,
+   * and a refused one can never appear as though it had been transmitted.
+   */
   function dispatch(command: GroundCommand): DispatchResult {
+    const ac = find(command.aircraftId)
+    const issuedBy = ac?.controlledBy ?? 'ground'
+    const result = applyCommand(command)
+    if (result.ok && ac) {
+      logExchange(command, ac, issuedBy)
+      // A handoff that took effect immediately: the pilot checks in on the new frequency.
+      if (command.type === 'contactTower') checkIn(ac)
+      // "…contact ground" issued once already clear of the runway takes effect at once.
+      if (command.type === 'contactGround' && ac.controlledBy === 'ground') checkIn(ac)
+    }
+    return result
+  }
+
+  function applyCommand(command: GroundCommand): DispatchResult {
     const ac = find(command.aircraftId)
     if (!ac) return refused(`unknown aircraft "${command.aircraftId}"`)
     if (ac.airborne && GROUND_ONLY.has(command.type)) return refused('aircraft is airborne')
@@ -1353,6 +1456,8 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     ac.assignedExitRef = null
     const next = ac.path[1]
     if (next) ac.heading = normalizeDeg(bearing(fix[0], fix[1], next[0], next[1]))
+    // A go-around is the pilot's call, not the controller's — it is announced, not cleared.
+    transmit('pilot', 'tower', ac, `${ac.callsign}, going around.`)
   }
 
   /**
@@ -1413,7 +1518,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     ac.exitRetrySec -= dt
     if (ac.exitRetrySec > 0) return
     ac.exitRetrySec = EXIT_RETRY_SEC
-    handOffToGround(ac)
+    if (handOffToGround(ac)) checkIn(ac)
   }
 
   /** Detect goal completion; returns ids to remove. */
@@ -1518,6 +1623,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         time,
         departed,
         arrived,
+        comms: [...comms],
         aircraft: fleet.map((ac) => ({
           id: ac.id,
           callsign: ac.callsign,
@@ -1627,22 +1733,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     },
     taxiwaysOf(aircraftId: string): string[] {
       const ac = find(aircraftId)
-      if (!ac || !graph) return []
-      const out: string[] = []
-      let prevKey: string | null = null
-      for (const p of ac.path) {
-        const k = graph.keyAt(p)
-        if (!k) {
-          prevKey = null
-          continue
-        }
-        if (prevKey) {
-          const ref = graph.refBetween(prevKey, k)
-          if (ref && out[out.length - 1] !== ref) out.push(ref)
-        }
-        prevKey = k
-      }
-      return out
+      return ac ? taxiwaysFor(ac) : []
     },
   }
 }

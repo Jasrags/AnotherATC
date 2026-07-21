@@ -1,0 +1,110 @@
+import { describe, expect, it } from 'vitest'
+import { phonetic, phraseFor, type PhraseContext } from './comms'
+
+const ctx = (over: Partial<PhraseContext> = {}): PhraseContext => ({
+  callsign: 'SKW412',
+  runway: '27',
+  squawk: null,
+  taxiways: [],
+  destination: null,
+  giveWayTo: null,
+  exitRef: null,
+  towerFreq: null,
+  groundFreq: null,
+  vacated: false,
+  ...over,
+})
+
+describe('phonetic', () => {
+  it('spells a single-letter taxiway', () => {
+    expect(phonetic('A')).toBe('Alpha')
+    expect(phonetic('J')).toBe('Juliett')
+  })
+
+  it('keeps the number on a numbered connector', () => {
+    expect(phonetic('B4')).toBe('Bravo 4')
+    expect(phonetic('C10')).toBe('Charlie 10')
+  })
+
+  it('passes through anything it cannot spell', () => {
+    expect(phonetic('HS1')).toBe('HS1')
+  })
+})
+
+describe('phraseFor', () => {
+  it('reads an IFR clearance back with the beacon code', () => {
+    const ex = phraseFor({ type: 'clearance', aircraftId: 'a' }, ctx({ squawk: '4201' }))
+    expect(ex?.instruction).toBe('SKW412, cleared to destination as filed, squawk 4201.')
+    expect(ex?.readback).toBe('Cleared as filed, squawk 4201, SKW412.')
+  })
+
+  it('phrases a taxi clearance with destination and route', () => {
+    const ex = phraseFor(
+      { type: 'taxiToGoal', aircraftId: 'a' },
+      ctx({ destination: 'runway 27', taxiways: ['A', 'B', 'B4'] }),
+    )
+    expect(ex?.instruction).toBe('SKW412, taxi to runway 27 via Alpha, Bravo, Bravo 4.')
+    expect(ex?.readback).toBe('Runway 27 via Alpha, Bravo, Bravo 4, SKW412.')
+  })
+
+  it('omits the route when no taxiways are named', () => {
+    const ex = phraseFor({ type: 'taxiToGoal', aircraftId: 'a' }, ctx({ destination: 'gate 39' }))
+    expect(ex?.instruction).toBe('SKW412, taxi to gate 39.')
+  })
+
+  it('phrases hold, continue and crossing', () => {
+    expect(phraseFor({ type: 'hold', aircraftId: 'a' }, ctx())?.instruction).toBe('SKW412, hold position.')
+    expect(phraseFor({ type: 'resume', aircraftId: 'a' }, ctx())?.instruction).toBe('SKW412, continue taxi.')
+    expect(phraseFor({ type: 'crossRunway', aircraftId: 'a' }, ctx())?.readback).toBe(
+      'Cross runway 27, SKW412.',
+    )
+  })
+
+  it('names the traffic in a give-way instruction', () => {
+    const ex = phraseFor({ type: 'giveWay', aircraftId: 'a', toId: 'b' }, ctx({ giveWayTo: 'AAL88' }))
+    expect(ex?.instruction).toBe('SKW412, give way to AAL88.')
+  })
+
+  it('puts the runway before the takeoff and landing clearances', () => {
+    expect(phraseFor({ type: 'clearedForTakeoff', aircraftId: 'a' }, ctx())?.instruction).toBe(
+      'SKW412, runway 27, cleared for takeoff.',
+    )
+    expect(phraseFor({ type: 'lineUpAndWait', aircraftId: 'a' }, ctx())?.instruction).toBe(
+      'SKW412, runway 27, line up and wait.',
+    )
+    expect(phraseFor({ type: 'clearedToLand', aircraftId: 'a' }, ctx())?.readback).toBe(
+      'Runway 27, cleared to land, SKW412.',
+    )
+  })
+
+  it('includes the frequency in a handoff when the field publishes one', () => {
+    expect(
+      phraseFor({ type: 'contactTower', aircraftId: 'a' }, ctx({ towerFreq: '118.3' }))?.instruction,
+    ).toBe('SKW412, contact tower 118.3.')
+    expect(phraseFor({ type: 'contactTower', aircraftId: 'a' }, ctx())?.instruction).toBe(
+      'SKW412, contact tower.',
+    )
+  })
+
+  it('says "when vacated" only while the arrival is still on the runway', () => {
+    expect(
+      phraseFor({ type: 'contactGround', aircraftId: 'a' }, ctx({ groundFreq: '123.9' }))?.instruction,
+    ).toBe('SKW412, when vacated, contact ground 123.9.')
+    expect(
+      phraseFor({ type: 'contactGround', aircraftId: 'a' }, ctx({ groundFreq: '123.9', vacated: true }))
+        ?.instruction,
+    ).toBe('SKW412, contact ground 123.9.')
+  })
+
+  it('phrases an exit assignment phonetically', () => {
+    const ex = phraseFor({ type: 'assignExit', aircraftId: 'a', ref: 'B4' }, ctx({ exitRef: 'B4' }))
+    expect(ex?.instruction).toBe('SKW412, turn off at Bravo 4.')
+    expect(ex?.readback).toBe('Bravo 4, SKW412.')
+  })
+
+  it('phrases pushback', () => {
+    expect(phraseFor({ type: 'pushback', aircraftId: 'a' }, ctx())?.instruction).toBe(
+      'SKW412, push and start approved.',
+    )
+  })
+})
