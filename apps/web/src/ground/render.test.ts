@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import type { AirportSurface, Point, RunwayLayout, SurfaceFeature, TaxiTopology } from '@anotheratc/sim'
 import {
   drawAircraft,
+  drawStandHighlight,
   polylineLength,
   polylineMidpoint,
   distToSeg,
@@ -450,5 +451,50 @@ describe('heading pip', () => {
     // Nose-to-nose vs. back-to-back is now visible: the pips point opposite ways.
     expect(tip(a.ops)[0]).toBeGreaterThan(200)
     expect(tip(b.ops)[0]).toBeLessThan(200)
+  })
+})
+
+describe('drawStandHighlight', () => {
+  function tracing() {
+    const strokes: { style: string; pts: [number, number][] }[] = []
+    const texts: { text: string }[] = []
+    let pending: [number, number][] = []
+    const ctx = {
+      canvas: { width: 400, height: 400 },
+      save() {}, restore() {}, translate() {}, rotate() {}, setLineDash() {},
+      beginPath() { pending = [] },
+      closePath() {},
+      moveTo(x: number, y: number) { pending.push([x, y]) },
+      lineTo(x: number, y: number) { pending.push([x, y]) },
+      arc() {}, rect() {},
+      fillText(text: string) { texts.push({ text }) },
+      measureText: () => ({ width: 10 }),
+      fill() {},
+      stroke() { strokes.push({ style: ctx.strokeStyle, pts: [...pending] }) },
+      fillStyle: '', strokeStyle: '', lineWidth: 0, font: '', textAlign: '', textBaseline: '',
+      shadowColor: '', shadowBlur: 0, lineJoin: '', lineCap: '',
+    }
+    return { ctx: ctx as unknown as CanvasRenderingContext2D, strokes, texts }
+  }
+
+  const view = fitView({ minX: -1, minY: -1, maxX: 1, maxY: 1 }, 400, 400)
+  const stand = {
+    ref: '41',
+    gate: [0.4, 0.1] as [number, number],
+    lead: [[0.2, 0], [0.3, 0.05], [0.4, 0.1]] as [number, number][],
+    entry: [0.2, 0] as [number, number],
+    stop: [0.4, 0.1] as [number, number],
+    headingDeg: 30,
+    source: 'charted' as const,
+  }
+
+  it('draws the lead-in in the route colour, and labels the gate number', () => {
+    const { ctx, strokes, texts } = tracing()
+    drawStandHighlight(ctx, view, stand)
+    // The lead-in polyline is stroked route-blue (part of the cleared path).
+    const lead = strokes.find((st) => st.pts.length === stand.lead.length)
+    expect(lead?.style).toBe(COLORS.route)
+    // The gate number is rendered.
+    expect(texts.map((t) => t.text)).toContain('41')
   })
 })

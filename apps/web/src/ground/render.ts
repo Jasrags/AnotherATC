@@ -149,6 +149,43 @@ function drawStandLines(ctx: Ctx, v: View, stands: readonly Stand[]): void {
   ctx.setLineDash([])
 }
 
+/**
+ * Emphasise a selected arrival's assigned stand: its painted lead-in, its stop bar, and the
+ * gate number, all drawn in the route colour so the destination reads as part of the cleared
+ * path — the same treatment the assigned runway turnoff gets. Answers "where is this arrival
+ * going" at a glance, and makes a gate conflict visible before it happens.
+ */
+export function drawStandHighlight(ctx: Ctx, v: View, stand: Stand): void {
+  ctx.save()
+  ctx.strokeStyle = COLORS.route
+  ctx.lineWidth = 2.2
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+  ctx.setLineDash([])
+  ctx.beginPath()
+  trace(ctx, v, stand.lead)
+  ctx.stroke()
+
+  // Stop bar, in screen space so it stays a fixed tick at any zoom.
+  const rad = (stand.headingDeg * Math.PI) / 180
+  const [sx, sy] = toScreen(v, stand.stop[0], stand.stop[1])
+  const px = Math.cos(rad) * (STOP_BAR_PX + 1)
+  const py = Math.sin(rad) * (STOP_BAR_PX + 1)
+  ctx.beginPath()
+  ctx.moveTo(sx - px, sy - py)
+  ctx.lineTo(sx + px, sy + py)
+  ctx.stroke()
+
+  // Gate number at the entry end, clear of the target on the stop.
+  const [ex, ey] = toScreen(v, stand.entry[0], stand.entry[1])
+  ctx.fillStyle = COLORS.routeDest
+  ctx.font = `${DIMS.blockFont}px ui-monospace, "SF Mono", Menlo, monospace`
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillText(stand.ref, ex, ey)
+  ctx.restore()
+}
+
 export function drawSurface(ctx: Ctx, v: View, prep: PreparedSurface, w: number, h: number): void {
   ctx.fillStyle = COLORS.bg
   ctx.fillRect(0, 0, w, h)

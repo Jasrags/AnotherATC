@@ -373,3 +373,48 @@ describe('communications log through the bridge', () => {
     expect(visibleComms(comms, 'ground').some((t) => t.text.includes('contact tower'))).toBe(true)
   })
 })
+
+describe('arrival destination stand', () => {
+  it('flags an inbound arrival whose gate is already occupied, and clears once it parks', () => {
+    const c = createGroundController()
+    // A seeded departure sits on a stand; send an arrival to that same gate.
+    const occupied = c.getSnapshot().aircraft.find((a) => a.gate !== null)!.gate!
+    const stand = buildStands(c.airport.surface).find((s) => s.ref === occupied)!
+    const ap = c.approach()
+    c.sim.add({
+      id: 'arr',
+      callsign: 'ARR',
+      type: 'B738',
+      wake: 'M',
+      path: [ap.fix, ap.threshold],
+      targetSpeed: 140,
+      airborne: true,
+      intent: 'arrival',
+      gate: occupied,
+      goalPoint: stand.stop,
+    })
+    c.publish()
+
+    const item = () => c.getSnapshot().aircraft.find((a) => a.id === 'arr')!
+    // Inbound to a taken gate — the conflict is visible before it arrives.
+    expect(item().destStandOccupied).toBe(true)
+
+    // An arrival to a free gate does not flag.
+    const taken = new Set(c.getSnapshot().aircraft.map((a) => a.gate))
+    const free = buildStands(c.airport.surface).find((s) => s.source === 'charted' && !taken.has(s.ref))!
+    c.sim.add({
+      id: 'arr2',
+      callsign: 'ARR2',
+      type: 'B738',
+      wake: 'M',
+      path: [ap.fix, ap.threshold],
+      targetSpeed: 140,
+      airborne: true,
+      intent: 'arrival',
+      gate: free.ref,
+      goalPoint: free.stop,
+    })
+    c.publish()
+    expect(c.getSnapshot().aircraft.find((a) => a.id === 'arr2')!.destStandOccupied).toBe(false)
+  })
+})

@@ -18,6 +18,7 @@ import {
   runwayMarkingsVisible,
   drawSelection,
   drawSpawnPreview,
+  drawStandHighlight,
   drawSurface,
   nearestTaxiwayRef,
   prepareSurface,
@@ -365,6 +366,12 @@ export function GroundScope({ controller }: { controller: GroundController }) {
         // selection rather than cluttering the runway permanently.
         if (selected && selectedId && selected.intent === 'arrival' && selected.controlledBy === 'tower') {
           drawRunwayExits(ctx, view, controller.exitOptions(selectedId), selected.exitRef)
+        }
+        // A selected arrival still heading for its stand: show where it is going, so a gate
+        // conflict is visible before the aircraft ever gets there. Drops once it has parked.
+        if (selected && selected.intent === 'arrival' && selected.gate && selected.status !== 'parked') {
+          const stand = prep.standLines.find((s) => s.ref === selected.gate)
+          if (stand) drawStandHighlight(ctx, view, stand)
         }
         drawSelection(ctx, view, selected, selectedId ? sim.routeOf(selectedId) : [])
         drawOffscreenTraffic(ctx, view, snap.aircraft, width, height)

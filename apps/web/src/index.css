@@ -462,6 +462,20 @@ body {
   color: #f0c06a;
 }
 
+/* An arrival's destination stand. Route-blue like the rest of a cleared path; amber-red when
+   the stand is already taken, so a gate conflict reads before the aircraft arrives. */
+.strip-dest {
+  margin-top: 5px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #8becff;
+}
+
+.strip-dest-conflict {
+  color: #ff8a5c;
+}
+
 .strip-wake {
   margin-top: 5px;
   font-size: 10px;

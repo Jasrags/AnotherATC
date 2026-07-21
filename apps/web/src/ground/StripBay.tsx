@@ -180,10 +180,18 @@ export function StripBay({ controller }: { controller: GroundController }) {
                   <span className="strip-meta">
                     <span className={`intent intent-${a.intent}`}>{intentLabel(a.intent)}</span>
                     {a.type}
-                    {a.gate ? ` · ${a.gate}` : ''}
+                    {/* A departure's gate is its origin; an arrival's is its destination, and it
+                        gets its own line below — so only show it here for a departure. */}
+                    {a.gate && a.intent === 'departure' ? ` · ${a.gate}` : ''}
                   </span>
                   {a.squawk && <span className="strip-squawk">{a.squawk}</span>}
                 </div>
+                {a.intent === 'arrival' && a.gate && a.status !== 'parked' && (
+                  <div className={`strip-dest${a.destStandOccupied ? ' strip-dest-conflict' : ''}`}>
+                    → GATE {a.gate}
+                    {a.destStandOccupied ? ' ⚠ OCCUPIED' : ''}
+                  </div>
+                )}
                 {a.altitude > 0 && (
                   <div className="strip-final">
                     ▼ {a.finalNm.toFixed(1)} NM · {a.altitude} FT
