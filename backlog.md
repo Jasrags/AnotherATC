@@ -35,7 +35,7 @@ strips, KSAN charts) and `CLAUDE.md` for architecture.
 The core ground-control loop. Ordered roughly by priority.
 
 - ✅ **Hold-short of runway / runway-crossing clearances** — routes stop at the runway; press C to clear across. _Next: snap the stop to the exact `holding_position` line; require Tower coordination._
-- ✅ **Spawn / despawn (traffic flow)** — intent-driven: departures start at gates → RWY, arrivals appear off RWY → gates; deterministic spawner, goal completion despawns, dep/arr score.
+- ✅ **Spawn / despawn (traffic flow)** — intent-driven: departures start at gates → RWY, arrivals appear on a 4 nm final → land → gates; deterministic spawner, goal completion despawns, dep/arr score.
 - ✅ **Named destinations** — selected strip shows a clearance row: RWY 27 / RWY 9 (auto hold-short), arrival's gate, Hold, Cross RWY. Goal-append makes "taxi to RWY" stop at the hold line. _Next: pick an arbitrary gate/spot; assigned-route ("via B, C")._
 - 🚧 **Aircraft separation / conflict** — following separation, runway single-occupancy, conflict alerts (red ring + HUD). Right-of-way uses a deterministic *total* order (rolling-beats-stopped, id tiebreak), so two aircraft can never both yield → no head-on/intersection deadlock. **Segment reservation (hold-at-junction):** graph-routed traffic treats each taxiway edge as a one-lane resource — the lower-priority aircraft stops *short of the junction* before entering a contested edge and waits for the other to clear, instead of driving through it. Automatic no-overlap floor. _Next: **player-instructed** give-way / reroute / sequencing (ties into Assigned taxi routes); HS1-specific incursion._
 - ✅ **Parallel-taxiway diversion** (separation follow-up) — when the yielder has been reservation-held at a junction for a sustained interval (`DIVERT_AFTER_SEC`), it reroutes to its current destination *around* the contested edge, if a path avoiding it exists and the detour stays within `DIVERSION_COST_FACTOR`× the direct route; otherwise it keeps waiting (no regression on the no-parallel corridor). Graph primitive `routeAvoiding` (Dijkstra excluding blocked edges) + per-clearance diversion memory. Deterministic (fixed-timestep hold accrual). The full fix for the pass-through degrade cases.
@@ -51,7 +51,7 @@ The core ground-control loop. Ordered roughly by priority.
 - ✅ **Routing-graph contraction + admin overlay** — the OSM surface gave the router ~1157 vertices when the network has only ~159 real decision points (junctions, endpoints, name changes). `graph.topology()` contracts pass-through vertices into geometry-preserving edges (edges keep the full polyline + true length, so driving still follows the curve) and flags long dead-straight runs for chart review. Admin overlay (GRAPH button / `g` key) draws the graph over the surface — junctions emphasized, flagged straight edges in pink — to spot geometry issues fast. _Next (**#2**): eyeball the ~4 flagged 2-point chords (taxiway C 936ft past the North Ramp is the "drove through the terminal" one) against the airport diagram and patch missing centerline vertices in `tools/ingest`. Later: optionally migrate routing itself onto the contracted graph (needs edge-snapping so gate stubs don't regress)._
 - ⬜ **HS1 hotspot** — render the KSAN hot spot; incursion-risk awareness
 - ⬜ **Ground conflict / incursion alerts** — two aircraft converging, or one entering an occupied runway
-- 🚧 **Handoff to/from Tower** — **Contact tower** now performs a real Ground→Tower control transfer (`controlledBy` flips; the strip moves to the TWR bay). Tower then issues **line up and wait** and an explicit **cleared for takeoff** (full-power accel to 140 kt, exempt from taxi caps/conflict; lifts off the far end, counted `departed`). Runway single-occupancy + wake separation gate the takeoff clearance. Cross runway is only for transiting traffic. See **Tower (Local Control)** epic + `docs/atc-tower.md`. _Next (Slice 2): Tower→Ground handoff on arrival runway-exit; refuse when Tower is overloaded._
+- 🚧 **Handoff to/from Tower** — **Contact tower** now performs a real Ground→Tower control transfer (`controlledBy` flips; the strip moves to the TWR bay). Tower then issues **line up and wait** and an explicit **cleared for takeoff** (full-power accel to 140 kt, exempt from taxi caps/conflict; lifts off the far end, counted `departed`). Runway single-occupancy + wake separation gate the takeoff clearance. Cross runway is only for transiting traffic. **Tower→Ground on arrival** also works now: a landed aircraft flips back to Ground once it has rolled out to taxi speed and can leave the runway (Slice 2). See **Tower (Local Control)** epic + `docs/atc-tower.md`. _Next: refuse a handoff when Tower is overloaded._
 - 💭 Multiple ground frequencies (N/S) — not needed at KSAN's scale
 - 💭 Progressive taxi / follow-the-greens visualization
 
@@ -110,11 +110,18 @@ Design note: `docs/atc-tower.md` (one sim, two projections; Ground and Tower own
   directly from hold-short (fast path) or from LUAW. Runway-clear + wake-separation gates moved to
   the takeoff clearance. Web: Tower command menu (LUAW / cleared for takeoff) + **Ground | Tower
   position switch** (tabs filter strips by owner, live counts).
-- ⬜ **Slice 2 — Tower owns arrivals** (new airborne physics): arrivals spawn on a short final
-  (`altitude` + descent), **cleared to land** → touchdown → rollout → runway exit → **Tower→Ground
-  handoff** to taxi to the gate. Runway single-occupancy spans landings + departures + LUAW.
-- ⬜ **Slice 3 — tension & polish**: wake spacing on final, sequence numbers, go-around stub,
-  ATIS/weather line, assign-exit.
+- ✅ **Slice 2 — Tower owns arrivals** (first airborne physics). Arrivals originate under Tower on
+  a 4 nm straight-in final (`altitude` derived from range to the threshold → a ~3° descent, no
+  integration drift). **Cleared to land** arms the landing; touchdown at the threshold hands the
+  aircraft to surface kinematics decelerating down the runway; at taxi speed it is handed to
+  **Ground** and routed to its gate (existing dwell / `arrived` counter). Uncleared at the
+  threshold → automatic **go-around** back to the fix (stub — closes the state-machine hole; the
+  player-issued command is Slice 3). One `blocksRunway` predicate — surface occupants plus anyone
+  inside 1.5 nm final — now gates line-up, takeoff, crossing, and landing alike. Web: Tower arrival
+  menu with a visible "runway busy" reason, FINAL/CLR LAND/ROLLOUT strips with range + altitude,
+  hollow airborne targets on the scope. _Next: arrival sequence numbers; pick the turnoff exit._
+- ⬜ **Slice 3 — tension & polish**: wake spacing on final, arrival sequence numbers, a
+  player-issued go-around, ATIS/weather line, assign-exit.
 - ⬜ Departure releases / wheels-up windows from TRACON _(deferred — needs TRACON)_
 - ⬜ **Naming debt** — the sim module is `packages/sim/src/ground/` / `createGroundSim` but now
   models Tower (airborne) state too. Revisit the name after Tower lands (likely `local/` or `atct/`,
@@ -175,7 +182,7 @@ Design note: `docs/atc-tower.md` (one sim, two projections; Ground and Tower own
 - ⬜ Destinations are raw clicks snapped to nearest node (see named destinations)
 - ⬜ Hold-short stops at the last taxi vertex before the runway zone, not the exact painted hold line (`holding_position`) — but a runway destination now routes to the threshold's own-side hold node (not across the runway), so it holds ~0.03–0.06 nm short of the correct departure end
 - ⬜ Taxi routes are shortest-path, not operationally realistic assigned routes
-- ⬜ Graph-routed head-ons hold at the junction (no overlap) and now **divert** onto a parallel taxiway when one exists within the cost cap. Residual: non-graph/hand-set paths (no edge topology → no reservation/diversion), and a contrived no-parallel ≥3-aircraft cycle (see Gridlock hardening — deferred). Arrivals still spawn stationary rather than rolling off the runway
+- ⬜ Graph-routed head-ons hold at the junction (no overlap) and now **divert** onto a parallel taxiway when one exists within the cost cap. Residual: non-graph/hand-set paths (no edge topology → no reservation/diversion), and a contrived no-parallel ≥3-aircraft cycle (see Gridlock hardening — deferred)
 - ⬜ Arrivals park at the nearest taxiway node + a straight leg to the gate point, not the real stand geometry
 - ⬜ Surface redrawn every frame; consider offscreen-canvas caching if perf needs it
 - ⬜ Scenario stitches arbitrary long taxiways for demo traffic — replace with real gate→runway flows

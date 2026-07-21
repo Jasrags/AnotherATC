@@ -169,19 +169,43 @@ Web (`apps/web`):
 - Position switch (Ground | Tower tabs) filters strips + scope to `controlledBy`; controller test
   for the filter + selection reset on switch.
 
-### Slice 2 — Tower owns arrivals (airborne)
+### Slice 2 — Tower owns arrivals (airborne) — **shipped**
 Sim:
-- Arrivals spawn on final: `altitude > 0`, position on the centerline-extended path; `step`
-  descends them toward the threshold deterministically.
-- `clearedToLand` → touchdown at threshold (`altitude→0`) → rollout decel → stop near taxi speed.
-- Runway-clear predicate covers final + LUAW + on-runway; cross-checked by refusal tests
-  (land-over-departure refused; takeoff-under-arrival refused).
-- Tower→Ground handoff on exit: arrival becomes `controlledBy:'ground'`, taxis to its gate,
-  counts `arrived` after the existing gate dwell (reuses `arrival.test.ts` tail).
+- Arrivals spawn on final: `airborne` init flag, `altitude > 0`, position on the
+  centerline-extended path (`SpawnConfig.approach = { fix, threshold }`, 4 nm / 1250 ft at KSAN).
+  Altitude is *derived* from range to the threshold rather than integrated, so the descent is a
+  pure function of position — deterministic and drift-free.
+- `clearedToLand` arms the landing; the aircraft keeps flying the same final. Touchdown at the
+  threshold (`altitude→0`) hands it to surface kinematics decelerating (`ROLLOUT_DECEL`) down the
+  runway toward the far end.
+- Runway-clear predicate unified as `blocksRunway` = on-runway occupant (minus a rotated
+  departure) **or** anyone inside `SHORT_FINAL_NM` (1.5 nm). One predicate now gates line-up,
+  takeoff, runway crossing, and the landing clearance alike.
+- Tower→Ground handoff on exit: once the rollout slows to taxi speed the arrival becomes
+  `controlledBy:'ground'` and is routed to its gate, reusing the existing taxi machinery and the
+  gate dwell / `arrived` counter.
+- **Go-around stub landed early** (Slice 3 owned the command version): an arrival that reaches the
+  threshold with no landing clearance is re-established at the final fix. Without it the state
+  machine has a hole — an aircraft flying past the threshold with nowhere to go. The *player-issued*
+  `goAround` command and the climb-out/TRACON re-inject remain Slice 3.
+
+Statuses: `onFinal → landing → rollout → (Ground) taxi`. Airborne aircraft are exempt from the
+surface systems — taxi separation, junction reservation, give-way, conflict detection, and the
+hold-short route split all skip them; they are over the field, not on it.
+
+Web (`apps/web`):
+- Tower arrival vocabulary: `onFinal`→[Cleared to land, Go around *(soon)*], `landing`→[Go around],
+  `rollout`→ automatic. The landing clearance is disabled with a visible "runway busy" reason that
+  mirrors `blocksRunway`, so the menu never offers a button the sim would refuse.
+- Strips show FINAL / CLR LAND / ROLLOUT plus a range + altitude row; the scope draws airborne
+  traffic as a hollow target with an altitude-in-hundreds / range data block. Range enters the
+  strip-bay re-render signature at 0.1 nm precision, so a final costs ~one re-render per 2.5 s
+  rather than one per frame.
 
 ### Slice 3 — tension & polish
-- Wake spacing on final (arrival-behind-heavy) + assign-exit; sequence numbering; `goAround`
-  re-inject stub; ATIS/weather line. Each independently testable.
+- Wake spacing on final (arrival-behind-heavy) + assign-exit; arrival sequence numbering; a
+  player-issued `goAround` (the automatic stub already exists — see Slice 2); ATIS/weather line.
+  Each independently testable.
 
 **Docs win over realism** where they conflict (`CLAUDE.md`): the 3° final, fixed final fix, and
 "despawn on climb-out" are deliberate simplifications until TRACON exists.
