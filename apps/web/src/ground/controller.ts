@@ -5,6 +5,7 @@ import {
   buildTaxiGraph,
   createGroundSim,
   APPROACH_SPEED_KT,
+  KSAN_RUNWAYS,
 } from '@anotheratc/sim'
 import type {
   ApproachConfig,
@@ -119,8 +120,14 @@ export interface StripSnapshot {
 export interface GroundController {
   readonly sim: GroundSim
   readonly destinations: NamedDestination[]
-  /** The final-approach geometry arrivals fly in on, so the scope can draw the course. */
-  readonly approach: ApproachConfig
+  /** The final-approach geometry arrivals fly in on, so the scope can draw the course.
+   *  Follows the active runway — it changes when the configuration does. */
+  approach(): ApproachConfig
+  /** Designator of the runway direction in use, e.g. "27". */
+  activeRunway(): string
+  /** Switch the airport configuration. Single runway: this moves *both* the arrival final and
+   *  the departure end, because they are always the same direction. */
+  setRunway(ident: '09' | '27'): void
   /** Runway turnoffs this arrival could still be assigned (ahead of it and reachable).
    *  For the canvas only, which draws outside React's render cycle — anything rendered by
    *  React must use `StripItem.exitOptions` off the published snapshot instead. */
@@ -308,7 +315,12 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
   return {
     sim,
     destinations,
-    approach: game.spawn.approach,
+    approach: () => sim.approach() ?? game.spawn.approach,
+    activeRunway: () => sim.runway()?.ident ?? game.runway.ident,
+    setRunway: (ident) => {
+      sim.setRunway(KSAN_RUNWAYS[ident])
+      publish()
+    },
     exitOptions: (id) => sim.exitOptions(id),
     topology,
     dev,

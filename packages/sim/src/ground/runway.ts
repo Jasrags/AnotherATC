@@ -3,6 +3,9 @@ import type { Point } from '../world/types'
 /** Feet in a nautical mile. */
 export const FT_PER_NM = 6076.12
 
+/** Length (nm) of the straight-in final arrivals are established on. */
+export const FINAL_APPROACH_NM = 4
+
 /**
  * The runway direction currently in use — the airport's *configuration*.
  *

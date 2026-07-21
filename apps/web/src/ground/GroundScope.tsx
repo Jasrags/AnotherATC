@@ -62,6 +62,15 @@ export function GroundScope({ controller }: { controller: GroundController }) {
     refitRef.current = true
   }
 
+  // Airport configuration. KSAN is single-runway, so this moves the arrival final *and* the
+  // departure end together — you cannot land one way and depart the other.
+  const [activeRunway, setActiveRunway] = useState(controller.activeRunway())
+  const toggleRunway = () => {
+    const next = controller.activeRunway() === '27' ? '09' : '27'
+    controller.setRunway(next)
+    setActiveRunway(next)
+  }
+
   // Dev sandbox: which surface-click tool is armed. Ref drives the click/render loop;
   // state drives the toolbar's pressed styling.
   type DevTool = 'none' | 'spawn' | 'probe'
@@ -315,7 +324,7 @@ export function GroundScope({ controller }: { controller: GroundController }) {
         drawGates(ctx, view, prep)
         drawRunwayMarkings(ctx, view, KSAN_RUNWAY_LAYOUT)
         drawHotspots(ctx, view, KSAN_SURFACE)
-        drawApproachCourse(ctx, view, controller.approach)
+        drawApproachCourse(ctx, view, controller.approach())
         if (draft) {
           drawRouteDraft(ctx, view, KSAN_SURFACE, draft.via)
           if (hovering) {
@@ -428,6 +437,14 @@ export function GroundScope({ controller }: { controller: GroundController }) {
       </div>
       <div className="hud hud-controls">
         {controller.dev && <span className="dev-tag mono">DEV</span>}
+        <button
+          type="button"
+          className="ctl-btn mono"
+          onClick={toggleRunway}
+          title="Switch the active runway. Arrivals and departures always use the same direction."
+        >
+          RWY {activeRunway}
+        </button>
         <button
           type="button"
           className="ctl-btn mono"

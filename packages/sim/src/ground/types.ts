@@ -1,6 +1,8 @@
 import type { Point } from '../world/types'
 import type { AircraftInit } from './sim'
 import type { RunwayExit } from './runwayExits'
+import type { ActiveRunway } from './runway'
+import type { ApproachConfig } from './sim'
 
 /** ICAO wake turbulence category: Light / Medium / Heavy / Super. */
 export type WakeCategory = 'L' | 'M' | 'H' | 'J'
@@ -164,6 +166,13 @@ export interface GroundSim {
   /** Runway turnoffs this arrival could still be assigned: ahead of it, and reachable at its
    *  current speed. Empty for anything that isn't landing. */
   exitOptions(aircraftId: string): RunwayExit[]
+  /** The runway direction in use, or null when the sim has no configuration. */
+  runway(): ActiveRunway | null
+  /** Where arrivals are established on final, derived from the active runway. */
+  approach(): ApproachConfig | null
+  /** Change the active runway direction — the airport's configuration. Traffic already
+   *  committed (airborne on final, rolling out) keeps the runway it was given. */
+  setRunway(next: ActiveRunway): void
   /** Insert an aircraft at runtime (dev/admin sandbox); returns its id. */
   add(init: AircraftInit): string
   /** Remove an aircraft by id; returns whether one was removed. */

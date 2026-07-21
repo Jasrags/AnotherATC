@@ -235,3 +235,113 @@ describe('EMAS and the pre-threshold pavement', () => {
     expect(westmost).toBeGreaterThan(r.farEnd[0])
   })
 })
+
+describe('a departure needs runway ahead of it', () => {
+  const guard = buildRunwayGuard(KSAN_SURFACE)
+  const graph = buildTaxiGraph(KSAN_SURFACE)
+
+  // Unit vector along the runway, and its perpendicular, so fixtures can be placed relative to
+  // either end without hand-computing coordinates.
+  const w = KSAN_RUNWAYS['09'].departureStart
+  const e = KSAN_RUNWAYS['27'].departureStart
+  const len = Math.hypot(e[0] - w[0], e[1] - w[1])
+  const ux = (e[0] - w[0]) / len
+  const uy = (e[1] - w[1]) / len
+
+  /** A departure holding short of `end`, handed to Tower, with its goal on the runway. */
+  const holdingShortAt = (end: readonly [number, number], config: '09' | '27') => {
+    const off = 0.08
+    const near: [number, number] = [end[0] + uy * off, end[1] - ux * off]
+    const across: [number, number] = [end[0] - uy * off, end[1] + ux * off]
+    const game = buildKsanGroundGame(1, config)
+    const sim = createGroundSim(
+      [
+        {
+          id: 'd', callsign: 'DEV01', type: 'B738', wake: 'M',
+          path: [near, [end[0], end[1]], across],
+          targetSpeed: 15, intent: 'departure', goalPoint: [end[0], end[1]],
+        },
+      ],
+      { guard, graph, runway: game.runway },
+    )
+    expect(sim.snapshot().aircraft[0]!.holdingForTakeoff).toBe(true)
+    expect(sim.dispatch({ type: 'contactTower', aircraftId: 'd' })).toEqual({ ok: true })
+    return sim
+  }
+
+  it('refuses a takeoff from the wrong end of the runway in use', () => {
+    // RWY 27 is active (rolls west), but this aircraft is at the west end. Cleared, it used to
+    // be given a "takeoff roll" to a point a few feet away and drive straight off the pavement.
+    const sim = holdingShortAt(w, '27')
+    expect(sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'd' })).toEqual({
+      ok: false,
+      reason: 'insufficient runway remaining — RWY 27 is in use',
+    })
+    expect(sim.dispatch({ type: 'lineUpAndWait', aircraftId: 'd' })).toEqual({
+      ok: false,
+      reason: 'insufficient runway remaining — RWY 27 is in use',
+    })
+  })
+
+  it('accepts the same aircraft once that end is the one in use', () => {
+    const sim = holdingShortAt(w, '09')
+    expect(sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'd' })).toEqual({ ok: true })
+  })
+
+  it('an aircraft at the in-use end lines up and gets airborne', () => {
+    const sim = holdingShortAt(e, '27')
+    expect(sim.dispatch({ type: 'lineUpAndWait', aircraftId: 'd' })).toEqual({ ok: true })
+    for (let i = 0; i < 400; i += 1) sim.step(0.1)
+    expect(sim.snapshot().aircraft[0]!.status).toBe('lineUpWait')
+    expect(sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'd' })).toEqual({ ok: true })
+    for (let i = 0; i < 900; i += 1) sim.step(0.1)
+    expect(sim.snapshot().departed).toBe(1)
+  })
+})
+
+describe('switching the airport configuration', () => {
+  const guard = buildRunwayGuard(KSAN_SURFACE)
+  const graph = buildTaxiGraph(KSAN_SURFACE)
+
+  it('moves the arrival final and the departure end together', () => {
+    const game = buildKsanGroundGame(1, '27')
+    const sim = createGroundSim([], { guard, graph, runway: game.runway })
+    expect(sim.runway()!.ident).toBe('27')
+    const on27 = sim.approach()!
+    sim.setRunway(KSAN_RUNWAYS['09'])
+    const on09 = sim.approach()!
+    expect(sim.runway()!.ident).toBe('09')
+    // The final flips to the other side of the field, and the threshold with it.
+    expect(on27.fix[0]).toBeGreaterThan(on27.threshold[0])
+    expect(on09.fix[0]).toBeLessThan(on09.threshold[0])
+    expect(on09.threshold).not.toEqual(on27.threshold)
+  })
+
+  it('lets an aircraft take off from the end that just became active', () => {
+    const game = buildKsanGroundGame(1, '27')
+    const off = 0.08
+    const wEnd = KSAN_RUNWAYS['09'].departureStart
+    const eEnd = KSAN_RUNWAYS['27'].departureStart
+    const l = Math.hypot(eEnd[0] - wEnd[0], eEnd[1] - wEnd[1])
+    const ux = (eEnd[0] - wEnd[0]) / l
+    const uy = (eEnd[1] - wEnd[1]) / l
+    const sim = createGroundSim(
+      [
+        {
+          id: 'd', callsign: 'DEV01', type: 'B738', wake: 'M',
+          path: [
+            [wEnd[0] + uy * off, wEnd[1] - ux * off],
+            [wEnd[0], wEnd[1]],
+            [wEnd[0] - uy * off, wEnd[1] + ux * off],
+          ],
+          targetSpeed: 15, intent: 'departure', goalPoint: [wEnd[0], wEnd[1]],
+        },
+      ],
+      { guard, graph, runway: game.runway },
+    )
+    sim.dispatch({ type: 'contactTower', aircraftId: 'd' })
+    expect(sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'd' }).ok).toBe(false)
+    sim.setRunway(KSAN_RUNWAYS['09'])
+    expect(sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'd' })).toEqual({ ok: true })
+  })
+})

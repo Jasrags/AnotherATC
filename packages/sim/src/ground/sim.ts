@@ -13,7 +13,7 @@ import type {
 import { edgeKey, type TaxiGraph } from './taxiGraph'
 import { wakeSeparationSec, WAKE_TIME_SCALE } from './wake'
 import { onRunway, splitRouteAtRunway, type RunwayGuard } from './runwayGuard'
-import { glideAltitudeFt, type ActiveRunway } from './runway'
+import { finalFix, glideAltitudeFt, FINAL_APPROACH_NM, type ActiveRunway } from './runway'
 import {
   brakeRateFor,
   buildRunwayExits,
@@ -102,6 +102,11 @@ const PUSHBACK_SPEED_KT = 5
 /** Takeoff roll: full-power acceleration (kt/s) up to the liftoff speed (kt). */
 const TAKEOFF_ACCEL = 12
 const TAKEOFF_SPEED_KT = 140
+/** Runway (nm) a departure needs ahead of it to get airborne, straight from this sim's own
+ *  takeoff physics: v² / (2·a) with v in kt and distance in nm. Anything less and the roll would
+ *  run off the end — which is exactly what happened when an aircraft at the *wrong* end of the
+ *  runway was cleared: the far end was right beside it, so it drove onto the grass. */
+const MIN_TAKEOFF_RUN_NM = (TAKEOFF_SPEED_KT * TAKEOFF_SPEED_KT) / (7200 * TAKEOFF_ACCEL)
 /** Groundspeed (kt) at which a departure has "rotated" — effectively airborne, so it no longer
  *  blocks the next departure's takeoff clearance (anticipated separation).
  *  SAFETY NOTE: clearing #2 once #1 passes this speed is collision-free only because takeoff
@@ -295,7 +300,14 @@ interface Internal
  * in place each tick; {@link GroundSim.snapshot} hands out fresh immutable objects.
  */
 export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimOptions = {}): GroundSim {
-  const { graph, guard, spawn, servicing, runway } = opts
+  const { graph, guard, spawn, servicing } = opts
+  /** The runway direction in use. Mutable: an airport changes configuration. */
+  let runway: ActiveRunway | undefined = opts.runway
+  /** Where arrivals are established, derived from the active runway when there is one. */
+  const approachNow = (): ApproachConfig | null =>
+    runway
+      ? { fix: finalFix(runway, FINAL_APPROACH_NM), threshold: runway.threshold }
+      : (spawn?.approach ?? null)
   let time = 0
   let departed = 0
   let arrived = 0
@@ -550,6 +562,21 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
    *  while anyone occupies its surface or is committed on short final above it. */
   function blocksRunway(ac: Internal): boolean {
     return occupiesForTakeoff(ac) || onShortFinal(ac)
+  }
+
+  /**
+   * Runway (nm) left ahead of an aircraft in the takeoff direction. Negative when it is past the
+   * far end — i.e. lined up facing the wrong way for the runway in use.
+   */
+  function takeoffRunRemaining(ac: Internal): number {
+    const far = farRunwayEnd([ac.x, ac.y])
+    if (!far) return Infinity
+    const from = runway?.departureStart ?? null
+    if (!from) return dist([ac.x, ac.y], far)
+    const dx = far[0] - from[0]
+    const dy = far[1] - from[1]
+    const len = Math.hypot(dx, dy) || 1
+    return ((far[0] - ac.x) * dx + (far[1] - ac.y) * dy) / len
   }
 
   /** Seconds of wake separation still owed before this holding-short departure may roll. */
@@ -1028,6 +1055,12 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         if (!ac.holdShort) return refused('not holding short of the runway')
         if (guard && (!ac.goalPoint || !onRunway(ac.goalPoint, guard)))
           return refused('route crosses the runway — clear it to cross, not to line up')
+        if (takeoffRunRemaining(ac) < MIN_TAKEOFF_RUN_NM)
+          return refused(
+            runway
+              ? `insufficient runway remaining — RWY ${runway.ident} is in use`
+              : 'insufficient runway remaining',
+          )
         // A departure actually ROLLING down the runway (moving away) does NOT block a line-up
         // behind it — that's precisely what "line up and wait" is for (anticipated separation).
         // But one merely *cleared and not yet moving* (departing, still at its spot), any
@@ -1067,6 +1100,15 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         if (!ac.holdShort && !ac.lineUpWait) return refused('not holding short or lined up')
         if (guard && (!ac.goalPoint || !onRunway(ac.goalPoint, guard)))
           return refused('route crosses the runway — clear it to cross, not for takeoff')
+        // Enough runway ahead to actually get airborne. This is what stops an aircraft at the
+        // wrong end being launched into a few hundred feet of pavement and then the grass.
+        const runLeft = takeoffRunRemaining(ac)
+        if (runLeft < MIN_TAKEOFF_RUN_NM)
+          return refused(
+            runway
+              ? `insufficient runway remaining — RWY ${runway.ident} is in use`
+              : 'insufficient runway remaining',
+          )
         // The runway must be clear of blocking traffic — but a preceding departure that has
         // rotated (near liftoff) no longer blocks, so the next may be cleared behind it.
         if (guard && fleet.some((o) => o !== ac && blocksRunway(o))) return refused('runway occupied')
@@ -1346,12 +1388,16 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         path:
           intent === 'departure'
             ? [slot.point]
-            : [spawn.approach.fix, spawn.approach.threshold],
+            : (() => {
+                const ap = approachNow()
+                return ap ? [ap.fix, ap.threshold] : [slot.point]
+              })(),
         targetSpeed: intent === 'departure' ? 0 : APPROACH_SPEED_KT,
         airborne: intent === 'arrival',
         intent,
         gate: slot.ref,
-        goalPoint: intent === 'departure' ? spawn.departureTarget : slot.point,
+        goalPoint:
+          intent === 'departure' ? (runway?.departureStart ?? spawn.departureTarget) : slot.point,
       }),
     )
   }
@@ -1428,6 +1474,12 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       }
     },
     dispatch,
+    runway: () => runway ?? null,
+    approach: () => approachNow(),
+    setRunway(next: ActiveRunway): void {
+      runway = next
+      exitCache.clear() // turnoffs are derived per landing direction
+    },
     exitOptions(aircraftId: string): RunwayExit[] {
       const ac = find(aircraftId)
       return ac ? exitOptionsFor(ac) : []
