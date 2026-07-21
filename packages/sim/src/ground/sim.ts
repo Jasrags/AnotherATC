@@ -14,6 +14,8 @@ import type {
 import { edgeKey, type TaxiGraph } from './taxiGraph'
 import {
   COMMS_LOG_LIMIT,
+  misheardSquawk,
+  negative,
   phraseFor,
   type PhraseContext,
   type Transmission,
@@ -108,6 +110,10 @@ export interface GroundSimOptions {
   /** Published controller frequencies, quoted in handoff phraseology ("contact tower 118.3").
    *  Omit and the transcript simply says "contact tower". */
   frequencies?: { ground: string; tower: string }
+  /** Read-back errors: with what probability a pilot mishears a clearance, and the seed that
+   *  makes it reproducible. Omit (the default) and every read-back is correct — which is why
+   *  every test written before this mechanic still holds. */
+  readback?: { errorRate: number; seed: number }
   /** The runway direction in use. Supplies the real landing threshold (which is *not* the end
    *  of the pavement where the threshold is displaced) and the far end a takeoff rolls toward,
    *  instead of guessing both from the polyline endpoints. */
@@ -260,6 +266,8 @@ interface Internal
     | 'exitRef'
     | 'vacated'
     | 'handoffPending'
+    // Derived at snapshot time from `lastClearance`, not stored twice.
+    | 'hasInstruction'
   > {
   path: readonly Point[]
   leg: number
@@ -318,6 +326,11 @@ interface Internal
   avoidEdges: Set<string>
   /** Blocked edges we already tried and failed to divert around (skip recompute until recleared). */
   divertTried: Set<string>
+  /** The last clearance transmitted to this aircraft — what "say again" repeats. */
+  lastClearance: GroundCommand | null
+  /** What the controller actually said, when the pilot read it back wrong. Null when the last
+   *  read-back was correct (which is indistinguishable from the outside — deliberately). */
+  misheard: { squawk: string } | null
 }
 
 /**
@@ -327,7 +340,7 @@ interface Internal
  * in place each tick; {@link GroundSim.snapshot} hands out fresh immutable objects.
  */
 export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimOptions = {}): GroundSim {
-  const { graph, guard, spawn, servicing, frequencies } = opts
+  const { graph, guard, spawn, servicing, frequencies, readback } = opts
   /** The runway direction in use. Mutable: an airport changes configuration. */
   let runway: ActiveRunway | undefined = opts.runway
   /** Where arrivals are established, derived from the active runway when there is one. */
@@ -388,12 +401,59 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     }
   }
 
+  // ─── Read-back verification ────────────────────────────────────────────────
+  // A pilot who mishears a clearance *acts on what they read back* — which is why the read-back
+  // exists in real ATC and why catching a wrong one is the controller's job. The clearance is
+  // never withheld: it takes effect immediately, wrong. The only cue is the transcript, so
+  // catching one is a judgement rather than a prompt, and "say again" is the catch.
+  const readbackRng = readback ? createRng(readback.seed) : null
+  let readbackErrors = 0
+  let readbackCaught = 0
+
+  /** Corrupt what the pilot heard, saving the correct value for a later correction. Returns
+   *  whether anything was misheard. Only clearances carrying a discrete value can be misheard;
+   *  everything else is read back verbatim. */
+  function maybeMishear(cmd: GroundCommand, ac: Internal): boolean {
+    if (!readbackRng || !readback || cmd.type !== 'clearance' || !ac.squawk) return false
+    if (readbackRng.next() >= readback.errorRate) return false
+    const wrong = misheardSquawk(ac.squawk, readbackRng.next())
+    if (wrong === ac.squawk) return false
+    ac.misheard = { squawk: ac.squawk }
+    ac.squawk = wrong
+    readbackErrors += 1
+    return true
+  }
+
+  /** Undo a misheard clearance: the aircraft acts on what the controller actually said. */
+  function correctMishearing(ac: Internal): boolean {
+    if (!ac.misheard) return false
+    ac.squawk = ac.misheard.squawk
+    ac.misheard = null
+    readbackCaught += 1
+    return true
+  }
+
   /** Log the exchange for a command that was just applied. `position` is who *issued* it —
    *  captured before the command ran, since a handoff changes the owner mid-command. */
   function logExchange(cmd: GroundCommand, ac: Internal, position: ControllerPosition): void {
+    // The instruction is phrased from the state as issued; the read-back from the state as the
+    // pilot heard it. When nothing is misheard the two are the same context.
     const ex = phraseFor(cmd, phraseContext(ac))
     if (!ex) return
+    ac.lastClearance = cmd
+    const readbackText = maybeMishear(cmd, ac) ? (phraseFor(cmd, phraseContext(ac))?.readback ?? ex.readback) : ex.readback
     transmit('controller', position, ac, ex.instruction)
+    transmit('pilot', position, ac, readbackText)
+  }
+
+  /** "Negative, …": repeat the last clearance, correctly. Never mishears — the point of a
+   *  correction is that it lands. */
+  function logCorrection(ac: Internal, position: ControllerPosition): void {
+    const prior = ac.lastClearance
+    if (!prior) return
+    const ex = phraseFor(prior, phraseContext(ac))
+    if (!ex) return
+    transmit('controller', position, ac, negative(ex.instruction))
     transmit('pilot', position, ac, ex.readback)
   }
 
@@ -482,6 +542,8 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       heldSec: 0,
       avoidEdges: new Set(),
       divertTried: new Set(),
+      lastClearance: null,
+      misheard: null,
     }
   }
 
@@ -1133,6 +1195,10 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     const issuedBy = ac?.controlledBy ?? 'ground'
     const result = applyCommand(command)
     if (result.ok && ac) {
+      if (command.type === 'sayAgain') {
+        logCorrection(ac, issuedBy)
+        return result
+      }
       logExchange(command, ac, issuedBy)
       // A handoff that took effect immediately: the pilot checks in on the new frequency.
       if (command.type === 'contactTower') checkIn(ac)
@@ -1216,6 +1282,12 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         ac.targetSpeed = TAXI_SPEED_KT
         ac.holding = false
         ac.holdShort = false
+        return ACCEPTED
+      case 'sayAgain':
+        // Refused only when there is nothing to repeat — never because the read-back happened
+        // to be correct, which would turn the mechanic into a free answer.
+        if (!ac.lastClearance) return refused('nothing has been issued to that aircraft')
+        correctMishearing(ac)
         return ACCEPTED
       case 'clearance':
         // Clearance delivery: issue the IFR clearance to a departure, assigning a beacon
@@ -1628,6 +1700,8 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         departed,
         arrived,
         comms: commsView,
+        readbackErrors,
+        readbackCaught,
         aircraft: fleet.map((ac) => ({
           id: ac.id,
           callsign: ac.callsign,
@@ -1655,6 +1729,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
           conflict: ac.conflict,
           giveWayTo: ac.giveWayTo ? (find(ac.giveWayTo)?.callsign ?? null) : null,
           squawk: ac.squawk,
+          hasInstruction: ac.lastClearance !== null,
           wakeHoldSec: wakeHoldFor(ac),
           services: ac.services.map((s) => ({ kind: s.kind, total: s.total, remaining: s.remaining })),
           serviceSec: Math.ceil(serviceRemaining(ac)),

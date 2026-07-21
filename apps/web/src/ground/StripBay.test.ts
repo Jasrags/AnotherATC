@@ -25,6 +25,7 @@ function strip(over: Partial<StripItem> = {}): StripItem {
     via: [],
     giveWayTo: null,
     squawk: null,
+    hasInstruction: false,
     wakeHoldSec: 0,
     services: [],
     serviceSec: 0,

@@ -28,6 +28,10 @@ import type {
 /** How far apart (nm) successive dev-spawned test arrivals sit along the final. */
 const DEV_ARRIVAL_SPACING_NM = 1.2
 
+/** How often a pilot mishears a clearance and reads it back wrong. The controller's job is to
+ *  catch it in the transcript ("say again"); uncaught, the aircraft acts on what it heard. */
+const READBACK_ERROR_RATE = 0.15
+
 /** What a flight strip shows — deliberately excludes fast-changing fields (position,
  *  speed) so the strip bay only re-renders when phase or selection changes. */
 export interface StripItem {
@@ -71,8 +75,12 @@ export interface StripItem {
   via: string[]
   /** Callsign of the traffic this aircraft is giving way to, or null. */
   giveWayTo: string | null
-  /** Assigned transponder code once cleared, or null. */
+  /** The code the aircraft is squawking — not necessarily the one issued, if the pilot
+   *  misheard the clearance. */
   squawk: string | null
+  /** Something has been transmitted to this aircraft, so "say again" has a clearance to
+   *  repeat. */
+  hasInstruction: boolean
   /** Seconds of wake-turbulence separation still owed before takeoff release; 0 when none. */
   wakeHoldSec: number
   /** Parallel ground services still running before pushback unlocks; empty when ready/none. */
@@ -209,8 +217,10 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
   const { destinations } = game
   // Dev mode starts empty: no seeded aircraft, no auto-spawner, no servicing gate.
   const frequencies = { ground: airport.comms.ground, tower: airport.comms.tower }
+  const readback = { errorRate: READBACK_ERROR_RATE, seed: 1 }
   const sim = dev
-    ? createGroundSim([], { graph, guard, runway: game.runway, frequencies })
+    ? // The sandbox is for driving a specific case, so nothing is misheard there.
+      createGroundSim([], { graph, guard, runway: game.runway, frequencies })
     : createGroundSim(game.inits, {
         graph,
         guard,
@@ -218,6 +228,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
         servicing: game.servicing,
         runway: game.runway,
         frequencies,
+        readback,
       })
 
   let selected: string | null = null
@@ -302,7 +313,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
     // Range-to-threshold is continuous, so it enters the signature at display precision
     // (0.1 nm ≈ one re-render every ~2.5 s on final) rather than every frame.
     for (const a of acs)
-      nextSig += `|${a.id}:${a.status}:${a.controlledBy}:${a.onRunway ? 'R' : ''}${a.blocksTakeoff ? 'B' : ''}${a.onShortFinal ? 'F' : ''}${a.vacated ? 'V' : ''}${a.handoffPending ? 'H' : ''}:${a.exitRef ?? ''}:${(exitOpts.get(a.id) ?? []).map((e) => e.ref).join('+')}:${vias.get(a.id)!.join('.')}:${a.giveWayTo ?? ''}:${a.squawk ?? ''}:${a.wakeHoldSec}:${a.serviceSec}:${a.finalNm.toFixed(1)}`
+      nextSig += `|${a.id}:${a.status}:${a.controlledBy}:${a.onRunway ? 'R' : ''}${a.blocksTakeoff ? 'B' : ''}${a.onShortFinal ? 'F' : ''}${a.vacated ? 'V' : ''}${a.handoffPending ? 'H' : ''}:${a.exitRef ?? ''}:${(exitOpts.get(a.id) ?? []).map((e) => e.ref).join('+')}:${vias.get(a.id)!.join('.')}:${a.giveWayTo ?? ''}:${a.squawk ?? ''}:${a.hasInstruction ? 'I' : ''}:${a.wakeHoldSec}:${a.serviceSec}:${a.finalNm.toFixed(1)}`
     if (nextSig === sig) return
     sig = nextSig
     snapshot = {
@@ -333,6 +344,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
         via: vias.get(a.id)!,
         giveWayTo: a.giveWayTo,
         squawk: a.squawk,
+        hasInstruction: a.hasInstruction,
         wakeHoldSec: a.wakeHoldSec,
         services: a.services,
         serviceSec: a.serviceSec,

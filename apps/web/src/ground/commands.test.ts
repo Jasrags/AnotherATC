@@ -26,6 +26,7 @@ function strip(over: Partial<StripItem> = {}): StripItem {
     via: [],
     giveWayTo: null,
     squawk: null,
+    hasInstruction: false,
     wakeHoldSec: 0,
     services: [],
     serviceSec: 0,
@@ -422,5 +423,28 @@ describe('commandsFor — intersection departures', () => {
     const taxi = cmds.find((c) => c.label === 'Taxi to…')!.action
     if (taxi.kind !== 'submenu') throw new Error('expected a submenu')
     expect(taxi.items.map((i) => i.label)).not.toContain('RWY @ B4')
+  })
+})
+
+describe('say again', () => {
+  it('is not offered until something has been transmitted', () => {
+    const { controller } = fakeController()
+    expect(labels(commandsFor(controller, strip({ hasInstruction: false }), []))).not.toContain('Say again')
+  })
+
+  it('is offered in every phase once a clearance has been issued', () => {
+    for (const status of ['parked', 'taxi', 'holding', 'holdShort', 'lineUpWait'] as const) {
+      const item = strip({ status, hasInstruction: true, controlledBy: status === 'lineUpWait' ? 'tower' : 'ground' })
+      const { controller } = fakeController()
+      expect(labels(commandsFor(controller, item, []))).toContain('Say again')
+    }
+  })
+
+  it('dispatches the correction for the selected aircraft', () => {
+    const { controller, dispatched } = fakeController()
+    const cmd = commandsFor(controller, strip({ hasInstruction: true }), []).find((x) => x.label === 'Say again')!
+    expect(cmd.action.kind).toBe('run')
+    if (cmd.action.kind === 'run') cmd.action.run()
+    expect(dispatched).toEqual([{ type: 'sayAgain', aircraftId: 'a' }])
   })
 })

@@ -99,6 +99,23 @@ export interface Exchange {
   readback: string
 }
 
+/** Re-issue an instruction as a correction: "SKW412, negative, cleared to …". The callsign
+ *  always leads an instruction, so the qualifier goes straight after it. */
+export function negative(instruction: string): string {
+  return instruction.replace(', ', ', negative, ')
+}
+
+/** A beacon code with one octal digit misheard — the classic read-back error. Deterministic:
+ *  `roll` (0–1) picks which digit and by how much, so a seeded sim mishears reproducibly. */
+export function misheardSquawk(code: string, roll: number): string {
+  const digits = [...code]
+  const index = Math.min(digits.length - 1, Math.floor(roll * digits.length))
+  const delta = 1 + Math.floor(roll * 7) % 7
+  const digit = Number.parseInt(digits[index] as string, 8)
+  digits[index] = ((digit + delta) % 8).toString(8)
+  return digits.join('')
+}
+
 /** The exchange for an accepted command, or null for one nobody says out loud. */
 export function phraseFor(cmd: GroundCommand, ctx: PhraseContext): Exchange | null {
   const cs = ctx.callsign

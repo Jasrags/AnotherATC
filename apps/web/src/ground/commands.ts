@@ -27,6 +27,22 @@ export interface MenuCommand {
  * strip state machine — see `docs/atc-flight-strips.md`.
  */
 export function commandsFor(controller: GroundController, item: StripItem, aircraft: StripItem[]): MenuCommand[] {
+  const cmds = phaseCommandsFor(controller, item, aircraft)
+  // "Say again" applies in every phase once anything has been said, and is deliberately offered
+  // whether or not the read-back was wrong — an always-available correction is a judgement; one
+  // that appears only when needed is a prompt.
+  if (!item.hasInstruction) return cmds
+  return [
+    ...cmds,
+    {
+      key: 'sayAgain',
+      label: 'Say again',
+      action: { kind: 'run', run: () => controller.dispatch({ type: 'sayAgain', aircraftId: item.id }) },
+    },
+  ]
+}
+
+function phaseCommandsFor(controller: GroundController, item: StripItem, aircraft: StripItem[]): MenuCommand[] {
   const id = item.id
   const send = controller.dispatch
 

@@ -49,6 +49,10 @@ export type GroundCommand =
   | { type: 'assignExit'; aircraftId: string; ref: string }
   | { type: 'contactGround'; aircraftId: string }
   | { type: 'clearance'; aircraftId: string }
+  /** "Negative, …" — re-issue the aircraft's last clearance. If the pilot had misheard it, this
+   *  is the catch: they act on what the controller actually said. If they hadn't, it is simply a
+   *  repeated transmission, which is what makes catching one a judgement rather than a prompt. */
+  | { type: 'sayAgain'; aircraftId: string }
 
 /** Progress of one parallel ground service (fuel, cargo, cabin, …) on a parked departure. */
 export interface ServiceProgress {
@@ -128,8 +132,13 @@ export interface GroundAircraft {
   conflict: boolean
   /** Callsign of the traffic this aircraft has been told to give way to, or null. */
   giveWayTo: string | null
-  /** Assigned transponder (beacon) code once IFR clearance is delivered, or null. */
+  /** Assigned transponder (beacon) code once IFR clearance is delivered, or null. Note this is
+   *  the code the *aircraft is squawking* — if the pilot misheard the clearance, it is not the
+   *  code the controller issued. Comparing it against the transcript is the game. */
   squawk: string | null
+  /** At least one instruction has been transmitted to this aircraft, so "say again" has
+   *  something to repeat. Says nothing about whether it was read back correctly. */
+  hasInstruction: boolean
   /** Seconds of wake-turbulence separation still required before this holding-short
    *  departure can be released for takeoff; 0 when none applies. */
   wakeHoldSec: number
@@ -149,6 +158,10 @@ export interface GroundSnapshot {
   arrived: number
   /** Radio transcript, oldest first, capped at `COMMS_LOG_LIMIT`. */
   comms: readonly Transmission[]
+  /** Clearances a pilot has read back incorrectly this session. */
+  readbackErrors: number
+  /** How many of those the controller caught with a "say again" before they mattered. */
+  readbackCaught: number
 }
 
 /** Outcome of a dispatched command: accepted, or refused with a controller-facing reason. */
