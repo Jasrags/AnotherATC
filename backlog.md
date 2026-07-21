@@ -51,7 +51,7 @@ The core ground-control loop. Ordered roughly by priority.
 - ✅ **Routing-graph contraction + admin overlay** — the OSM surface gave the router ~1157 vertices when the network has only ~159 real decision points (junctions, endpoints, name changes). `graph.topology()` contracts pass-through vertices into geometry-preserving edges (edges keep the full polyline + true length, so driving still follows the curve) and flags long dead-straight runs for chart review. Admin overlay (GRAPH button / `g` key) draws the graph over the surface — junctions emphasized, flagged straight edges in pink — to spot geometry issues fast. _Next (**#2**): eyeball the ~4 flagged 2-point chords (taxiway C 936ft past the North Ramp is the "drove through the terminal" one) against the airport diagram and patch missing centerline vertices in `tools/ingest`. Later: optionally migrate routing itself onto the contracted graph (needs edge-snapping so gate stubs don't regress)._
 - ⬜ **HS1 hotspot** — render the KSAN hot spot; incursion-risk awareness
 - ⬜ **Ground conflict / incursion alerts** — two aircraft converging, or one entering an occupied runway
-- 🚧 **Handoff to/from Tower** — **Contact tower** hands off a departure holding short of its runway: it lines up and **rolls for takeoff** (full-power accel to 140 kt, exempt from taxi caps/conflict), lifts off the far runway end, and is counted as `departed` (new `departing`/TAKEOFF phase). Requires a clear runway (single-occupancy). Cross runway is now only for transiting traffic. _Next: real Tower mode (line up & wait, explicit takeoff clearance, wake spacing); Tower→Ground handoff on arrival runway-exit; refuse when Tower is overloaded._
+- 🚧 **Handoff to/from Tower** — **Contact tower** now performs a real Ground→Tower control transfer (`controlledBy` flips; the strip moves to the TWR bay). Tower then issues **line up and wait** and an explicit **cleared for takeoff** (full-power accel to 140 kt, exempt from taxi caps/conflict; lifts off the far end, counted `departed`). Runway single-occupancy + wake separation gate the takeoff clearance. Cross runway is only for transiting traffic. See **Tower (Local Control)** epic + `docs/atc-tower.md`. _Next (Slice 2): Tower→Ground handoff on arrival runway-exit; refuse when Tower is overloaded._
 - 💭 Multiple ground frequencies (N/S) — not needed at KSAN's scale
 - 💭 Progressive taxi / follow-the-greens visualization
 
@@ -102,12 +102,23 @@ individual command features below plug into; it generalizes across controller mo
 
 The game models four positions (see `docs/atc-flight-strips.md`). Ground first, then:
 
-### ⬜ Tower (Local Control)
-- ⬜ Runway environment: line up and wait, takeoff clearance, landing clearance
-- ⬜ Wake-turbulence spacing enforcement (Heavy/Super intervals)
-- ⬜ Go-around authority (re-injects into TRACON)
-- ⬜ Departure releases / wheels-up windows from TRACON
-- ⬜ Runway exit assignment on rollout
+### 🚧 Tower (Local Control)
+Design note: `docs/atc-tower.md` (one sim, two projections; Ground and Tower own the same fleet).
+- ✅ **Slice 1 — Tower owns departures.** `contactTower` is now a Ground→Tower control transfer
+  (`controlledBy` flips), not an instant launch. Tower issues **line up and wait** (taxi onto the
+  centerline, new `lineUpWait` status) and **cleared for takeoff** (the roll) — takeoff is legal
+  directly from hold-short (fast path) or from LUAW. Runway-clear + wake-separation gates moved to
+  the takeoff clearance. Web: Tower command menu (LUAW / cleared for takeoff) + **Ground | Tower
+  position switch** (tabs filter strips by owner, live counts).
+- ⬜ **Slice 2 — Tower owns arrivals** (new airborne physics): arrivals spawn on a short final
+  (`altitude` + descent), **cleared to land** → touchdown → rollout → runway exit → **Tower→Ground
+  handoff** to taxi to the gate. Runway single-occupancy spans landings + departures + LUAW.
+- ⬜ **Slice 3 — tension & polish**: wake spacing on final, sequence numbers, go-around stub,
+  ATIS/weather line, assign-exit.
+- ⬜ Departure releases / wheels-up windows from TRACON _(deferred — needs TRACON)_
+- ⬜ **Naming debt** — the sim module is `packages/sim/src/ground/` / `createGroundSim` but now
+  models Tower (airborne) state too. Revisit the name after Tower lands (likely `local/` or `atct/`,
+  since one ATCT facility runs both Ground and Local Control).
 
 ### ⬜ TRACON (Approach + Departure)
 - ⬜ Radar scope (airborne): targets, data blocks, history trails, range rings
