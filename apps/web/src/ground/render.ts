@@ -564,8 +564,13 @@ export function prepareSurface(
 }
 
 export function drawGates(ctx: Ctx, v: View, prep: PreparedSurface): void {
+  // A stand with a lead-in is already marked by its stop bar — a square on the same point would
+  // just sit inside the bar, under the aircraft parked on it. Only stands with no line of their
+  // own (numbered cargo/remote positions) still need a marker.
+  const marked = new Set(prep.standLines.map((s) => s.ref))
   ctx.fillStyle = COLORS.gateNode
   for (const s of prep.stands) {
+    if (marked.has(s.ref)) continue
     const [sx, sy] = toScreen(v, s.point[0], s.point[1])
     ctx.fillRect(sx - 1.5, sy - 1.5, 3, 3)
   }
