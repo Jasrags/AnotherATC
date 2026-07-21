@@ -12,6 +12,7 @@ import type {
   WakeCategory,
 } from './types'
 import { edgeKey, type TaxiGraph } from './taxiGraph'
+import { findStand, type Stand } from './stands'
 import {
   COMMS_LOG_LIMIT,
   misheardSquawk,
@@ -66,7 +67,11 @@ export interface AircraftInit {
 /** A gate/stand the spawner can use. */
 export interface GateSlot {
   ref: string
+  /** Where the nose stops — the end of the stand's lead-in line, not the gate label point. */
   point: Point
+  /** Which way the aircraft faces when parked. Without it a parked aircraft points north and
+   *  the pushback that follows looks like it is being dragged sideways off the stand. */
+  headingDeg?: number
 }
 
 /** Final-approach geometry: arrivals appear airborne at `fix` (on the runway centerline
@@ -110,6 +115,10 @@ export interface GroundSimOptions {
   /** Published controller frequencies, quoted in handoff phraseology ("contact tower 118.3").
    *  Omit and the transcript simply says "contact tower". */
   frequencies?: { ground: string; tower: string }
+  /** Stand geometry: the painted lead-in line for each gate. Omit and an aircraft parks at the
+   *  bare gate point, which is what makes an arrival cut across the apron and a pushback shove
+   *  off toward whatever node happens to be nearest. */
+  stands?: readonly Stand[]
   /** Read-back errors: with what probability a pilot mishears a clearance, and the seed that
    *  makes it reproducible. Omit (the default) and every read-back is correct — which is why
    *  every test written before this mechanic still holds. */
@@ -124,6 +133,10 @@ const TAXI_ACCEL = 4
 const TAXI_SPEED_KT = 15
 /** Pushback creep speed (kt) — a tug easing the aircraft off the stand. */
 const PUSHBACK_SPEED_KT = 5
+/** Speed (kt) along a stand's lead-in line. An aircraft is marshalled onto a stand at a walking
+ *  pace, not at taxi speed — and the line is short enough that arriving at 15 kt means stopping
+ *  dead on the mark rather than easing onto it. */
+const STAND_SPEED_KT = 5
 /** Takeoff roll: full-power acceleration (kt/s) up to the liftoff speed (kt). */
 const TAKEOFF_ACCEL = 12
 const TAKEOFF_SPEED_KT = 140
@@ -333,6 +346,9 @@ interface Internal
   avoidEdges: Set<string>
   /** Blocked edges we already tried and failed to divert around (skip recompute until recleared). */
   divertTried: Set<string>
+  /** Trailing legs of the current path that run along a stand's lead-in line (0 when none).
+   *  Inside them the aircraft is being marshalled onto the stand and creeps. */
+  standLegs: number
   /** Cleared for takeoff while still holding short: taxi into position first, then roll.
    *  The roll begins on its own once the aircraft is established on the centerline. */
   rollWhenLinedUp: boolean
@@ -351,6 +367,7 @@ interface Internal
  */
 export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimOptions = {}): GroundSim {
   const { graph, guard, spawn, servicing, frequencies, readback } = opts
+  const stands = opts.stands ?? []
   /** The runway direction in use. Mutable: an airport changes configuration. */
   let runway: ActiveRunway | undefined = opts.runway
   /** Where arrivals are established, derived from the active runway when there is one. */
@@ -579,6 +596,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       heldSec: 0,
       avoidEdges: new Set(),
       divertTried: new Set(),
+      standLegs: 0,
       rollWhenLinedUp: false,
       lastClearance: null,
       misheard: null,
@@ -1006,6 +1024,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     applyRoute(ac, alt, dest, appendExact)
     ac.heldSec = 0
     ac.blockedEdge = null
+    ac.standLegs = 0
   }
 
   /**
@@ -1119,6 +1138,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     ac.holdShort = false
     ac.heldSec = 0
     ac.blockedEdge = null
+    ac.standLegs = 0
   }
 
   /** Forget accumulated diversion state — a fresh player clearance supersedes it. */
@@ -1171,6 +1191,42 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     clearDiversion(ac)
     applyRoute(ac, route, dest, appendExact)
     return true
+  }
+
+  /** Marshalling pace once the aircraft is on its stand's lead-in line. */
+  function standCap(ac: Internal): number {
+    if (ac.standLegs <= 0) return Infinity
+    return ac.leg >= ac.path.length - ac.standLegs ? STAND_SPEED_KT : Infinity
+  }
+
+  /** The stand this aircraft is assigned, when the field has one mapped for its gate. */
+  function standFor(ac: Internal): Stand | undefined {
+    return findStand(stands, ac.gate)
+  }
+
+  /**
+   * Route to a gate the way an aircraft actually reaches one: taxi to where the lead-in meets
+   * the taxilane, then follow the painted line onto the stand. Routing straight to the stand
+   * point instead lets the graph leg cut across the apron and arrive from any direction.
+   */
+  function routeToStand(ac: Internal, stand: Stand): boolean {
+    if (!graph) return false
+    const startKey = graph.nearestNode([ac.x, ac.y])
+    const goalKey = goalNodeFor(stand.entry, [ac.x, ac.y])
+    if (!startKey || !goalKey) return false
+    const route = graph.route(startKey, goalKey)
+    if (route.length === 0) return false
+    clearDiversion(ac)
+    applyRoute(ac, [...route, ...stand.lead], stand.stop, false)
+    ac.standLegs = stand.lead.length
+    return true
+  }
+
+  /** Send an aircraft to its own goal — onto the stand for an arrival with mapped geometry. */
+  function routeToOwnGoal(ac: Internal): boolean {
+    const stand = ac.intent === 'arrival' ? standFor(ac) : undefined
+    if (stand) return routeToStand(ac, stand)
+    return ac.goalPoint ? routeTo(ac, ac.goalPoint, true) : false
   }
 
   /** Route via an ordered taxiway sequence, falling back to shortest path if that
@@ -1310,7 +1366,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         // Append the exact goal so departures hold short at the runway and
         // arrivals park at the stand (rather than stopping at the nearest node).
         if (!ac.goalPoint) return refused('aircraft has no assigned goal')
-        return routeTo(ac, ac.goalPoint, true) ? ACCEPTED : refused('no taxi route to the goal')
+        return routeToOwnGoal(ac) ? ACCEPTED : refused('no taxi route to the goal')
       case 'taxiVia':
         return routeVia(ac, command.taxiways, command.dest, command.exact ?? false)
           ? ACCEPTED
@@ -1330,11 +1386,22 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         if (ac.groundspeed > 0.1 || ac.path.length > 1) return refused('already moving or routed')
         const svc = serviceRemaining(ac)
         if (svc > 0) return refused(`ground servicing in progress — ${Math.ceil(svc)}s to pushback`)
-        const alleyKey = graph.nearestNode([ac.x, ac.y])
-        const alley = alleyKey ? graph.nodePoint(alleyKey) : undefined
-        if (!alley || dist([ac.x, ac.y], alley) < GATE_EPS) return refused('no alley to push onto')
+        // Push back the way the aircraft came in: reversed along its own lead-in line, which
+        // ends on the taxilane. Shoving toward the nearest graph node instead is what sent
+        // aircraft backing off the stand in directions the paint never goes.
+        const stand = standFor(ac)
+        const back: Point[] = stand
+          ? [[ac.x, ac.y], ...[...stand.lead].reverse().slice(1)]
+          : (() => {
+              const alleyKey = graph.nearestNode([ac.x, ac.y])
+              const alley = alleyKey ? graph.nodePoint(alleyKey) : undefined
+              return alley ? [[ac.x, ac.y] as Point, alley] : []
+            })()
+        const target = back[back.length - 1]
+        if (back.length < 2 || !target || dist([ac.x, ac.y], target) < GATE_EPS)
+          return refused('no alley to push onto')
         clearDiversion(ac)
-        ac.path = [[ac.x, ac.y], alley]
+        ac.path = back
         ac.leg = 0
         ac.held = null
         ac.dwell = -1
@@ -1623,7 +1690,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
    * and the aircraft is parked on the runway while it fails.
    */
   function handOffToGround(ac: Internal): boolean {
-    if (!ac.goalPoint || !routeTo(ac, ac.goalPoint, true)) return false
+    if (!ac.goalPoint || !routeToOwnGoal(ac)) return false
     ac.rollingOut = false
     ac.groundPending = false
     ac.controlledBy = 'ground'
@@ -1732,6 +1799,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
                 return ap ? [ap.fix, ap.threshold] : [slot.point]
               })(),
         targetSpeed: intent === 'departure' ? 0 : APPROACH_SPEED_KT,
+        ...(intent === 'departure' && slot.headingDeg !== undefined ? { heading: slot.headingDeg } : {}),
         airborne: intent === 'arrival',
         intent,
         gate: slot.ref,
@@ -1750,7 +1818,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
           ? Infinity // a takeoff roll and a final aren't taxi movements
           : ac.rollingOut
             ? rolloutCap(ac) // …and a landing rollout follows its own turn-speed profile
-            : Math.min(separationCap(ac), reservationCap(ac), giveWayCap(ac)),
+            : Math.min(separationCap(ac), reservationCap(ac), giveWayCap(ac), standCap(ac)),
       )
       // reservationCap set each aircraft's blockedEdge; accrue continuous hold time and,
       // once it's sustained, reroute around the block if a viable parallel exists.

@@ -219,7 +219,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
   // Dev mode starts empty: no seeded aircraft, no auto-spawner, no servicing gate.
   const frequencies = { ground: airport.comms.ground, tower: airport.comms.tower }
   const sim = dev
-    ? createGroundSim([], { graph, guard, runway: game.runway, frequencies })
+    ? createGroundSim([], { graph, guard, runway: game.runway, frequencies, stands: game.stands })
     : createGroundSim(game.inits, {
         graph,
         guard,
@@ -227,6 +227,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
         servicing: game.servicing,
         runway: game.runway,
         frequencies,
+        stands: game.stands,
       })
 
   let selected: string | null = null

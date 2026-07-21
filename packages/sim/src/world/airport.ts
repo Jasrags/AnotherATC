@@ -2,6 +2,7 @@ import { createRng, type Rng } from '../random'
 import { finalFix, FINAL_APPROACH_NM, type ActiveRunway, type RunwayLayout } from '../ground/runway'
 import type { AircraftInit, GateSlot, ServicingConfig, SpawnConfig } from '../ground/sim'
 import type { NamedDestination, WakeCategory } from '../ground/types'
+import { buildStands, type Stand } from '../ground/stands'
 import type { AirportSurface, Point } from './types'
 
 /** Controller frequencies, for the scope header. */
@@ -67,23 +68,19 @@ export function findRunway(airport: Airport, ident: string): ActiveRunway | unde
   return airport.runways.find((r) => r.ident === ident)
 }
 
-/** Stands from the surface's tagged gate nodes, deduped by designator. The common case: a field
- *  whose gates are in the surface data needs no gate list of its own. */
+/** Stands from the surface, deduped by designator. The common case: a field whose gates are in
+ *  the surface data needs no gate list of its own. Each slot is the stand's *nose stop* and the
+ *  heading it parks on, taken from the painted lead-in line where the field has one — not the
+ *  gate label node, which sits at the terminal a plane's length further in. */
 export function gatesFromSurface(surface: AirportSurface): GateSlot[] {
-  const slots: GateSlot[] = []
-  const seen = new Set<string>()
-  for (const f of surface.features) {
-    if (f.kind !== 'gate' || !f.ref || seen.has(f.ref)) continue
-    const p = f.points[0]
-    if (!p) continue
-    seen.add(f.ref)
-    slots.push({ ref: f.ref, point: p })
-  }
-  return slots
+  return buildStands(surface).map((s) => ({ ref: s.ref, point: s.stop, headingDeg: s.headingDeg }))
 }
 
 export interface AirportGame {
   inits: AircraftInit[]
+  /** Painted lead-in geometry per stand — how an arrival gets onto a gate and a departure
+   *  pushes back off it. */
+  stands: Stand[]
   spawn: SpawnConfig
   destinations: NamedDestination[]
   servicing: ServicingConfig
@@ -133,11 +130,19 @@ export function createAirportGame(airport: Airport, seed = 1, runwayIdent?: stri
         wake,
         path: [slot.point],
         targetSpeed: 0,
+        ...(slot.headingDeg !== undefined ? { heading: slot.headingDeg } : {}),
         intent: 'departure' as const,
         gate: slot.ref,
         goalPoint: departureTarget,
       }
     })
 
-  return { inits, spawn, destinations, servicing: airport.servicing, runway }
+  return {
+    inits,
+    spawn,
+    destinations,
+    servicing: airport.servicing,
+    runway,
+    stands: buildStands(airport.surface),
+  }
 }
