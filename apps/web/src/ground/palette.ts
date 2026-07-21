@@ -22,6 +22,8 @@ export const COLORS = {
   airborneTarget: '#7fd4ff', // traffic on final — hollow, to read as "not on the surface"
   approachCourse: '#2f5d72', // the extended runway centerline arrivals fly in on
   approachTick: '#4a7f96', // 1-nm range ticks along that course
+  exitAvailable: '#4d7f6a', // a turnoff the landing aircraft could still be assigned
+  exitAssigned: '#7ff0b0', // the turnoff it is actually planning for
   leader: '#5aa8cb',
   block1: '#8ef0b4',
   block2: '#54b487',

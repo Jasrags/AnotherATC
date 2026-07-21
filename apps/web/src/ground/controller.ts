@@ -15,6 +15,7 @@ import type {
   GroundStatus,
   NamedDestination,
   Point,
+  RunwayExit,
   ServiceProgress,
   TaxiTopology,
   WakeCategory,
@@ -44,6 +45,12 @@ export interface StripItem {
   /** Occupies the runway in a way that blocks another aircraft's takeoff clearance (any
    *  on-runway aircraft except a departure that has rotated). Gates the takeoff-clearance UI. */
   blocksTakeoff: boolean
+  /** Designator of the runway turnoff this arrival is planning for / rolling out to, or null. */
+  exitRef: string | null
+  /** Landed and fully clear of the runway — ready to be handed to Ground. */
+  vacated: boolean
+  /** Tower has already issued the frequency change; it applies when the aircraft vacates. */
+  handoffPending: boolean
   /** On final and close enough in to own the runway. Comes straight from the sim's own
    *  predicate — never re-derived here from `finalNm`, which is rounded for display and
    *  would disagree with the sim near the threshold distance. */
@@ -110,6 +117,8 @@ export interface GroundController {
   readonly destinations: NamedDestination[]
   /** The final-approach geometry arrivals fly in on, so the scope can draw the course. */
   readonly approach: ApproachConfig
+  /** Runway turnoffs this arrival could still be assigned (ahead of it and reachable). */
+  exitOptions(id: string): RunwayExit[]
   /** The contracted routing graph (decision nodes + geometry edges) for the admin overlay. */
   readonly topology: TaxiTopology
   /** Whether the dev/admin sandbox is active (empty surface + spawn/probe tools). */
@@ -239,7 +248,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
     // Range-to-threshold is continuous, so it enters the signature at display precision
     // (0.1 nm ≈ one re-render every ~2.5 s on final) rather than every frame.
     for (const a of acs)
-      nextSig += `|${a.id}:${a.status}:${a.controlledBy}:${a.onRunway ? 'R' : ''}${a.blocksTakeoff ? 'B' : ''}${a.onShortFinal ? 'F' : ''}:${vias.get(a.id)!.join('.')}:${a.giveWayTo ?? ''}:${a.squawk ?? ''}:${a.wakeHoldSec}:${a.serviceSec}:${a.finalNm.toFixed(1)}`
+      nextSig += `|${a.id}:${a.status}:${a.controlledBy}:${a.onRunway ? 'R' : ''}${a.blocksTakeoff ? 'B' : ''}${a.onShortFinal ? 'F' : ''}${a.vacated ? 'V' : ''}${a.handoffPending ? 'H' : ''}:${a.exitRef ?? ''}:${vias.get(a.id)!.join('.')}:${a.giveWayTo ?? ''}:${a.squawk ?? ''}:${a.wakeHoldSec}:${a.serviceSec}:${a.finalNm.toFixed(1)}`
     if (nextSig === sig) return
     sig = nextSig
     snapshot = {
@@ -259,6 +268,9 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
         onRunway: a.onRunway,
         blocksTakeoff: a.blocksTakeoff,
         onShortFinal: a.onShortFinal,
+        exitRef: a.exitRef,
+        vacated: a.vacated,
+        handoffPending: a.handoffPending,
         altitude: Math.round(a.altitude / 50) * 50,
         finalNm: Math.round(a.finalNm * 10) / 10,
         via: vias.get(a.id)!,
@@ -278,6 +290,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
     sim,
     destinations,
     approach: game.spawn.approach,
+    exitOptions: (id) => sim.exitOptions(id),
     topology,
     dev,
     snap: snapPoint,

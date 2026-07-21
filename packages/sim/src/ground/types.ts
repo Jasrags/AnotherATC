@@ -1,5 +1,6 @@
 import type { Point } from '../world/types'
 import type { AircraftInit } from './sim'
+import type { RunwayExit } from './runwayExits'
 
 /** ICAO wake turbulence category: Light / Medium / Heavy / Super. */
 export type WakeCategory = 'L' | 'M' | 'H' | 'J'
@@ -42,6 +43,8 @@ export type GroundCommand =
   | { type: 'lineUpAndWait'; aircraftId: string }
   | { type: 'clearedForTakeoff'; aircraftId: string }
   | { type: 'clearedToLand'; aircraftId: string }
+  | { type: 'assignExit'; aircraftId: string; ref: string }
+  | { type: 'contactGround'; aircraftId: string }
   | { type: 'clearance'; aircraftId: string }
 
 /** Progress of one parallel ground service (fuel, cargo, cabin, …) on a parked departure. */
@@ -109,6 +112,15 @@ export interface GroundAircraft {
    *  {@link blocksTakeoff} this is the sim's full runway-clear predicate, exposed so the UI can
    *  gate and explain a clearance exactly as the sim would refuse it. */
   onShortFinal: boolean
+  /** Designator of the runway turnoff this arrival is planning for or rolling out to, or null.
+   *  Set automatically at touchdown when the controller hasn't assigned one. */
+  exitRef: string | null
+  /** A landed arrival is fully clear of the runway (past its turnoff's hold-short point) and
+   *  can be handed to Ground. False for anything not on a landing roll. */
+  vacated: boolean
+  /** Tower has issued the frequency change but the aircraft has not vacated yet, so it is
+   *  still on Tower's frequency ("when vacated, contact ground"). */
+  handoffPending: boolean
   /** Too close to another aircraft — a separation conflict. */
   conflict: boolean
   /** Callsign of the traffic this aircraft has been told to give way to, or null. */
@@ -149,6 +161,9 @@ export interface GroundSim {
   routeOf(aircraftId: string): Point[]
   /** The named taxiways the aircraft's current route follows, in order (e.g. ["A","B"]). */
   taxiwaysOf(aircraftId: string): string[]
+  /** Runway turnoffs this arrival could still be assigned: ahead of it, and reachable at its
+   *  current speed. Empty for anything that isn't landing. */
+  exitOptions(aircraftId: string): RunwayExit[]
   /** Insert an aircraft at runtime (dev/admin sandbox); returns its id. */
   add(init: AircraftInit): string
   /** Remove an aircraft by id; returns whether one was removed. */

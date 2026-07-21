@@ -14,6 +14,7 @@ import {
   drawProbe,
   drawRouteDraft,
   drawRouteHover,
+  drawRunwayExits,
   drawSelection,
   drawSpawnPreview,
   drawSurface,
@@ -324,6 +325,11 @@ export function GroundScope({ controller }: { controller: GroundController }) {
         drawLabels(ctx, view, prep)
         drawAircraft(ctx, view, snap.aircraft)
         const selected = selectedId ? snap.aircraft.find((a) => a.id === selectedId) : undefined
+        // Turnoffs are only meaningful for the arrival being worked, so they are drawn for the
+        // selection rather than cluttering the runway permanently.
+        if (selected && selectedId && selected.intent === 'arrival' && selected.controlledBy === 'tower') {
+          drawRunwayExits(ctx, view, controller.exitOptions(selectedId), selected.exitRef)
+        }
         drawSelection(ctx, view, selected, selectedId ? sim.routeOf(selectedId) : [])
         drawOffscreenTraffic(ctx, view, snap.aircraft, width, height)
         if (showGraphRef.current) drawGraphOverlay(ctx, view, controller.topology)

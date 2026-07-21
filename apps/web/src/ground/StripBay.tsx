@@ -176,6 +176,14 @@ export function StripBay({ controller }: { controller: GroundController }) {
                 {a.altitude > 0 && (
                   <div className="strip-final">
                     ▼ {a.finalNm.toFixed(1)} NM · {a.altitude} FT
+                    {a.exitRef ? ` · EXIT ${a.exitRef}` : ''}
+                  </div>
+                )}
+                {a.status === 'rollout' && (
+                  <div className="strip-final">
+                    {a.exitRef ? `EXIT ${a.exitRef}` : 'ROLLING OUT'}
+                    {a.vacated ? ' · CLEAR OF RWY' : ''}
+                    {a.handoffPending ? ' · → GND' : ''}
                   </div>
                 )}
                 {a.via.length > 0 && <div className="strip-route">VIA {a.via.join(' · ')}</div>}

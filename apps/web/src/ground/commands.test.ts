@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import type { GroundCommand } from '@anotheratc/sim'
+import type { GroundCommand, RunwayExit } from '@anotheratc/sim'
 import { commandsFor } from './commands'
 import type { GroundController, StripItem } from './controller'
 
@@ -17,6 +17,9 @@ function strip(over: Partial<StripItem> = {}): StripItem {
     onRunway: false,
     blocksTakeoff: false,
     onShortFinal: false,
+    exitRef: null,
+    vacated: false,
+    handoffPending: false,
     altitude: 0,
     finalNm: 0,
     via: [],
@@ -29,11 +32,12 @@ function strip(over: Partial<StripItem> = {}): StripItem {
   }
 }
 
-function fakeController() {
+function fakeController(exits: RunwayExit[] = []) {
   const dispatched: GroundCommand[] = []
   const beganRoute: string[] = []
   const controller = {
     dispatch: (cmd: GroundCommand) => dispatched.push(cmd),
+    exitOptions: () => exits,
     beginRoute: (id: string) => beganRoute.push(id),
     destinations: [
       { id: 'rwy27', label: 'RWY 27', kind: 'runway', point: [1, 0] },
@@ -279,14 +283,31 @@ describe('commandsFor — Tower arrivals', () => {
   const onFinal = (over: Partial<StripItem> = {}) =>
     strip({ status: 'onFinal', controlledBy: 'tower', intent: 'arrival', altitude: 1250, finalNm: 4, ...over })
 
-  it('on final → cleared to land (runs) and go around (soon)', () => {
+  it('on final → cleared to land (runs), exit assignment, go around (soon)', () => {
     const { controller, dispatched } = fakeController()
     const cmds = commandsFor(controller, onFinal(), [])
-    expect(labels(cmds)).toEqual(['Cleared to land', 'Go around'])
+    expect(labels(cmds)).toEqual(['Cleared to land', 'Exit at…', 'Go around'])
     const land = cmds[0]!.action
     if (land.kind === 'run') land.run()
     expect(dispatched).toEqual([{ type: 'clearedToLand', aircraftId: 'a' }])
-    expect(cmds[1]!.action.kind).toBe('soon')
+    expect(cmds[2]!.action.kind).toBe('soon')
+  })
+
+  it('lists only the turnoffs the sim says are still makeable', () => {
+    const { controller, dispatched } = fakeController([
+      { ref: 'B6', point: [0, 0], vacatePoint: [0, -0.1], angleDeg: 30, kind: 'rapid', turn: 'left', distanceNm: 0.7, speedKt: 40 },
+      { ref: 'C2', point: [1, 0], vacatePoint: [1, -0.1], angleDeg: 90, kind: 'standard', turn: 'right', distanceNm: 1.4, speedKt: 12 },
+    ])
+    const cmds = commandsFor(controller, onFinal(), [])
+    const exit = cmds.find((c) => c.key === 'exit')!.action
+    expect(exit.kind).toBe('submenu')
+    if (exit.kind !== 'submenu') return
+    expect(exit.items.map((i) => i.label)).toEqual([
+      'B6 — left high-speed · 0.7 nm',
+      'C2 — right 90° · 1.4 nm',
+    ])
+    exit.items[0]!.run()
+    expect(dispatched).toEqual([{ type: 'assignExit', aircraftId: 'a', ref: 'B6' }])
   })
 
   it('gates the landing clearance while another aircraft occupies the runway', () => {
@@ -297,16 +318,39 @@ describe('commandsFor — Tower arrivals', () => {
     expect(cmds[0]!.action.kind).toBe('soon')
   })
 
-  it('never offers a landing clearance twice — cleared traffic only has go around', () => {
+  it('never offers a landing clearance twice — cleared traffic can still be re-assigned an exit', () => {
     const { controller } = fakeController()
     const cmds = commandsFor(controller, onFinal({ status: 'landing' }), [])
-    expect(labels(cmds)).toEqual(['Go around'])
+    expect(labels(cmds)).toEqual(['Exit at…', 'Go around'])
   })
 
-  it('rollout is an automatic phase — nothing actionable until Ground has it', () => {
+  it('on the roll, Tower issues the frequency change — the pilot never self-initiates', () => {
+    const { controller, dispatched } = fakeController()
+    const rolling = onFinal({ status: 'rollout', altitude: 0, finalNm: 0, exitRef: 'B6' })
+    const cmds = commandsFor(controller, rolling, [])
+    // Not clear of the runway yet → the deferred phraseology.
+    const gnd = cmds.find((c) => c.key === 'gnd')!
+    expect(gnd.label).toBe('When vacated, contact ground')
+    if (gnd.action.kind === 'run') gnd.action.run()
+    expect(dispatched).toEqual([{ type: 'contactGround', aircraftId: 'a' }])
+  })
+
+  it('once clear of the runway the handoff is immediate, and the exit menu is gone', () => {
     const { controller } = fakeController()
-    const cmds = commandsFor(controller, onFinal({ status: 'rollout', altitude: 0, finalNm: 0 }), [])
-    expect(cmds.every((c) => c.action.kind === 'soon')).toBe(true)
+    const cmds = commandsFor(controller, onFinal({ status: 'rollout', altitude: 0, finalNm: 0, vacated: true }), [])
+    expect(labels(cmds)).toEqual(['Contact ground'])
+  })
+
+  it('an already-issued handoff is shown as pending, not offered again', () => {
+    const { controller } = fakeController()
+    const cmds = commandsFor(
+      controller,
+      onFinal({ status: 'rollout', altitude: 0, finalNm: 0, handoffPending: true }),
+      [],
+    )
+    const gnd = cmds.find((c) => c.key === 'gnd')!
+    expect(gnd.label).toBe('Sent to ground — awaiting vacate')
+    expect(gnd.action.kind).toBe('soon')
   })
 
   it('blocks a departure line-up and takeoff under traffic on short final', () => {

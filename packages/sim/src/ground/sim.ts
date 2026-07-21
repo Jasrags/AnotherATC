@@ -13,6 +13,14 @@ import type {
 import { edgeKey, type TaxiGraph } from './taxiGraph'
 import { wakeSeparationSec, WAKE_TIME_SCALE } from './wake'
 import { onRunway, splitRouteAtRunway, type RunwayGuard } from './runwayGuard'
+import {
+  brakeRateFor,
+  buildRunwayExits,
+  chooseExit,
+  MAX_BRAKE_KT_S,
+  MIN_BRAKE_KT_S,
+  type RunwayExit,
+} from './runwayExits'
 
 /** Initial definition of one aircraft: a route (nm waypoints) taxied at a target speed. */
 export interface AircraftInit {
@@ -101,8 +109,11 @@ const FINAL_ALT_FT = 1250
  *  hand-authored arrival (a scenario, or the dev sandbox) flies the same profile as a
  *  spawned one — it is a parameter, not a rule the caller could get subtly wrong. */
 export const APPROACH_SPEED_KT = 140
-/** Braking deceleration (kt/s) on the landing rollout — harder than a taxi ramp. */
-const ROLLOUT_DECEL = 6
+/** Braking deceleration (kt/s) used when there is no charted exit to aim at (no routing graph,
+ *  or nothing reachable) — the aircraft just brakes to taxi speed on the centerline. With an
+ *  exit assigned the rate is solved per rollout instead, so it arrives at the turnoff at the
+ *  turnoff's speed (see runwayExits.ts). */
+const ROLLOUT_DECEL = MAX_BRAKE_KT_S
 /** Inside this distance (nm) from the threshold, an arrival on final owns the runway:
  *  no takeoff clearance and no line-up may be issued underneath it. Exported so the UI can
  *  gate the same clearances the sim would refuse — but they read the `onShortFinal` flag off
@@ -205,6 +216,9 @@ interface Internal
     | 'blocksTakeoff'
     | 'onShortFinal'
     | 'finalNm'
+    | 'exitRef'
+    | 'vacated'
+    | 'handoffPending'
   > {
   path: readonly Point[]
   leg: number
@@ -236,6 +250,18 @@ interface Internal
   finalLenNm: number
   /** Seconds until the next Tower→Ground exit-routing attempt (see {@link EXIT_RETRY_SEC}). */
   exitRetrySec: number
+  /** The turnoff this arrival is planning for / rolling out to, or null when none applies. */
+  exit: RunwayExit | null
+  /** Turnoff the controller assigned by designator; overrides the default choice. */
+  assignedExitRef: string | null
+  /** Deceleration (kt/s) for the current rollout, solved so it reaches `exit` at its speed. */
+  brakeRate: number
+  /** Fully clear of the runway — past the turnoff's hold-short point, not merely off the
+   *  pavement band. This is the "vacated" a controller means, and it releases the runway. */
+  vacated: boolean
+  /** Tower has issued the frequency change; it takes effect the moment the aircraft vacates
+   *  ("when vacated, contact ground"). The aircraft never switches on its own. */
+  groundPending: boolean
   /** Parallel ground services still counting down while parked at the gate (empty when none). */
   services: { kind: string; total: number; remaining: number }[]
   /** Undirected edge (key) the reservation is currently making this aircraft hold short of, or null. */
@@ -327,6 +353,11 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       threshold,
       finalLenNm: threshold ? pathLength(path) : 0,
       exitRetrySec: 0,
+      exit: null,
+      assignedExitRef: null,
+      brakeRate: ROLLOUT_DECEL,
+      vacated: false,
+      groundPending: false,
       services:
         servicing && (init.intent ?? 'departure') === 'departure'
           ? servicing.services.map((s) => ({ kind: s.kind, total: s.sec, remaining: s.sec }))
@@ -384,6 +415,37 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       }
     }
     return best
+  }
+
+  // Runway turnoffs, derived per landing direction and cached (graph.topology() is not cheap).
+  const exitCache = new Map<string, RunwayExit[]>()
+  function exitsForLanding(threshold: Point): RunwayExit[] {
+    const key = `${threshold[0]},${threshold[1]}`
+    const hit = exitCache.get(key)
+    if (hit) return hit
+    const far = farRunwayEnd(threshold)
+    const exits = graph && guard && far ? buildRunwayExits(graph.topology(), guard, threshold, far) : []
+    exitCache.set(key, exits)
+    return exits
+  }
+  /** How far (nm) a point lies down the runway from a landing threshold. */
+  function alongRunway(threshold: Point, p: Point): number {
+    const far = farRunwayEnd(threshold)
+    if (!far) return 0
+    const dx = far[0] - threshold[0]
+    const dy = far[1] - threshold[1]
+    const len = Math.hypot(dx, dy) || 1
+    return ((p[0] - threshold[0]) * dx + (p[1] - threshold[1]) * dy) / len
+  }
+  /** The turnoffs this arrival could still be assigned: ahead of it, and slow-downable for. */
+  function exitOptionsFor(ac: Internal): RunwayExit[] {
+    if (ac.intent !== 'arrival' || !ac.threshold || ac.vacated) return []
+    const at = ac.airborne ? 0 : alongRunway(ac.threshold, [ac.x, ac.y])
+    const speed = ac.airborne ? ac.targetSpeed : ac.groundspeed
+    return exitsForLanding(ac.threshold).filter((e) => {
+      const remaining = e.distanceNm - at
+      return remaining > 0 && brakeRateFor(speed, e.speedKt, remaining) <= MAX_BRAKE_KT_S
+    })
   }
 
   const fleet: Internal[] = inits.map(makeInternal)
@@ -444,6 +506,9 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
    *  clearance: any on-runway aircraft, except a departure that has rotated (near liftoff and
    *  effectively airborne) — the next departure may be cleared behind it. */
   function occupiesForTakeoff(ac: Internal): boolean {
+    // A landing aircraft owns the runway until it is past its turnoff's hold-short point —
+    // "clear of the runway" is not the moment its centre leaves the pavement band.
+    if (ac.rollingOut && !ac.vacated) return true
     return onRunwayNow(ac) && !(ac.departing && ac.groundspeed >= ROTATE_KT)
   }
 
@@ -686,7 +751,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     // on final likewise flies its approach speed to the threshold; touchdown is resolved after
     // the motion, not by braking in the air.
     const target = ac.departing || ac.airborne ? ac.targetSpeed : Math.min(atEnd ? 0 : ac.targetSpeed, cap)
-    const accel = ac.departing ? TAKEOFF_ACCEL : ac.rollingOut ? ROLLOUT_DECEL : TAXI_ACCEL
+    const accel = ac.departing ? TAKEOFF_ACCEL : ac.rollingOut ? ac.brakeRate : TAXI_ACCEL
 
     if (ac.groundspeed < target) {
       ac.groundspeed = Math.min(target, ac.groundspeed + accel * dt)
@@ -1006,6 +1071,32 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         lastDeparture = { wake: ac.wake, atTime: time }
         return ACCEPTED
       }
+      case 'assignExit': {
+        // Tower assigns the turnoff — on final (planning ahead) or during the rollout (a
+        // change of plan, which re-solves the braking). Refused for a turnoff the aircraft
+        // cannot slow down enough to make, which is the real constraint.
+        if (ac.intent !== 'arrival') return refused('only arrivals are assigned a runway exit')
+        if (ac.controlledBy !== 'tower') return refused('not on tower frequency')
+        if (ac.vacated) return refused('already clear of the runway')
+        const option = exitOptionsFor(ac).find((e) => e.ref === command.ref)
+        if (!option) return refused(`unable ${command.ref} — cannot slow down in time`)
+        ac.assignedExitRef = option.ref
+        if (ac.rollingOut) planExitRoll(ac, option)
+        return ACCEPTED
+      }
+      case 'contactGround': {
+        // Tower → Ground. Issued during the rollout it is the real-world "when vacated,
+        // contact ground": it arms the change, which takes effect the moment the aircraft is
+        // actually clear. A pilot never switches frequency unprompted, so nothing else does.
+        if (ac.intent !== 'arrival') return refused('only arrivals are handed to ground after landing')
+        if (ac.controlledBy !== 'tower') return refused('not on tower frequency')
+        if (ac.airborne) return refused('still airborne')
+        if (!ac.rollingOut) return refused('not on the landing roll')
+        if (ac.groundPending) return refused('already sent to ground')
+        ac.groundPending = true
+        if (ac.vacated && !handOffToGround(ac)) return refused('no taxi route to the gate')
+        return ACCEPTED
+      }
       case 'clearedToLand': {
         // Tower: clear an arrival on final to land. The clearance is an arming — the aircraft
         // keeps flying the same final, but will now touch down at the threshold instead of
@@ -1026,15 +1117,47 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
    * runway toward the far end. It stays Tower's until it can leave the runway.
    */
   function touchdown(ac: Internal): void {
-    const far = farRunwayEnd([ac.x, ac.y])
     ac.airborne = false
     ac.altitude = 0
     ac.rollingOut = true
-    ac.threshold = null
+    ac.vacated = false
+    ac.held = null
+    ac.holding = false
+    // `threshold` is deliberately kept: it is the landing threshold every exit distance and
+    // rollout re-plan is measured from.
+    const assigned = ac.threshold
+      ? exitOptionsFor(ac).find((e) => e.ref === ac.assignedExitRef)
+      : undefined
+    const planned = assigned ?? (ac.threshold ? chooseExit(exitOptionsFor(ac), ac.groundspeed, 0) : null)
+    if (planned) {
+      planExitRoll(ac, planned)
+      return
+    }
+    // No charted turnoff to aim at (no routing graph, or nothing reachable): brake to taxi
+    // speed straight down the centerline, as the sim did before exits existed.
+    const far = farRunwayEnd([ac.x, ac.y])
+    ac.exit = null
+    ac.brakeRate = ROLLOUT_DECEL
     ac.path = far ? [[ac.x, ac.y], far] : [[ac.x, ac.y]]
     ac.leg = 0
-    ac.held = null
     ac.targetSpeed = TAXI_SPEED_KT
+  }
+
+  /**
+   * Aim the rollout at a turnoff: drive the centerline to the exit, then off it to the point
+   * where the aircraft is clear. The braking rate is *solved* so the aircraft arrives at the
+   * turnoff at the speed that turn can be taken — which is what makes a rapid exit actually
+   * save runway occupancy instead of just being a shorter line on the map.
+   */
+  function planExitRoll(ac: Internal, e: RunwayExit): void {
+    const remaining = Math.max(1e-6, e.distanceNm - alongRunway(ac.threshold ?? [ac.x, ac.y], [ac.x, ac.y]))
+    const required = brakeRateFor(ac.groundspeed, e.speedKt, remaining)
+    ac.exit = e
+    ac.brakeRate = Math.min(MAX_BRAKE_KT_S, Math.max(MIN_BRAKE_KT_S, required))
+    ac.path = [[ac.x, ac.y], e.point, e.vacatePoint]
+    ac.leg = 0
+    ac.held = null
+    ac.targetSpeed = e.speedKt
     ac.holding = false
   }
 
@@ -1052,6 +1175,8 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     ac.altitude = FINAL_ALT_FT
     ac.groundspeed = ac.targetSpeed
     ac.clearedToLand = false
+    ac.exit = null
+    ac.assignedExitRef = null
     const next = ac.path[1]
     if (next) ac.heading = normalizeDeg(bearing(fix[0], fix[1], next[0], next[1]))
   }
@@ -1064,13 +1189,12 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
    * {@link EXIT_RETRY_SEC} rather than every tick: a failing route is a full Dijkstra search,
    * and the aircraft is parked on the runway while it fails.
    */
-  function exitRunway(ac: Internal, dt: number): void {
-    ac.exitRetrySec -= dt
-    if (ac.exitRetrySec > 0) return
-    ac.exitRetrySec = EXIT_RETRY_SEC
-    if (!ac.goalPoint || !routeTo(ac, ac.goalPoint, true)) return
+  function handOffToGround(ac: Internal): boolean {
+    if (!ac.goalPoint || !routeTo(ac, ac.goalPoint, true)) return false
     ac.rollingOut = false
+    ac.groundPending = false
     ac.controlledBy = 'ground'
+    return true
   }
 
   /** Post-motion airborne bookkeeping: descend the final, touch down or go around at the
@@ -1086,7 +1210,21 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       ac.altitude = FINAL_ALT_FT * Math.min(1, remaining / (ac.finalLenNm || remaining))
       return
     }
-    if (ac.rollingOut && ac.groundspeed <= TAXI_SPEED_KT + 0.01) exitRunway(ac, dt)
+    if (!ac.rollingOut) return
+    // Vacated = past the turnoff's hold-short point (the end of the planned roll), not merely
+    // outside the pavement band. Without a planned exit there is no hold-short point to pass,
+    // so fall back to physically leaving the runway.
+    if (!ac.vacated)
+      ac.vacated = ac.exit
+        ? ac.leg >= ac.path.length - 1
+        : !onRunwayNow(ac) && ac.groundspeed <= TAXI_SPEED_KT + 0.01
+    // The aircraft never changes frequency on its own: it moves to Ground only once Tower has
+    // issued the change *and* it is actually clear of the runway.
+    if (!ac.vacated || !ac.groundPending) return
+    ac.exitRetrySec -= dt
+    if (ac.exitRetrySec > 0) return
+    ac.exitRetrySec = EXIT_RETRY_SEC
+    handOffToGround(ac)
   }
 
   /** Detect goal completion; returns ids to remove. */
@@ -1206,6 +1344,9 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
           onRunway: onRunwayNow(ac),
           blocksTakeoff: occupiesForTakeoff(ac),
           onShortFinal: onShortFinal(ac),
+          exitRef: ac.exit?.ref ?? ac.assignedExitRef,
+          vacated: ac.rollingOut ? ac.vacated : false,
+          handoffPending: ac.rollingOut && ac.groundPending,
           conflict: ac.conflict,
           giveWayTo: ac.giveWayTo ? (find(ac.giveWayTo)?.callsign ?? null) : null,
           squawk: ac.squawk,
@@ -1216,6 +1357,10 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       }
     },
     dispatch,
+    exitOptions(aircraftId: string): RunwayExit[] {
+      const ac = find(aircraftId)
+      return ac ? exitOptionsFor(ac) : []
+    },
     routeOf(aircraftId: string): Point[] {
       const ac = find(aircraftId)
       if (!ac) return []

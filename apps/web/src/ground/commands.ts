@@ -40,6 +40,24 @@ export function commandsFor(controller: GroundController, item: StripItem, aircr
     // Arrivals: the runway-clear predicate (surface occupants + anyone on short final) is
     // what the sim gates the landing clearance on, so mirror it in the disabled label.
     if (item.intent === 'arrival') {
+      // "Turn left at Bravo Five" — the turnoff the aircraft will take. Only the exits it can
+      // still slow down for are listed, so an unmakeable one is never offered.
+      const exits = controller.exitOptions(id)
+      const exitMenu: MenuCommand =
+        exits.length > 0
+          ? {
+              key: 'exit',
+              label: item.exitRef ? `Exit at… (${item.exitRef})` : 'Exit at…',
+              action: {
+                kind: 'submenu',
+                items: exits.map((e) => ({
+                  label: `${e.ref} — ${e.turn} ${e.kind === 'rapid' ? 'high-speed' : '90°'} · ${e.distanceNm.toFixed(1)} nm`,
+                  run: () => send({ type: 'assignExit', aircraftId: id, ref: e.ref }),
+                })),
+              },
+            }
+          : { key: 'exit', label: 'Exit at…', action: { kind: 'soon' } }
+
       if (item.status === 'onFinal') {
         const runwayBusy = aircraft.some((o) => o.id !== id && (o.blocksTakeoff || o.onShortFinal))
         return [
@@ -50,11 +68,23 @@ export function commandsFor(controller: GroundController, item: StripItem, aircr
                 label: 'Cleared to land',
                 action: { kind: 'run', run: () => send({ type: 'clearedToLand', aircraftId: id }) },
               },
+          exitMenu,
           { label: 'Go around', action: { kind: 'soon' } },
         ]
       }
-      if (item.status === 'landing') return [{ label: 'Go around', action: { kind: 'soon' } }]
-      if (item.status === 'rollout') return [{ label: 'Rolling out — exiting the runway', action: { kind: 'soon' } }]
+      if (item.status === 'landing') return [exitMenu, { label: 'Go around', action: { kind: 'soon' } }]
+      if (item.status === 'rollout') {
+        // The pilot never switches frequency unprompted. Issued before the aircraft is clear,
+        // this is the real "when vacated, contact ground" — it applies the moment it vacates.
+        const handoff: MenuCommand = item.handoffPending
+          ? { key: 'gnd', label: 'Sent to ground — awaiting vacate', action: { kind: 'soon' } }
+          : {
+              key: 'gnd',
+              label: item.vacated ? 'Contact ground' : 'When vacated, contact ground',
+              action: { kind: 'run', run: () => send({ type: 'contactGround', aircraftId: id }) },
+            }
+        return item.vacated ? [handoff] : [exitMenu, handoff]
+      }
     }
 
     // A stationary occupant (lined up or crossing) blocks a line-up; a rolling departure doesn't.

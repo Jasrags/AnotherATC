@@ -5,8 +5,9 @@ import { buildRunwayGuard } from './runwayGuard'
 import { buildTaxiGraph } from './taxiGraph'
 import type { AirportSurface, Point } from '../world/types'
 
-// One runway (y=0, x 0→2), a parallel taxiway south of it, and two connectors up to the
-// runway ends — enough for an arrival to land on 09, exit west, and taxi to the gate.
+// One runway (y=0, x 0→2), a parallel taxiway south of it, two right-angle connectors at the
+// ends, and one acute rapid-exit turnoff mid-field — enough for an arrival to land on 09, take
+// the high-speed off, and taxi to the gate.
 const surface: AirportSurface = {
   icao: 'TEST',
   name: 'Test',
@@ -16,9 +17,10 @@ const surface: AirportSurface = {
   bounds: { minX: 0, minY: -0.3, maxX: 2, maxY: 0 },
   features: [
     { kind: 'runway', points: [[0, 0], [2, 0]] },
-    { kind: 'taxiway', points: [[0.2, -0.2], [1, -0.2], [1.8, -0.2]] },
-    { kind: 'taxiway', points: [[0.2, -0.2], [0.2, -0.02]] }, // west connector (RWY 9 exit)
-    { kind: 'taxiway', points: [[1.8, -0.2], [1.8, -0.02]] }, // east connector
+    { kind: 'taxiway', ref: 'A', points: [[0.2, -0.2], [1, -0.2], [1.3, -0.2], [1.8, -0.2]] },
+    { kind: 'taxiway', ref: 'E1', points: [[0.2, -0.2], [0.2, -0.02]] }, // 90° connector, west
+    { kind: 'taxiway', ref: 'E5', points: [[0.9, 0], [1.15, -0.12], [1.3, -0.2]] }, // rapid exit
+    { kind: 'taxiway', ref: 'E9', points: [[1.8, -0.2], [1.8, -0.02]] }, // 90° connector, east
   ],
 }
 const guard = buildRunwayGuard(surface)
@@ -108,22 +110,22 @@ describe('landing clearance', () => {
     expect(sim.dispatch({ type: 'clearedToLand', aircraftId: 'a' })).toEqual({ ok: true })
     expect(A(sim, 'a')!.status).toBe('landing')
 
-    let sawRollout = false
-    let touchdownX = -1
-    for (let i = 0; i < 1000; i += 1) {
+    let atTouchdown: ReturnType<typeof A> = undefined
+    let slowedTo = 140
+    for (let i = 0; i < 1500; i += 1) {
       sim.step(0.1)
       const a = A(sim, 'a')
-      if (a?.status === 'rollout' && !sawRollout) {
-        sawRollout = true
-        touchdownX = a.x
+      if (!a) break
+      if (a.status === 'rollout') {
+        if (!atTouchdown) atTouchdown = a
+        slowedTo = Math.min(slowedTo, a.groundspeed)
       }
     }
-    expect(sawRollout).toBe(true)
-    expect(touchdownX).toBeCloseTo(THRESHOLD[0], 1) // touched down at the threshold
-    const a = A(sim, 'a')!
-    expect(a.altitude).toBe(0)
-    expect(Math.abs(a.y)).toBeLessThan(0.02) // rolled out along the centerline
-    expect(a.groundspeed).toBeLessThan(140) // and slowed down
+    expect(atTouchdown).toBeDefined()
+    expect(atTouchdown!.x).toBeCloseTo(THRESHOLD[0], 1) // touched down at the threshold
+    expect(atTouchdown!.altitude).toBe(0)
+    expect(Math.abs(atTouchdown!.y)).toBeLessThan(0.02) // on the centerline
+    expect(slowedTo).toBeLessThan(140) // and braked on the roll
   })
 
   it('refuses a landing clearance while a departure occupies the runway', () => {
@@ -204,6 +206,8 @@ describe('ground commands are refused to an aircraft in the air', () => {
   it('accepts them again once it is on the ground under Ground control', () => {
     const sim = createGroundSim([arrivalOnFinal('a')], { guard, graph })
     sim.dispatch({ type: 'clearedToLand', aircraftId: 'a' })
+    for (let i = 0; i < 4000 && A(sim, 'a')?.status !== 'rollout'; i += 1) sim.step(0.1)
+    sim.dispatch({ type: 'contactGround', aircraftId: 'a' })
     for (let i = 0; i < 4000 && A(sim, 'a')?.controlledBy !== 'ground'; i += 1) sim.step(0.1)
     expect(A(sim, 'a')!.controlledBy).toBe('ground')
     expect(sim.dispatch({ type: 'hold', aircraftId: 'a' })).toEqual({ ok: true })
@@ -235,11 +239,17 @@ describe('arrival end-to-end: final → land → exit → Ground → gate', () =
 
     const seen = new Set<string>()
     let handedToGroundAt = -1
-    for (let i = 0; i < 4000; i += 1) {
+    let sentToGround = false
+    for (let i = 0; i < 8000; i += 1) {
       sim.step(0.1)
       const a = A(sim, 'a')
       if (!a) break
       seen.add(a.status)
+      // Tower issues the frequency change during the rollout — "when vacated, contact ground".
+      if (a.status === 'rollout' && !sentToGround) {
+        sentToGround = true
+        expect(sim.dispatch({ type: 'contactGround', aircraftId: 'a' })).toEqual({ ok: true })
+      }
       if (a.controlledBy === 'ground' && handedToGroundAt < 0) handedToGroundAt = sim.snapshot().time
     }
 
@@ -261,7 +271,7 @@ describe('arrival end-to-end: final → land → exit → Ground → gate', () =
     for (let i = 0; i < 2000; i += 1) {
       sim.step(0.1)
       const a = A(sim, 'a')
-      if (!a || !a.onRunway) break
+      if (!a || a.vacated) break
       expect(sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'd' })).toEqual({
         ok: false,
         reason: 'runway occupied',
@@ -272,5 +282,146 @@ describe('arrival end-to-end: final → land → exit → Ground → gate', () =
     expect(sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'd' })).toEqual({ ok: true })
     run(sim, 600)
     expect(sim.snapshot().departed).toBe(1)
+  })
+})
+
+describe('runway exits: the turnoff is chosen, not stumbled into', () => {
+  const landed = () => {
+    const sim = createGroundSim([arrivalOnFinal('a')], { guard, graph })
+    sim.dispatch({ type: 'clearedToLand', aircraftId: 'a' })
+    for (let i = 0; i < 2000 && A(sim, 'a')?.status !== 'rollout'; i += 1) sim.step(0.1)
+    return sim
+  }
+
+  it('offers only turnoffs ahead of the aircraft that it can still slow down for', () => {
+    const sim = createGroundSim([arrivalOnFinal('a')], { guard, graph })
+    const refs = sim.exitOptions('a').map((e) => e.ref)
+    expect(refs).toContain('E5') // the mid-field rapid exit
+    expect(refs).toContain('E9') // the far right-angle connector
+    expect(refs).not.toContain('E1') // 0.2 nm from the threshold — no way to slow down that fast
+  })
+
+  it('plans the rapid exit by default, because it frees the runway soonest', () => {
+    const sim = landed()
+    expect(A(sim, 'a')!.exitRef).toBe('E5')
+  })
+
+  it('actually leaves the runway at the planned turnoff, at its speed', () => {
+    const sim = landed()
+    let speedAtExit = -1
+    for (let i = 0; i < 2000; i += 1) {
+      sim.step(0.1)
+      const a = A(sim, 'a')
+      if (!a) break
+      // 0.9 is where E5 meets the runway; sample the speed as it arrives there.
+      if (speedAtExit < 0 && a.x >= 0.9) speedAtExit = a.groundspeed
+      if (a.vacated) break
+    }
+    expect(speedAtExit).toBeGreaterThan(25) // took the high-speed at speed, not at a crawl
+    expect(speedAtExit).toBeLessThanOrEqual(45)
+    const a = A(sim, 'a')!
+    expect(a.vacated).toBe(true)
+    expect(a.y).toBeLessThan(-0.1) // off the runway, down the turnoff
+  })
+
+  it('a far turnoff can be assigned instead, and costs runway occupancy', () => {
+    const rot = (assign?: string): number => {
+      const sim = createGroundSim([arrivalOnFinal('a')], { guard, graph })
+      sim.dispatch({ type: 'clearedToLand', aircraftId: 'a' })
+      if (assign) expect(sim.dispatch({ type: 'assignExit', aircraftId: 'a', ref: assign })).toEqual({ ok: true })
+      let touchdown = -1
+      for (let i = 0; i < 4000; i += 1) {
+        sim.step(0.1)
+        const a = A(sim, 'a')
+        if (!a) break
+        if (touchdown < 0 && a.status === 'rollout') touchdown = sim.snapshot().time
+        if (a.vacated) return sim.snapshot().time - touchdown
+      }
+      return Infinity
+    }
+    const viaRapid = rot()
+    const viaFarEnd = rot('E9')
+    expect(viaFarEnd).toBeGreaterThan(viaRapid + 15) // the whole reason RETs exist
+  })
+
+  it('refuses a turnoff the aircraft cannot slow down for', () => {
+    const sim = createGroundSim([arrivalOnFinal('a')], { guard, graph })
+    expect(sim.dispatch({ type: 'assignExit', aircraftId: 'a', ref: 'E1' })).toEqual({
+      ok: false,
+      reason: 'unable E1 — cannot slow down in time',
+    })
+  })
+})
+
+describe('Tower → Ground: the pilot never switches frequency unprompted', () => {
+  const rollingOut = () => {
+    const sim = createGroundSim([arrivalOnFinal('a')], { guard, graph })
+    sim.dispatch({ type: 'clearedToLand', aircraftId: 'a' })
+    for (let i = 0; i < 2000 && A(sim, 'a')?.status !== 'rollout'; i += 1) sim.step(0.1)
+    return sim
+  }
+
+  it('stays with Tower after vacating until Tower issues the frequency change', () => {
+    const sim = rollingOut()
+    for (let i = 0; i < 2000; i += 1) sim.step(0.1)
+    const a = A(sim, 'a')!
+    expect(a.vacated).toBe(true) // clear of the runway…
+    expect(a.controlledBy).toBe('tower') // …but still Tower's, waiting to be sent to Ground
+    expect(sim.snapshot().arrived).toBe(0)
+  })
+
+  it('"when vacated, contact ground" issued on the roll takes effect on vacating', () => {
+    const sim = rollingOut()
+    expect(A(sim, 'a')!.vacated).toBe(false)
+    expect(sim.dispatch({ type: 'contactGround', aircraftId: 'a' })).toEqual({ ok: true })
+    expect(A(sim, 'a')!.controlledBy).toBe('tower') // not yet — it is still on the runway
+    for (let i = 0; i < 3000 && A(sim, 'a')?.controlledBy !== 'ground'; i += 1) sim.step(0.1)
+    expect(A(sim, 'a')!.controlledBy).toBe('ground')
+    expect(A(sim, 'a')!.vacated).toBe(false) // no longer rolling out — it is taxiing now
+  })
+
+  it('holds the runway against a departure until it has actually vacated', () => {
+    // A departure already at the hold line, so it is waiting on Tower well before touchdown.
+    const dep: AircraftInit = {
+      id: 'd', callsign: 'd', type: 'B738', wake: 'M',
+      path: [[1.8, -0.14], [1.8, -0.1], [1.8, 0.1], [1.8, 0.5]],
+      targetSpeed: 15, intent: 'departure', goalPoint: [1.8, 0],
+    }
+    const sim = createGroundSim([arrivalOnFinal('a'), dep], { guard, graph })
+    sim.dispatch({ type: 'clearedToLand', aircraftId: 'a' })
+    run(sim, 300)
+    expect(A(sim, 'd')!.holdShort).toBe(true)
+    sim.dispatch({ type: 'contactTower', aircraftId: 'd' })
+
+    let refusals = 0
+    let releasedWhileOnRunway = false
+    for (let i = 0; i < 4000; i += 1) {
+      sim.step(0.1)
+      const a = A(sim, 'a')
+      if (!a) break
+      if (a.vacated) break // clear of the runway — the departure may go now
+      if (a.status !== 'rollout') continue
+      const res = sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'd' })
+      if (res.ok) releasedWhileOnRunway = true
+      else refusals += 1
+    }
+    expect(refusals).toBeGreaterThan(0) // it really was asked while the arrival was rolling
+    expect(releasedWhileOnRunway).toBe(false)
+    expect(sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'd' })).toEqual({ ok: true })
+  })
+
+  it('refuses the handoff before touchdown and twice', () => {
+    const sim = createGroundSim([arrivalOnFinal('a')], { guard, graph })
+    expect(sim.dispatch({ type: 'contactGround', aircraftId: 'a' })).toEqual({
+      ok: false,
+      reason: 'still airborne',
+    })
+    sim.dispatch({ type: 'clearedToLand', aircraftId: 'a' })
+    for (let i = 0; i < 2000 && A(sim, 'a')?.status !== 'rollout'; i += 1) sim.step(0.1)
+    expect(sim.dispatch({ type: 'contactGround', aircraftId: 'a' })).toEqual({ ok: true })
+    expect(sim.dispatch({ type: 'contactGround', aircraftId: 'a' })).toEqual({
+      ok: false,
+      reason: 'already sent to ground',
+    })
   })
 })

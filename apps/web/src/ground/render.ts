@@ -2,6 +2,7 @@ import type {
   AirportSurface,
   ApproachConfig,
   GroundAircraft,
+  RunwayExit,
   Point,
   SurfaceFeature,
   SurfaceKind,
@@ -574,6 +575,43 @@ export function drawApproachCourse(ctx: Ctx, v: View, approach: ApproachConfig):
     ctx.moveTo(ax, ay)
     ctx.lineTo(bx, by)
     ctx.stroke()
+  }
+  ctx.restore()
+}
+
+/**
+ * The runway turnoffs available to the selected arrival, with the assigned one emphasized.
+ * A rapid exit is drawn along its real acute geometry so the shape reads as what it is — the
+ * reason it can be taken at speed — rather than as an anonymous tick on the runway.
+ */
+export function drawRunwayExits(
+  ctx: Ctx,
+  v: View,
+  exits: readonly RunwayExit[],
+  assignedRef: string | null,
+): void {
+  ctx.save()
+  ctx.font = `${DIMS.blockFont - 1}px ui-monospace, "SF Mono", Menlo, monospace`
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  for (const e of exits) {
+    const on = e.ref === assignedRef
+    const [ax, ay] = toScreen(v, e.point[0], e.point[1])
+    const [bx, by] = toScreen(v, e.vacatePoint[0], e.vacatePoint[1])
+    ctx.strokeStyle = on ? COLORS.exitAssigned : COLORS.exitAvailable
+    ctx.lineWidth = on ? 2.4 : 1.2
+    ctx.setLineDash(on ? [] : [4, 4])
+    ctx.beginPath()
+    ctx.moveTo(ax, ay)
+    ctx.lineTo(bx, by)
+    ctx.stroke()
+    ctx.setLineDash([])
+    // Label just past the vacate point, offset along the turnoff so it clears the pavement.
+    const dx = bx - ax
+    const dy = by - ay
+    const len = Math.hypot(dx, dy) || 1
+    ctx.fillStyle = on ? COLORS.exitAssigned : COLORS.exitAvailable
+    ctx.fillText(e.ref, bx + (dx / len) * 12, by + (dy / len) * 12)
   }
   ctx.restore()
 }

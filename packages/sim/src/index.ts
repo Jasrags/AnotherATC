@@ -26,6 +26,8 @@ export { buildKsanGroundGame } from './ground/ksanGame'
 export { buildTaxiGraph } from './ground/taxiGraph'
 export type { TaxiGraph, TaxiTopology, TopoNode, TopoEdge } from './ground/taxiGraph'
 export { buildRunwayGuard } from './ground/runwayGuard'
+export { buildRunwayExits, chooseExit } from './ground/runwayExits'
+export type { RunwayExit } from './ground/runwayExits'
 export type { RunwayGuard } from './ground/runwayGuard'
 export type {
   GroundAircraft,
