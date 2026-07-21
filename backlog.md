@@ -328,8 +328,13 @@ is switched on.
   assigned turnoff) from the moment it appears on final, and the strip carries a `→ GATE nn`
   destination line. Because occupancy is modelled, the line warns *early* — amber-red
   `⚠ OCCUPIED` when the stand is already taken, so a gate conflict is visible while the aircraft
-  is still on final. _Next: the conflict is only shown on the *selected* arrival; a field-wide
-  alert (any inbound whose gate is occupied) belongs with the game-loop/alerts work._
+  is still on final.
+- ✅ **Field-wide gate-conflict alert** — `gateBlocked` is a sim snapshot field (an inbound
+  arrival whose stand is already occupied), so the strip warning and the scope alert read one
+  source. The scope names the gates on its own advisory line — amber and `aria-live="polite"`,
+  deliberately quieter than the red separation CONFLICT above it, because that one is happening
+  now and this one has not happened yet. _Next: the alert says *which* gates, not what to do
+  about it — reassigning an arrival to a different stand isn't a command yet._
 - ⬜ Aircraft symbology by category/phase; selected-target emphasis
 - ⬜ Data-block declutter (leader-line direction, overlap avoidance)
 - ⬜ Theme polish; light/dark intentional (currently dark-only, correct for a scope)
