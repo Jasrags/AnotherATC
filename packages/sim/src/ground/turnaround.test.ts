@@ -162,3 +162,55 @@ describe('turnaround', () => {
     expect(sim.standOccupied(stand.ref)).toBe(false)
   })
 })
+
+// The single-aircraft tests above cannot see this: instructions issued to the *arrival* have to
+// die with it, and a give-way is the one that outlives the gate dwell whenever the traffic it
+// names is still standing nearby — which, on a ramp, it usually is.
+describe('turnaround discards the arrival’s own instructions', () => {
+  it('does not carry a give-way hold into the new flight', () => {
+    const { sim } = field({ turnaround: true })
+    const { stand, at } = inbound(sim)
+
+    // Let it reach the stand first: a give-way issued while it is still taxiing simply stops
+    // it short, and it never arrives at all. The case that matters is one issued on the ramp
+    // while it sits at the gate — the instruction is then still in force when the dwell ends.
+    for (let i = 0; i < 12000; i += 1) {
+      sim.step(0.1)
+      const a = at()!
+      if (dist([a.x, a.y], stand.stop) < 0.01 && a.groundspeed === 0) break
+    }
+
+    // Traffic parked on a neighbouring stand, close enough that the give-way never expires.
+    const neighbour = sim
+      .snapshot()
+      .aircraft.filter((a) => a.id !== 'arr')
+      .map((a) => ({ a, d: dist([a.x, a.y], stand.stop) }))
+      .sort((x, y) => x.d - y.d)[0]!
+    expect(neighbour.d).toBeLessThan(0.35) // inside GIVEWAY_FORGET_NM, so it stays in force
+
+    expect(sim.dispatch({ type: 'giveWay', aircraftId: 'arr', toId: neighbour.a.id })).toEqual({
+      ok: true,
+    })
+    expect(at()!.giveWayTo).not.toBeNull()
+
+    parkIt(sim, stand)
+    expect(at()!.intent).toBe('departure')
+    // The new flight is not still giving way to traffic the previous one was told about.
+    expect(at()!.giveWayTo).toBeNull()
+
+    // …and it can actually leave: a stale hold caps its speed at zero forever, with a strip
+    // that looks like an ordinary uncleared departure.
+    sim.dispatch({ type: 'clearance', aircraftId: 'arr' })
+    for (let i = 0; i < 1200; i += 1) sim.step(0.1)
+    expect(sim.dispatch({ type: 'pushback', aircraftId: 'arr' })).toEqual({ ok: true })
+    for (let i = 0; i < 1500 && at()?.status === 'pushback'; i += 1) sim.step(0.1)
+    sim.dispatch({ type: 'taxiToGoal', aircraftId: 'arr' })
+    let moved = false
+    const from: Point = [at()!.x, at()!.y]
+    for (let i = 0; i < 4000 && !moved; i += 1) {
+      sim.step(0.1)
+      if (dist([at()!.x, at()!.y], from) > 0.05) moved = true
+    }
+    expect(moved).toBe(true)
+  })
+})

@@ -2089,7 +2089,13 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     ac.rollingOut = false
     ac.vacated = false
     ac.groundPending = false
+    ac.clearedToLand = false
     ac.held = null
+    // Instructions issued to the *arrival* die with it. A give-way in particular outlives the
+    // dwell whenever the named traffic is still nearby, and nothing a parked departure is then
+    // told clears it — so the new flight would sit on the stand looking freshly arrived and
+    // silently refuse to move, held for an instruction nobody gave it.
+    ac.giveWayTo = null
     ac.services = freshServices()
     return true
   }
