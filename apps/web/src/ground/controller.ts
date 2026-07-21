@@ -250,6 +250,9 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
         runway: game.runway,
         frequencies,
         stands: game.stands,
+        // Arrivals become the next departure off the same stand rather than vanishing, which is
+        // what makes a gate a finite resource rather than a formality.
+        turnaround: true,
       })
 
   let selected: string | null = null

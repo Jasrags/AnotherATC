@@ -122,6 +122,10 @@ export interface GroundSimOptions {
    *  bare gate point, which is what makes an arrival cut across the apron and a pushback shove
    *  off toward whatever node happens to be nearest. */
   stands?: readonly Stand[]
+  /** Turn arrivals round instead of despawning them: on reaching its stand an arrival is
+   *  counted, then becomes a departure at that same gate. Omit (the default) and an arrival
+   *  clears the field when it parks, which is what every test written before this assumes. */
+  turnaround?: boolean
   /** Read-back errors: with what probability a pilot mishears a clearance, and the seed that
    *  makes it reproducible. Omit (the default) and every read-back is correct — which is why
    *  every test written before this mechanic still holds. */
@@ -391,7 +395,7 @@ interface Internal
  * in place each tick; {@link GroundSim.snapshot} hands out fresh immutable objects.
  */
 export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimOptions = {}): GroundSim {
-  const { graph, guard, spawn, servicing, frequencies, readback } = opts
+  const { graph, guard, spawn, servicing, frequencies, readback, turnaround } = opts
   const stands = opts.stands ?? []
   /** The runway direction in use. Mutable: an airport changes configuration. */
   let runway: ActiveRunway | undefined = opts.runway
@@ -614,10 +618,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       speedLimits: [],
       vacated: false,
       groundPending: false,
-      services:
-        servicing && (init.intent ?? 'departure') === 'departure'
-          ? servicing.services.map((s) => ({ kind: s.kind, total: s.sec, remaining: s.sec }))
-          : [],
+      services: (init.intent ?? 'departure') === 'departure' ? freshServices() : [],
       blockedEdge: null,
       heldSec: 0,
       avoidEdges: new Set(),
@@ -2045,6 +2046,54 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     if (handOffToGround(ac)) checkIn(ac)
   }
 
+  /** A fresh set of ground services, as a departure gets on the stand. Declared rather than
+   *  assigned: the seeded fleet is built during construction, before a `const` here would be
+   *  initialised. */
+  function freshServices(): { kind: string; total: number; remaining: number }[] {
+    return servicing ? servicing.services.map((s) => ({ kind: s.kind, total: s.sec, remaining: s.sec })) : []
+  }
+
+  /**
+   * Turn an arrival round into the next departure off the same stand.
+   *
+   * This is what makes a stand finite. Until now an arrival vanished when it parked, so a gate
+   * freed itself the moment it was reached and none of the occupancy machinery was ever under
+   * real pressure; with a turnaround the aircraft sits there through its whole ground cycle,
+   * and the next arrival for that gate has to wait for a real thing rather than a formality.
+   *
+   * The airframe is the same aircraft — type, wake, callsign and position all carry over — but
+   * the flight is a new one, so it needs its own IFR clearance and its own beacon code. Returns
+   * false when the field has nowhere for a departure to go, in which case it clears as before.
+   */
+  function turnRound(ac: Internal): boolean {
+    const target = runway?.departureStart ?? spawn?.departureTarget
+    if (!target) return false
+    ac.intent = 'departure'
+    ac.goalPoint = target
+    ac.dwell = -1
+    ac.path = [[ac.x, ac.y]]
+    ac.leg = 0
+    ac.targetSpeed = 0
+    // Stopped on the stand, and stated now rather than a tick later: `holding` is what tells
+    // the strip this is parked, and a frame reading 'taxi' on a stationary aircraft is a lie.
+    ac.holding = true
+    ac.groundspeed = 0
+    ac.controlledBy = 'ground'
+    // A new flight: the previous clearance and its beacon code do not carry over, and neither
+    // does anything left from the arrival — the landing, its turnoff, or its read-back state.
+    ac.squawk = null
+    ac.lastClearance = null
+    ac.misheard = null
+    ac.exit = null
+    ac.assignedExitRef = null
+    ac.rollingOut = false
+    ac.vacated = false
+    ac.groundPending = false
+    ac.held = null
+    ac.services = freshServices()
+    return true
+  }
+
   /** Detect goal completion; returns ids to remove. */
   function resolveGoals(dt: number): string[] {
     const remove: string[] = []
@@ -2067,7 +2116,8 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
             ac.dwell -= dt
             if (ac.dwell <= 0) {
               arrived += 1
-              remove.push(ac.id)
+              // The arrival is complete either way; what differs is whether the airframe stays.
+              if (!turnaround || !turnRound(ac)) remove.push(ac.id)
             }
           }
         }
