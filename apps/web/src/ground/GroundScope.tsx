@@ -66,9 +66,10 @@ export function GroundScope({ controller }: { controller: GroundController }) {
   // departure end together — you cannot land one way and depart the other.
   const [activeRunway, setActiveRunway] = useState(controller.activeRunway())
   const toggleRunway = () => {
-    const next = controller.activeRunway() === '27' ? '09' : '27'
-    controller.setRunway(next)
-    setActiveRunway(next)
+    controller.setRunway(controller.activeRunway() === '27' ? '09' : '27')
+    // The sim refuses a change while traffic is committed to the runway, so read back what it
+    // actually is rather than assuming the toggle took.
+    setActiveRunway(controller.activeRunway())
   }
 
   // Dev sandbox: which surface-click tool is armed. Ref drives the click/render loop;

@@ -126,7 +126,8 @@ export interface GroundController {
   /** Designator of the runway direction in use, e.g. "27". */
   activeRunway(): string
   /** Switch the airport configuration. Single runway: this moves *both* the arrival final and
-   *  the departure end, because they are always the same direction. */
+   *  the departure end, because they are always the same direction. Refused (with a notice)
+   *  while traffic is committed to the runway in use. */
   setRunway(ident: '09' | '27'): void
   /** Runway turnoffs this arrival could still be assigned (ahead of it and reachable).
    *  For the canvas only, which draws outside React's render cycle — anything rendered by
@@ -318,7 +319,8 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
     approach: () => sim.approach() ?? game.spawn.approach,
     activeRunway: () => sim.runway()?.ident ?? game.runway.ident,
     setRunway: (ident) => {
-      sim.setRunway(KSAN_RUNWAYS[ident])
+      const res = sim.setRunway(KSAN_RUNWAYS[ident])
+      if (!res.ok) flashNotice(res.reason)
       publish()
     },
     exitOptions: (id) => sim.exitOptions(id),

@@ -175,8 +175,11 @@ Design note: `docs/atc-tower.md` (one sim, two projections; Ground and Tower own
   active runway direction, switchable in-game (`RWY 27` / `RWY 09` control). Arrivals and
   departures always share it — the game previously landed RWY 9 while departing RWY 27, head-on
   on a single runway. The configuration drives the arrival final, the departure end, the exit
-  set and the glide path. _Next: wind + altimeter, an actual ATIS letter, and a runway-change
-  cascade for traffic already committed._
+  set and the glide path. **Runway-change cascade** shipped too: a change is refused while anything is
+  committed to the runway in use (on it, or on short final above it); on success every arrival
+  still on final goes around and re-establishes on the *new* approach at that end's glide path,
+  landing clearances are voided, and departures yet to roll are retargeted to the new departure
+  end. _Next: wind + altimeter, an actual ATIS letter._
 - ⬜ **Weather** — wind (affects ops), precipitation shading on scopes
 - ⬜ **Wake-turbulence model** — categories on strips, spacing constraints
 - 🚧 **Scenario / traffic generation** — deterministic spawner (gates → RWY, RWY → gates) in place; want realistic demand curves, schedules, runway-config awareness

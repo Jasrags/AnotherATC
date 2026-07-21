@@ -397,3 +397,129 @@ describe('departures use the pavement before the threshold', () => {
     expect(lined.status).toBe('lineUpWait')
   })
 })
+
+describe('lining up follows the connector onto the runway', () => {
+  const guard = buildRunwayGuard(KSAN_SURFACE)
+  const graph = buildTaxiGraph(KSAN_SURFACE)
+
+  it('drives the taxiway curve and finishes pointing down the runway', () => {
+    // Holding short at the east end, where B1 curves onto RWY 27. Lining up used to path
+    // straight at the nearest centerline point, so the aircraft slid sideways onto the runway
+    // and sat there crabbed across it.
+    const game = buildKsanGroundGame(1, '27')
+    const r = game.runway
+    const off = 0.08
+    const l = Math.hypot(r.farEnd[0] - r.departureStart[0], r.farEnd[1] - r.departureStart[1])
+    const ux = (r.farEnd[0] - r.departureStart[0]) / l
+    const uy = (r.farEnd[1] - r.departureStart[1]) / l
+    const sim = createGroundSim(
+      [
+        {
+          id: 'd', callsign: 'DEV01', type: 'B738', wake: 'M',
+          path: [
+            [r.departureStart[0] + uy * off, r.departureStart[1] - ux * off],
+            [r.departureStart[0], r.departureStart[1]],
+            [r.departureStart[0] - uy * off, r.departureStart[1] + ux * off],
+          ],
+          targetSpeed: 15, intent: 'departure', goalPoint: [r.departureStart[0], r.departureStart[1]],
+        },
+      ],
+      { guard, graph, runway: r },
+    )
+    sim.dispatch({ type: 'contactTower', aircraftId: 'd' })
+    expect(sim.dispatch({ type: 'lineUpAndWait', aircraftId: 'd' })).toEqual({ ok: true })
+    for (let i = 0; i < 600; i += 1) sim.step(0.1)
+
+    const d = sim.snapshot().aircraft[0]!
+    expect(d.status).toBe('lineUpWait')
+    // Aligned with the takeoff direction, not across it.
+    const takeoff = (((Math.atan2(ux, uy) * 180) / Math.PI) + 360) % 360
+    expect(Math.abs(((d.heading - takeoff + 540) % 360) - 180)).toBeLessThan(20)
+    expect(d.onRunway).toBe(true)
+  })
+})
+
+describe('runway-change cascade', () => {
+  const guard = buildRunwayGuard(KSAN_SURFACE)
+  const graph = buildTaxiGraph(KSAN_SURFACE)
+
+  const withArrivalOnFinal = (config: '09' | '27') => {
+    const game = buildKsanGroundGame(1, config)
+    const sim = createGroundSim(
+      [
+        {
+          id: 'a', callsign: 'AAL1', type: 'B738', wake: 'M',
+          path: [game.spawn.approach.fix, game.spawn.approach.threshold],
+          targetSpeed: 140, airborne: true, intent: 'arrival',
+          goalPoint: game.spawn.gates[0]!.point, gate: game.spawn.gates[0]!.ref,
+        },
+      ],
+      { guard, graph, runway: game.runway },
+    )
+    return sim
+  }
+
+  it('sends everyone still on final around onto the new approach', () => {
+    const sim = withArrivalOnFinal('27')
+    for (let i = 0; i < 300; i += 1) sim.step(0.1) // established, well down the final
+    const before = sim.snapshot().aircraft[0]!
+    expect(before.finalNm).toBeLessThan(4)
+
+    expect(sim.setRunway(KSAN_RUNWAYS['09'])).toEqual({ ok: true })
+    const after = sim.snapshot().aircraft[0]!
+    expect(after.status).toBe('onFinal') // went around, not landed
+    expect(after.finalNm).toBeGreaterThan(3.9) // re-established at the new fix
+    // …and on the *other* side of the field, on 09's approach.
+    expect(after.x).toBeLessThan(KSAN_RUNWAYS['09'].threshold[0])
+    // The new final is flown at 09's glide path, so it starts lower than 27's.
+    expect(after.altitude).toBeLessThan(glideAltitudeFt(3.5, 4))
+    expect(after.altitude).toBeCloseTo(glideAltitudeFt(3.3, 4), -1)
+  })
+
+  it('a landing clearance does not survive the change', () => {
+    const sim = withArrivalOnFinal('27')
+    for (let i = 0; i < 300; i += 1) sim.step(0.1)
+    sim.dispatch({ type: 'clearedToLand', aircraftId: 'a' })
+    expect(sim.snapshot().aircraft[0]!.status).toBe('landing')
+    sim.setRunway(KSAN_RUNWAYS['09'])
+    expect(sim.snapshot().aircraft[0]!.status).toBe('onFinal') // must be cleared again
+  })
+
+  it('is refused while traffic is committed to the runway in use', () => {
+    const sim = withArrivalOnFinal('27')
+    sim.dispatch({ type: 'clearedToLand', aircraftId: 'a' })
+    // Fly it inside short final, where it owns the runway.
+    for (let i = 0; i < 2000 && !sim.snapshot().aircraft[0]!.onShortFinal; i += 1) sim.step(0.1)
+    expect(sim.snapshot().aircraft[0]!.onShortFinal).toBe(true)
+    const res = sim.setRunway(KSAN_RUNWAYS['09'])
+    expect(res.ok).toBe(false)
+    expect(sim.runway()!.ident).toBe('27') // unchanged
+  })
+
+  it('refuses a change to the runway already in use', () => {
+    const sim = withArrivalOnFinal('27')
+    expect(sim.setRunway(KSAN_RUNWAYS['27'])).toEqual({ ok: false, reason: 'RWY 27 already in use' })
+  })
+
+  it('retargets a departure that has not rolled to the new departure end', () => {
+    const game = buildKsanGroundGame(1, '27')
+    const gate = game.spawn.gates[0]!
+    const sim = createGroundSim(
+      [
+        {
+          id: 'd', callsign: 'UAL2', type: 'B738', wake: 'M',
+          path: [gate.point], targetSpeed: 0, intent: 'departure',
+          gate: gate.ref, goalPoint: game.runway.departureStart,
+        },
+      ],
+      { guard, graph, runway: game.runway },
+    )
+    expect(sim.setRunway(KSAN_RUNWAYS['09'])).toEqual({ ok: true })
+    // Its clearance was to the east end; the departure end is now the west one.
+    sim.dispatch({ type: 'taxiToGoal', aircraftId: 'd' })
+    const route = sim.routeOf('d')
+    const end = route[route.length - 1]!
+    expect(Math.hypot(end[0] - KSAN_RUNWAYS['09'].departureStart[0], end[1] - KSAN_RUNWAYS['09'].departureStart[1]))
+      .toBeLessThan(0.2)
+  })
+})

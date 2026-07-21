@@ -170,9 +170,11 @@ export interface GroundSim {
   runway(): ActiveRunway | null
   /** Where arrivals are established on final, derived from the active runway. */
   approach(): ApproachConfig | null
-  /** Change the active runway direction — the airport's configuration. Traffic already
-   *  committed (airborne on final, rolling out) keeps the runway it was given. */
-  setRunway(next: ActiveRunway): void
+  /** Change the active runway direction — the airport's configuration. Refused while anything
+   *  is committed to the current runway (on it, or on short final above it). On success every
+   *  arrival still on final goes around and re-establishes on the new approach, and departures
+   *  yet to roll are retargeted to the new departure end. */
+  setRunway(next: ActiveRunway): DispatchResult
   /** Insert an aircraft at runtime (dev/admin sandbox); returns its id. */
   add(init: AircraftInit): string
   /** Remove an aircraft by id; returns whether one was removed. */

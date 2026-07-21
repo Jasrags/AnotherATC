@@ -135,6 +135,9 @@ const ROLLOUT_DECEL = MAX_BRAKE_KT_S
 const SHORT_FINAL_NM = 1.5
 /** How often (s) a rolled-out arrival retries routing off the runway when routing fails. */
 const EXIT_RETRY_SEC = 1
+/** How far (nm ≈ 180 ft) up the runway a lining-up aircraft rolls past the point it entered, so
+ *  it finishes pointing down the runway rather than across it. */
+const LINEUP_ALIGN_NM = 0.03
 /** How close (nm) counts as reaching a gate. */
 const GATE_EPS = 0.02
 /** Seconds an arrival dwells at the gate before it clears the stand. */
@@ -577,6 +580,43 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     const dy = far[1] - from[1]
     const len = Math.hypot(dx, dy) || 1
     return ((far[0] - ac.x) * dx + (far[1] - ac.y) * dy) / len
+  }
+
+  /**
+   * The path an aircraft drives to line up: along the connector it is already holding on, onto
+   * the centerline, then a short roll up the runway so it ends pointing down it.
+   *
+   * The held route is the part of its taxi clearance beyond the hold-short line, so it carries
+   * the connector's real curve. Driving straight at the nearest centerline point instead makes
+   * the aircraft slide sideways onto the runway and sit there crabbed across it.
+   */
+  function lineUpPath(ac: Internal, lineup: Point): Point[] {
+    const pts: Point[] = [[ac.x, ac.y]]
+    const far = farRunwayEnd(lineup)
+    // Perpendicular offset from the runway, to tell which side of it a point is on.
+    const ux = far ? far[0] - lineup[0] : 1
+    const uy = far ? far[1] - lineup[1] : 0
+    const ulen = Math.hypot(ux, uy) || 1
+    const side = (p: Point): number => ((p[0] - lineup[0]) * uy - (p[1] - lineup[1]) * ux) / ulen
+    const mySide = Math.sign(side([ac.x, ac.y]))
+    // Follow the connector while it is still on our side of the runway; the moment it reaches
+    // or crosses the pavement we take over and go to the centerline instead.
+    for (let i = 1; i < (ac.held?.length ?? 0); i += 1) {
+      const p = ac.held![i]!
+      if (guard && onRunway(p, guard)) break
+      if (mySide !== 0 && Math.sign(side(p)) !== mySide) break
+      pts.push(p)
+    }
+    pts.push(lineup)
+    // …then roll far enough up the runway to be aligned with the takeoff direction.
+    if (far) {
+      const d = Math.hypot(far[0] - lineup[0], far[1] - lineup[1])
+      if (d > 1e-6) {
+        const step = Math.min(LINEUP_ALIGN_NM, d / 2)
+        pts.push([lineup[0] + ((far[0] - lineup[0]) / d) * step, lineup[1] + ((far[1] - lineup[1]) / d) * step])
+      }
+    }
+    return pts
   }
 
   /** Seconds of wake separation still owed before this holding-short departure may roll. */
@@ -1081,7 +1121,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         // its far departure-runway goal — so it lines up where it's holding, at either end.
         const lineup: Point = nearestRunwayPoint([ac.x, ac.y]) ?? ac.goalPoint ?? [ac.x, ac.y]
         clearDiversion(ac)
-        ac.path = [[ac.x, ac.y], lineup]
+        ac.path = lineUpPath(ac, lineup)
         ac.leg = 0
         ac.held = null
         ac.holdShort = false
@@ -1476,9 +1516,48 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     dispatch,
     runway: () => runway ?? null,
     approach: () => approachNow(),
-    setRunway(next: ActiveRunway): void {
+    setRunway(next: ActiveRunway): DispatchResult {
+      // A runway change is coordinated, not thrown. Anything already committed to the runway —
+      // on it, or on short final above it — has to finish first; the controller stops the flow,
+      // lets it land or go, and then turns the airport around.
+      if (runway && next.ident === runway.ident) return refused(`RWY ${next.ident} already in use`)
+      const committed = fleet.find((a) => blocksRunway(a))
+      if (committed)
+        return refused(`runway in use — ${committed.callsign} is committed to RWY ${runway?.ident ?? ''}`.trim())
+
+      const previous = runway
       runway = next
       exitCache.clear() // turnoffs are derived per landing direction
+
+      for (const ac of fleet) {
+        // Arrivals still on final for the old direction cannot land on it any more, so they go
+        // around and re-establish on the new approach. This is the cascade — one configuration
+        // change hands the controller back every inbound at once.
+        if (ac.airborne && ac.intent === 'arrival') {
+          const ap = approachNow()
+          if (ap) {
+            ac.path = [ap.fix, ap.threshold]
+            ac.threshold = ap.threshold
+            ac.finalLenNm = pathLength(ac.path)
+            ac.finalAltFt = glideAltitudeFt(next.glidePathDeg, ac.finalLenNm)
+          }
+          goAround(ac)
+          continue
+        }
+        // A departure that has not started rolling is now aimed at the wrong end of the field;
+        // its clearance is stale and Ground has to taxi it round. Retarget the goal so the strip
+        // and "taxi to the runway" mean the new end — it is not moved automatically.
+        if (
+          ac.intent === 'departure' &&
+          !ac.departing &&
+          previous &&
+          ac.goalPoint &&
+          dist(ac.goalPoint, previous.departureStart) < 1e-6
+        ) {
+          ac.goalPoint = next.departureStart
+        }
+      }
+      return ACCEPTED
     },
     exitOptions(aircraftId: string): RunwayExit[] {
       const ac = find(aircraftId)
