@@ -463,8 +463,45 @@ describe('lining up follows the connector onto the runway', () => {
     expect(d.status).toBe('lineUpWait')
     // Aligned with the takeoff direction, not across it.
     const takeoff = (((Math.atan2(ux, uy) * 180) / Math.PI) + 360) % 360
-    expect(Math.abs(((d.heading - takeoff + 540) % 360) - 180)).toBeLessThan(20)
+    expect(Math.abs(((d.heading - takeoff + 540) % 360) - 180)).toBeLessThan(5)
     expect(d.onRunway).toBe(true)
+    // …and *on the stripe*. The runway guard's band is wider than the pavement, so a node a
+    // hundred feet off the centerline still reads as "on the runway" — lining up on one of
+    // those left the aircraft parked beside the centerline rather than on it.
+    const offCenterline = Math.abs((d.x - r.departureStart[0]) * uy - (d.y - r.departureStart[1]) * ux)
+    expect(ft(offCenterline)).toBeLessThan(15)
+  })
+
+  it('lines up on the centerline in both configurations', () => {
+    for (const config of ['09', '27'] as const) {
+      const game = buildKsanGroundGame(1, config)
+      const r = game.runway
+      const off = 0.08
+      const l = Math.hypot(r.farEnd[0] - r.departureStart[0], r.farEnd[1] - r.departureStart[1])
+      const ux = (r.farEnd[0] - r.departureStart[0]) / l
+      const uy = (r.farEnd[1] - r.departureStart[1]) / l
+      const sim = createGroundSim(
+        [
+          {
+            id: 'd', callsign: 'DEV01', type: 'B738', wake: 'M',
+            path: [
+              [r.departureStart[0] + uy * off, r.departureStart[1] - ux * off],
+              [r.departureStart[0], r.departureStart[1]],
+              [r.departureStart[0] - uy * off, r.departureStart[1] + ux * off],
+            ],
+            targetSpeed: 15, intent: 'departure', goalPoint: [r.departureStart[0], r.departureStart[1]],
+          },
+        ],
+        { guard, graph, runway: r },
+      )
+      sim.dispatch({ type: 'contactTower', aircraftId: 'd' })
+      sim.dispatch({ type: 'lineUpAndWait', aircraftId: 'd' })
+      for (let i = 0; i < 900; i += 1) sim.step(0.1)
+      const d = sim.snapshot().aircraft[0]!
+      expect(d.status).toBe('lineUpWait')
+      const offCenterline = Math.abs((d.x - r.departureStart[0]) * uy - (d.y - r.departureStart[1]) * ux)
+      expect(ft(offCenterline)).toBeLessThan(15)
+    }
   })
 
   it('uses the connector geometry rather than one straight cut at the centerline', () => {

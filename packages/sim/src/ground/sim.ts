@@ -146,6 +146,11 @@ const EXIT_RETRY_SEC = 1
 /** How far (nm ≈ 180 ft) up the runway a lining-up aircraft rolls past the point it entered, so
  *  it finishes pointing down the runway rather than across it. */
 const LINEUP_ALIGN_NM = 0.03
+/** How close (nm ≈ 24 ft) a node must be to the centerline to count as *on* it. The runway
+ *  guard's band is deliberately wider than the pavement, so "on the runway" also catches
+ *  connector nodes a hundred feet off the centerline — fine for occupancy, useless for
+ *  choosing where to line up. */
+const CENTERLINE_EPS_NM = 0.004
 /** How close (nm) counts as reaching a gate. */
 const GATE_EPS = 0.02
 /** Seconds an arrival dwells at the gate before it clears the stand. */
@@ -593,23 +598,25 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     const pts: Point[] = [[ac.x, ac.y]]
     if (graph && guard) {
       const startKey = graph.nearestNode([ac.x, ac.y])
-      // Enter at the nearest point of the runway that is actually a node, so the route runs
-      // through the connector's vertices — which is where its curvature is recorded.
-      const entryKey = graph.nearestNodeWhere(lineup, (n) => onRunway(n, guard))
+      // Route to a node genuinely *on the centerline* — the runway polyline's own vertices —
+      // so the path runs through the connector's geometry, which is where its curvature is
+      // recorded, and finishes on the stripe rather than at the pavement edge.
+      const entryKey = graph.nearestNodeWhere(lineup, (n) => {
+        const c = nearestRunwayPoint(n)
+        return c !== null && dist(n, c) < CENTERLINE_EPS_NM
+      })
       const route = startKey && entryKey ? graph.route(startKey, entryKey) : []
       for (const p of route) {
         const last = pts[pts.length - 1]!
         if (dist(last, p) > 1e-6) pts.push(p)
       }
     }
-    // If the route already reached the pavement we are on the centerline; going on to the
-    // perpendicular projection as well would double back and produce a near-reversal right at
-    // the runway edge. Only fall back to the projection when there was no route to follow.
-    let base = pts[pts.length - 1]!
-    if (!(guard && onRunway(base, guard))) {
-      if (dist(base, lineup) > 1e-6) pts.push(lineup)
-      base = lineup
-    }
+    // Finish on the centerline. Projecting the *end of the route* rather than the aircraft's
+    // original position keeps this ahead of it: projecting from where it was holding would
+    // double back to a point already behind, swinging it through a near-reversal.
+    const arrived = pts[pts.length - 1]!
+    const base = nearestRunwayPoint(arrived) ?? lineup
+    if (dist(arrived, base) > 1e-6) pts.push(base)
     // …then roll far enough up the runway to be aligned with the takeoff direction.
     const far = farRunwayEnd(base)
     if (far) {
