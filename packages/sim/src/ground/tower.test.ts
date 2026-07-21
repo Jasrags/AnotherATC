@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { createGroundSim } from './sim'
 import type { AircraftInit } from './sim'
 import { buildRunwayGuard } from './runwayGuard'
+import { buildTaxiGraph } from './taxiGraph'
 import type { AirportSurface } from '../world/types'
 
 // Runway along y=0; a departure taxis north up to (and onto) it with its goal on the runway.
@@ -120,6 +121,78 @@ describe('tower — departures', () => {
     expect(cto.ok).toBe(false)
     if (!cto.ok) expect(cto.reason).toMatch(/occupied/i)
     expect(sim.snapshot().departed).toBe(0)
+  })
+
+  it('a taxi clearance to a lined-up aircraft aborts the line-up (status is not stuck on lineUpWait)', () => {
+    // Regression: applyRoute must clear lineUpWait/departing, else re-routing a lined-up
+    // (or rolling) aircraft leaves the flag stuck and statusOf reports lineUpWait forever.
+    // A scope click-to-taxi (GroundScope) can hit a Tower-owned aircraft, so this is reachable.
+    // Needs a taxi graph: a taxiway running south up to the runway.
+    const gSurface: AirportSurface = {
+      ...surface,
+      features: [
+        { kind: 'runway', points: [[-1, 0], [1, 0]] },
+        { kind: 'taxiway', ref: 'A', points: [[0, -0.5], [0, -0.3], [0, -0.1]] },
+      ],
+    }
+    const gGuard = buildRunwayGuard(gSurface)
+    const gGraph = buildTaxiGraph(gSurface)
+    const dep: AircraftInit = {
+      id: 'd', callsign: 'd', type: 'B738', wake: 'M',
+      path: [[0, -0.5]], targetSpeed: 0, intent: 'departure', goalPoint: [0, 0],
+    }
+    const sim = createGroundSim([dep], { graph: gGraph, guard: gGuard })
+    sim.dispatch({ type: 'taxiToGoal', aircraftId: 'd' })
+    for (let i = 0; i < 2000 && !A(sim, 'd').holdShort; i += 1) sim.step(0.1)
+    expect(A(sim, 'd').holdShort).toBe(true)
+    sim.dispatch({ type: 'contactTower', aircraftId: 'd' })
+    sim.dispatch({ type: 'lineUpAndWait', aircraftId: 'd' })
+    for (let i = 0; i < 400; i += 1) sim.step(0.1)
+    expect(A(sim, 'd').status).toBe('lineUpWait')
+
+    // Re-route it (e.g. a scope click-to-taxi) back down the taxiway. It must resume taxiing,
+    // not stay stuck on 'lineUpWait', and must never be spuriously counted as departed.
+    expect(sim.dispatch({ type: 'taxiTo', aircraftId: 'd', dest: [0, -0.3] }).ok).toBe(true)
+    for (let i = 0; i < 50; i += 1) sim.step(0.1)
+    expect(A(sim, 'd').status).toBe('taxi')
+    for (let i = 0; i < 600; i += 1) sim.step(0.1)
+    expect(A(sim, 'd').status).not.toBe('lineUpWait')
+    expect(sim.snapshot().departed).toBe(0)
+  })
+
+  it('enforces the wake interval through the line-up-and-wait path, not just the fast path', () => {
+    const lead: AircraftInit = {
+      id: 'lead',
+      callsign: 'lead',
+      type: 'B763',
+      wake: 'H', // Heavy leader
+      path: [[-0.3, -0.5], [-0.3, -0.1], [-0.3, 0.1], [-0.3, 0.5]],
+      targetSpeed: 15,
+      intent: 'departure',
+      goalPoint: [-0.3, 0],
+    }
+    const foll = departure('foll', -0.6) // Medium follower, further west
+    const sim = createGroundSim([lead, foll], { guard })
+    taxiToHoldShort(sim)
+    sim.dispatch({ type: 'contactTower', aircraftId: 'lead' })
+    sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'lead' })
+    const t0 = sim.snapshot().time
+    for (let i = 0; i < 3000 && sim.snapshot().departed < 1; i += 1) sim.step(0.1)
+
+    // Follower lines up while the Heavy's wake still holds it — the takeoff clearance is refused.
+    sim.dispatch({ type: 'contactTower', aircraftId: 'foll' })
+    expect(sim.dispatch({ type: 'lineUpAndWait', aircraftId: 'foll' }).ok).toBe(true)
+    for (let i = 0; i < 200; i += 1) sim.step(0.1)
+    expect(A(sim, 'foll').status).toBe('lineUpWait')
+    const early = sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'foll' })
+    expect(early.ok).toBe(false) // gated by wake even from LUAW
+    if (!early.ok) expect(early.reason).toMatch(/wake.*heavy/i)
+    expect(A(sim, 'foll').wakeHoldSec).toBeGreaterThan(0) // countdown reported while lined up
+
+    // Once the interval elapses, the clearance is accepted from the line-up.
+    for (let i = 0; i < 3000 && sim.snapshot().time - t0 < 120; i += 1) sim.step(0.1)
+    expect(sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'foll' })).toEqual({ ok: true })
+    expect(A(sim, 'foll').status).toBe('departing')
   })
 
   it('refuses to hand off a crossing aircraft, and cross-runway still releases it', () => {

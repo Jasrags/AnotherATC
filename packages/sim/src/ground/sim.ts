@@ -606,7 +606,9 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     ac.held = held
     ac.dwell = -1
     ac.giveWayTo = null // a fresh clearance supersedes any give-way hold
-    ac.pushingBack = false // …and aborts an in-progress pushback
+    ac.pushingBack = false // …and aborts an in-progress pushback,
+    ac.lineUpWait = false // …a line-up on the runway,
+    ac.departing = false // …and a takeoff roll — a taxi clearance means it's taxiing now.
     ac.targetSpeed = TAXI_SPEED_KT
     ac.holding = false
     ac.holdShort = false
