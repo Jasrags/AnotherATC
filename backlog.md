@@ -93,12 +93,19 @@ individual command features below plug into; it generalizes across controller mo
 - ✅ **Give way to…** — submenu of nearby traffic (by callsign); runs `giveWay`, the aircraft holds for that traffic then auto-continues. _Next: pick the target on the scope._
 - ✅ **Hold position** — wired to `hold` (shown when taxiing).
 - ✅ **Pushback approved** — wired: shown for a parked gate departure; runs the `pushback` phase, after which Taxi/Route unlock (see Pushback from gate).
-- ⬜ **Misc. messages** — catch-all phraseology (say again, expedite, verify heading/altitude, etc.).
+- 🚧 **Misc. messages** — catch-all phraseology. **Say again** is wired (see Read-back verification);
+  expedite, verify heading/altitude, etc. still open.
 - ✅ **Contact other frequency** — `Contact tower` wired for a departure holding short (Ground→Tower handoff, completes the departure); stays `soon` in other states until more frequencies/modes exist.
 
 ### Supporting systems shown in the reference
-- ⬜ **Communications log** — timestamped readback/clearance transcript in ATC phraseology (ties into
-  Read-back verification + 💭 Voice/phraseology).
+- ✅ **Communications log** — the sim writes a radio transcript (`ground/comms.ts`): every accepted
+  command emits the controller's instruction and the pilot's read-back in 7110.65/AIM phraseology,
+  timestamped in sim time and tagged with the frequency it happened on; refused commands say nothing.
+  Plus the calls no controller issues — the pilot checking in after a handoff (on the *new*
+  frequency) and announcing a go-around. Frequencies come off the `Airport` bundle
+  ("contact tower 118.3"). Web: a **COMMS panel** under the strip bay filtered to the active
+  position, controller flush + pilot indented, click a line to select the aircraft, `aria-live`.
+  _Next: filter to the selected aircraft; a "last call" line on the strip itself._
 - ⬜ **Richer strip / data-block header** — GS, IAS, altitude, heading, active state on the selected aircraft.
 - ⬜ **Quick-state tabs** — small summary of the aircraft's current clearance on the strip (e.g. "Pushback",
   "Taxi 24"), as fast context + shortcuts.
@@ -145,9 +152,10 @@ Design note: `docs/atc-tower.md` (one sim, two projections; Ground and Tower own
   / 3.5°). EMAS 315 × 218 ft at the **west** end. Markings — pre-threshold arrows, threshold
   bars, designators, EMAS chevrons — drawn from the surveyed layout. A departure is refused when
   it has insufficient runway ahead of it in the direction in use.
-- ⬜ **Slice 3d — communications log + read-back**: the arrival procedure is 4–5 transmissions and
-  none are visible today. Also open: wake spacing on final, arrival sequence numbers, a
-  player-issued go-around, hold-short during rollout, ATIS/weather line.
+- 🚧 **Slice 3d — communications log + read-back**: **the log and read-back verification shipped**
+  (see Cross-cutting systems) — the arrival procedure's transmissions are now all visible in the TWR
+  bay. Still open: wake spacing on final, arrival sequence numbers, a player-issued go-around,
+  hold-short during rollout, ATIS/weather line.
 - 💭 **Ramp Control** — a third layer after Ground at large hubs (airline/airport-run, not FAA).
   Deferred: adds a frequency without adding a decision until gate conflicts + pushback contention
   exist (see Turnaround).
@@ -173,8 +181,18 @@ Design note: `docs/atc-tower.md` (one sim, two projections; Ground and Tower own
 - ⬜ **Flight data model** — one canonical flight object, mode-specific strip projections (per design docs)
 - ⬜ **Flight strip state machine** — shared across modes; phase gates available actions
 - ⬜ **Handoff mechanics** — initiate/accept, frequency change, refusal when overloaded
-- ⬜ **Read-back verification** — clearance & taxi read-backs the controller must confirm (or catch an error) before the clearance takes effect; the accuracy check is the gameplay, distinct from TTS voice (see 💭 Voice/phraseology). Used by Clearance Delivery and Assigned taxi routes.
-- 🚧 **Squawk / transponder codes** — beacon code assigned at clearance delivery (deterministic 4-digit octal), shown on the strip. _Next: link the code to a radar target once airborne (feeds TRACON radar contact)._
+- 🚧 **Read-back verification** — **shipped:** a pilot who mishears a clearance reads it back wrong
+  and *acts on the read-back* — the clearance is never withheld, it takes effect wrong. The only cue
+  is the transcript, so catching one is a judgement, not a prompt. **Say again** is the catch: it
+  repeats the last clearance with "negative, …" and restores what the controller actually said; it is
+  offered in every phase once anything has been transmitted and accepted whether or not there was an
+  error. Opt-in `readback: { errorRate, seed }` (absent = never mishears, so every pre-existing test
+  still holds); the game runs 15%, the dev sandbox none. Scored via `readbackErrors`/`readbackCaught`.
+  A clearance the sim voids on its own (go-around, touchdown, handoff, expired give-way) stops being
+  repeatable. _Next: corrupt more than the beacon code — a misheard **runway exit** (real
+  consequence: wrong turnoff, different runway occupancy) and a misheard **hold short** vs. cross,
+  which is the dangerous one. Then surface the score._
+- 🚧 **Squawk / transponder codes** — beacon code assigned at clearance delivery (deterministic 4-digit octal), shown on the strip. Note the strip shows the code the aircraft is *squawking*, which is not the issued code when the pilot misheard it — comparing the two is the read-back game. _Next: link the code to a radar target once airborne (feeds TRACON radar contact)._
 - ⬜ **Turnaround & gate conflict** — an arrival feeds directly into the same aircraft's next departure cycle; short-turn timer; **gate conflict** when an arrival's gate is still occupied by a late departure. High-tension Ground/Ramp mechanic called out in the design docs.
 - ✅ **Sim ↔ UI bridge** — `GroundController` store + `useSyncExternalStore` for strips (canvas stays on rAF; strips re-render only on phase/selection change)
 - ⬜ **Time controls** — pause / 1× / 2× / 4× (fixed timestep already supports it)
@@ -190,7 +208,7 @@ Design note: `docs/atc-tower.md` (one sim, two projections; Ground and Tower own
 - ⬜ **Weather** — wind (affects ops), precipitation shading on scopes
 - ⬜ **Wake-turbulence model** — categories on strips, spacing constraints
 - 🚧 **Scenario / traffic generation** — deterministic spawner (gates → RWY, RWY → gates) in place; want realistic demand curves, schedules, runway-config awareness
-- 🚧 **Game loop & scoring** — dep/arr counters in place; want objectives, delays, incidents, difficulty, fail states
+- 🚧 **Game loop & scoring** — dep/arr counters plus `readbackErrors`/`readbackCaught` in place (not yet surfaced in the UI); want objectives, delays, incidents, difficulty, fail states
 - 💭 **Replay / save** — determinism enables record + replay (and later multiplayer)
 - 💭 **Voice / phraseology** — TTS readbacks, speech input
 - 🚧 **More airports** — **the abstraction is in** (`Airport` bundle in `world/airport.ts`; KSAN is
