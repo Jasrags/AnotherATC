@@ -25,10 +25,9 @@ import {
 } from './render'
 import { COLORS, DIMS } from './palette'
 import { isTypingTarget } from './keyboard'
+import { FIXED_DT, tick } from './simClock'
 import type { GroundAircraft } from '@anotheratc/sim'
 
-/** Fixed simulation timestep (seconds) — decoupled from the render framerate. */
-const FIXED_DT = 0.05
 /** Click must land within this many px of a target to select it. */
 const HIT_PX = 14
 /** Click within this many px of a taxiway snaps to it (generous — the hover preview
@@ -80,6 +79,18 @@ export function GroundScope({ controller }: { controller: GroundController }) {
     const next = idents[(idents.indexOf(activeRunway) + 1) % idents.length]
     if (next) controller.setRunway(next)
   }
+
+  // Time control. The ref drives the fixed-timestep loop; the state drives the buttons. 0 is
+  // paused — the sim simply stops accumulating, so everything else (pan, zoom, select, and
+  // issuing clearances) keeps working while it is stopped.
+  const SPEEDS = [1, 2, 4] as const
+  const [speed, setSpeed] = useState<number>(1)
+  const speedRef = useRef(1)
+  const applySpeed = (n: number) => {
+    speedRef.current = n
+    setSpeed(n)
+  }
+  const togglePause = () => applySpeed(speedRef.current === 0 ? 1 : 0)
 
   // Dev sandbox: which surface-click tool is armed. Ref drives the click/render loop;
   // state drives the toolbar's pressed styling.
@@ -219,6 +230,11 @@ export function GroundScope({ controller }: { controller: GroundController }) {
       if (isTypingTarget(e.target)) return // don't hijack keys meant for a focused text field
       const id = controller.selectedId()
       const draft = controller.routeDraft()
+      if (e.key === ' ' && !(e.target instanceof HTMLButtonElement)) {
+        e.preventDefault() // stop the page scrolling out from under the scope
+        togglePause()
+        return
+      }
       if (e.key === 'Escape') {
         if (controller.dev && devToolRef.current !== 'none') {
           devToolRef.current = 'none'
@@ -316,16 +332,10 @@ export function GroundScope({ controller }: { controller: GroundController }) {
         last = t
         started = true
       }
-      let dt = (t - last) / 1000
+      const t0 = tick(acc, (t - last) / 1000, speedRef.current)
       last = t
-      if (dt > 0.25) dt = 0.25
-      acc += dt
-      let steps = 0
-      while (acc >= FIXED_DT && steps < 30) {
-        sim.step(FIXED_DT)
-        acc -= FIXED_DT
-        steps += 1
-      }
+      acc = t0.acc
+      for (let i = 0; i < t0.steps; i += 1) sim.step(FIXED_DT)
       controller.publish()
 
       if (view) {
@@ -421,7 +431,8 @@ export function GroundScope({ controller }: { controller: GroundController }) {
           const onFinal = snap.aircraft.filter((a) => a.altitude > 0).length
           const surface = snap.aircraft.length - onFinal
           const final = onFinal > 0 ? ` · ${onFinal} on final` : ''
-          setText(statusRef.current, `${moving} taxiing · ${surface} on surface${final} · dep ${snap.departed} · arr ${snap.arrived} · T+${mm}:${ss}`)
+          const rate = speedRef.current === 0 ? ' · PAUSED' : speedRef.current === 1 ? '' : ` · ${speedRef.current}\u00d7`
+          setText(statusRef.current, `${moving} taxiing · ${surface} on surface${final} · dep ${snap.departed} · arr ${snap.arrived} · T+${mm}:${ss}${rate}`)
         }
         if (alertRef.current) {
           const inConflict = snap.aircraft.filter((a) => a.conflict).length
@@ -525,6 +536,31 @@ export function GroundScope({ controller }: { controller: GroundController }) {
         >
           ⤢ FIT
         </button>
+        {/* Time control. A taxi across the field is minutes and ground servicing is 45 s, so
+            watching it at 1x is most of the cost of play-testing at all. */}
+        <span className="ctl-group" role="group" aria-label="Simulation rate">
+          <button
+            type="button"
+            className="ctl-btn mono"
+            aria-pressed={speed === 0}
+            onClick={togglePause}
+            title="Pause the simulation (Space). Clearances can still be issued while paused."
+          >
+            {speed === 0 ? '▶' : '❚❚'}
+          </button>
+          {SPEEDS.map((n) => (
+            <button
+              key={n}
+              type="button"
+              className="ctl-btn mono"
+              aria-pressed={speed === n}
+              onClick={() => applySpeed(n)}
+              title={`Run at ${n}x`}
+            >
+              {n}&times;
+            </button>
+          ))}
+        </span>
         {controller.dev && (
           <span className="ctl-group" role="group" aria-label="Developer tools">
             <button
