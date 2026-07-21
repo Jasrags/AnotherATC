@@ -320,6 +320,19 @@ is switched on.
 
 ---
 
+## ⬜ Documentation debt
+
+- ⬜ **Refresh the build docs for the taxi/stand model.** `docs/adding-an-airport.md` and
+  `docs/airport-data-pipeline.md` predate several changes to how the ground layer actually
+  works: stands are now painted lead-in lines rather than gate points (`ground/stands.ts`,
+  charted vs derived, the measured nose setback), gate slots are nose-stop marks with a parked
+  heading, arrivals are marshalled in along the paint and pushback reverses down it, and the
+  routing graph gained runway-entry and turn constraints. A field's `parking_position` coverage
+  is now a first-class data question for a new airport — it belongs in the pipeline doc's
+  "what each source does not carry" section and in the adding-an-airport checklist.
+
+---
+
 ## Testing / infra
 
 - ✅ **Dev/admin sandbox** (`?dev`) — empty surface, spawner off, plus a control bar. **SPAWN**: click the surface to drop a test aircraft (snaps to the nearest routing node, auto `DEVnn`); drive it with the normal commands; **GRAPH** (the routing-graph overlay, and its `g` key) is dev-only — outside the sandbox the bar is just the two gameplay controls, RWY and FIT. **ARRIVAL** puts a test arrival on the final approach of the *active* runway (airborne — it can't be placed by clicking the surface) and switches to the Tower bay; successive spawns stagger 1.2 nm down the final. **X** removes the selected, **CLEAR** wipes all. **PROBE**: click two points to draw the shortest graph path between them with a live length + taxiway-sequence readout (no route → dashed red). Works alongside the **GRAPH** overlay. Sim gained `add`/`remove`/`clear`. _Next: param picker (type/wake/intent), exact (off-network) placement, step/pause, save/replay._
