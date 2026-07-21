@@ -339,3 +339,28 @@ describe('drawRunwayMarkings', () => {
     expect(ops).toHaveLength(0)
   })
 })
+
+describe('prepareSurface — stand lines', () => {
+  const surface = surfaceOf([
+    taxiway('A', [[-1, 0], [1, 0]]),
+    { kind: 'gate', ref: '1', points: [[0, 0.1]] },
+    { kind: 'gate', ref: '2', points: [[0.5, 0.1]] },
+    { kind: 'parking_position', ref: '2', points: [[0.5, 0], [0.5, 0.12]] },
+  ])
+
+  it('carries one oriented line per gate, flagged charted or derived', () => {
+    const prep = prepareSurface(surface)
+    expect(prep.standLines.map((s) => s.ref)).toEqual(['1', '2'])
+    const bySource = Object.fromEntries(prep.standLines.map((s) => [s.ref, s.source]))
+    // Gate 2 has a painted line in the data; gate 1's is inferred off the taxiway.
+    expect(bySource).toEqual({ '1': 'derived', '2': 'charted' })
+  })
+
+  it('orders every line taxi-side first so it can be driven in and reversed out', () => {
+    for (const s of prepareSurface(surface).standLines) {
+      expect(s.entry).toEqual(s.lead[0])
+      expect(s.stop).toEqual(s.lead[s.lead.length - 1])
+      expect(Math.abs(s.entry[1])).toBeLessThan(Math.abs(s.stop[1])) // entry nearer the taxiway
+    }
+  })
+})

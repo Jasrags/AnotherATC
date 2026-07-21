@@ -1,4 +1,4 @@
-import { FT_PER_NM } from '@anotheratc/sim'
+import { buildStands, FT_PER_NM } from '@anotheratc/sim'
 import type {
   AirportSurface,
   ApproachConfig,
@@ -10,6 +10,7 @@ import type {
   SurfaceFeature,
   SurfaceKind,
   TaxiTopology,
+  Stand,
 } from '@anotheratc/sim'
 import { COLORS, DIMS } from './palette'
 import { toScreen, type View } from './view'
@@ -58,7 +59,7 @@ interface StrokeOpts {
   cap?: CanvasLineCap
 }
 
-function trace(ctx: Ctx, v: View, points: SurfaceFeature['points']): void {
+function trace(ctx: Ctx, v: View, points: readonly Point[]): void {
   let started = false
   for (const p of points) {
     if (!p) continue
@@ -105,6 +106,46 @@ function strokeFeatures(ctx: Ctx, v: View, feats: SurfaceFeature[], color: strin
   }
 }
 
+/** Zoom at which stand paint becomes legible rather than a tangle across the aprons. */
+const STAND_LINE_SCALE = 1500
+/** Half-width (nm) of the bar painted across the line where the nose stops. */
+const STOP_BAR_NM = 0.006
+
+/**
+ * The painted lead-in lines, with the stop bar at the nose mark.
+ *
+ * An earlier pass drew every `parking_position` way raw and it read as a tangle, because the
+ * ways are unoriented and include stands the field doesn't use. These come from `buildStands`,
+ * already resolved to one line per gate and ordered taxilane → stop, so the paint reads the way
+ * it does on the apron. A *derived* line is inferred rather than surveyed, so it is drawn
+ * dashed: the scope should not claim paint that isn't there.
+ */
+function drawStandLines(ctx: Ctx, v: View, stands: readonly Stand[]): void {
+  if (v.scale < STAND_LINE_SCALE) return
+  ctx.lineWidth = 1.1
+  ctx.lineCap = 'round'
+  for (const s of stands) {
+    ctx.strokeStyle = COLORS.standLine
+    ctx.setLineDash(s.source === 'derived' ? [3, 4] : [])
+    ctx.beginPath()
+    trace(ctx, v, s.lead)
+    ctx.stroke()
+
+    // The stop bar, square across the line the nose comes in on.
+    const rad = (s.headingDeg * Math.PI) / 180
+    const nx = Math.cos(rad) * STOP_BAR_NM
+    const ny = -Math.sin(rad) * STOP_BAR_NM
+    ctx.setLineDash([])
+    ctx.beginPath()
+    trace(ctx, v, [
+      [s.stop[0] - nx, s.stop[1] - ny],
+      [s.stop[0] + nx, s.stop[1] + ny],
+    ])
+    ctx.stroke()
+  }
+  ctx.setLineDash([])
+}
+
 export function drawSurface(ctx: Ctx, v: View, prep: PreparedSurface, w: number, h: number): void {
   ctx.fillStyle = COLORS.bg
   ctx.fillRect(0, 0, w, h)
@@ -112,8 +153,7 @@ export function drawSurface(ctx: Ctx, v: View, prep: PreparedSurface, w: number,
   fillPolys(ctx, v, prep.apron, COLORS.apronFill, COLORS.apronEdge)
   fillPolys(ctx, v, prep.buildings, COLORS.buildingFill, COLORS.buildingEdge)
 
-  // gate stands are drawn as markers in drawGates (cleaner than the tangle of
-  // OSM parking guidance lines).
+  drawStandLines(ctx, v, prep.standLines)
 
   // taxiways: pavement then a thin centerline
   strokeFeatures(ctx, v, prep.taxiways, COLORS.taxiway, { nm: DIMS.taxiwayNm, minPx: 1.5 })
@@ -340,7 +380,7 @@ export function drawAreaLabels(ctx: Ctx, v: View, prep: PreparedSurface): void {
 /** Gate/stand numbers — only when zoomed in enough to read them (else they'd be a blur). */
 const GATE_LABEL_SCALE = 2400
 
-interface Stand {
+interface StandLabel {
   ref: string
   point: Point
 }
@@ -348,8 +388,8 @@ interface Stand {
 /** One numbered stand per gate: prefer the OSM gate node (terminal gates), fall
  *  back to a parking line's midpoint for numbered cargo/remote stands. Untagged
  *  parking positions are skipped (they'd just be unlabeled squares). */
-function collectStands(surface: AirportSurface): Stand[] {
-  const stands: Stand[] = []
+function collectStands(surface: AirportSurface): StandLabel[] {
+  const stands: StandLabel[] = []
   const seen = new Set<string>()
   for (const f of surface.features) {
     if (f.kind !== 'gate' || !f.ref) continue
@@ -393,7 +433,9 @@ export interface PreparedSurface {
   runwayCenterlines: SurfaceFeature[]
   holdShort: Point[]
   areaLabels: LabelAnchor[]
-  stands: Stand[]
+  stands: StandLabel[]
+  /** Painted lead-in geometry per stand, oriented taxilane → nose stop. */
+  standLines: Stand[]
   taxiLabels: LabelAnchor[]
   runwayNumbers: RunwayNumber[]
 }
@@ -503,6 +545,7 @@ export function prepareSurface(
     holdShort,
     areaLabels,
     stands: collectStands(surface),
+    standLines: buildStands(surface),
     taxiLabels,
     runwayNumbers,
   }

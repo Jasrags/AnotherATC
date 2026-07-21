@@ -17,6 +17,7 @@ export const COLORS = {
   emasFill: '#241a0c',
   holdShort: '#d79a2b',
   stand: '#1f3e4f', // gate/parking guidance lines (subtle — not a dominant feature)
+  standLine: '#8a7a33', // painted stand lead-in lines and stop bars
   gateNode: '#4a7285', // gate-node stand markers (e.g. Terminal 1, which has no stand lines)
   gateLabel: '#a9d0e2', // gate numbers (shown when zoomed in)
   target: '#f2f9ff',
