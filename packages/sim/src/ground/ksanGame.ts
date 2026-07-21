@@ -64,23 +64,8 @@ function runwayEnds(): { west: Point; east: Point } {
   return { west: west ?? [0, 0], east: east ?? [0, 0] }
 }
 
-/** Nearest taxiway vertex to a point — where arrivals join the surface. */
-function nearestTaxiwayVertex(target: Point): Point {
-  let best: Point | null = null
-  let bestD = Infinity
-  for (const f of KSAN_SURFACE.features) {
-    if (f.kind !== 'taxiway' && f.kind !== 'taxilane') continue
-    for (const p of f.points) {
-      if (!p) continue
-      const d = (p[0] - target[0]) ** 2 + (p[1] - target[1]) ** 2
-      if (d < bestD) {
-        bestD = d
-        best = p
-      }
-    }
-  }
-  return best ?? target
-}
+/** Length (nm) of the straight-in final arrivals are established on. */
+const FINAL_NM = 4
 
 /**
  * The KSAN ground game: a few aircraft to start, plus a spawn config that feeds
@@ -96,7 +81,13 @@ export function buildKsanGroundGame(seed = 1): {
   const slots = gates()
   const { west, east } = runwayEnds()
   const departureTarget = east // RWY 27 threshold
-  const arrivalSpawn = nearestTaxiwayVertex(west) // rolled out at the RWY 9 end
+  // Arrivals land on RWY 9 (west threshold), so the final lies west of the field along the
+  // runway centerline extended: the west threshold pushed FINAL_NM further away from the east.
+  const runLen = Math.hypot(west[0] - east[0], west[1] - east[1]) || 1
+  const finalFix: Point = [
+    west[0] + ((west[0] - east[0]) / runLen) * FINAL_NM,
+    west[1] + ((west[1] - east[1]) / runLen) * FINAL_NM,
+  ]
 
   const destinations: NamedDestination[] = [
     { id: 'rwy27', label: 'RWY 27', kind: 'runway', point: east },
@@ -106,7 +97,7 @@ export function buildKsanGroundGame(seed = 1): {
   const spawn: SpawnConfig = {
     gates: slots,
     departureTarget,
-    arrivalSpawn,
+    approach: { fix: finalFix, threshold: west },
     intervalSec: 22,
     maxAircraft: 12,
     seed,

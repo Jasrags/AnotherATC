@@ -19,6 +19,7 @@ export const COLORS = {
   targetHalo: '#7fd4ff',
   conflict: '#ff5a4d', // separation conflict alert
   targetHold: '#9aacbd',
+  airborneTarget: '#7fd4ff', // traffic on final — hollow, to read as "not on the surface"
   leader: '#5aa8cb',
   block1: '#8ef0b4',
   block2: '#54b487',

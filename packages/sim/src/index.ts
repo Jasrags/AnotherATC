@@ -11,8 +11,16 @@ export type {
   LatLon,
 } from './world/types'
 
-export { createGroundSim } from './ground/sim'
-export type { AircraftInit, GateSlot, SpawnConfig, GroundSimOptions, ServiceSpec, ServicingConfig } from './ground/sim'
+export { createGroundSim, SHORT_FINAL_NM } from './ground/sim'
+export type {
+  AircraftInit,
+  ApproachConfig,
+  GateSlot,
+  SpawnConfig,
+  GroundSimOptions,
+  ServiceSpec,
+  ServicingConfig,
+} from './ground/sim'
 export { buildKsanGroundScenario } from './ground/ksanScenario'
 export { buildKsanGroundGame } from './ground/ksanGame'
 export { buildTaxiGraph } from './ground/taxiGraph'

@@ -16,6 +16,8 @@ function strip(over: Partial<StripItem> = {}): StripItem {
     holdingForTakeoff: false,
     onRunway: false,
     blocksTakeoff: false,
+    altitude: 0,
+    finalNm: 0,
     via: [],
     giveWayTo: null,
     squawk: null,
@@ -269,5 +271,60 @@ describe('commandsFor (strip state machine)', () => {
     const { controller } = fakeController()
     const cmds = commandsFor(controller, strip({ status: 'taxi', giveWayTo: 'UAL2' }), [])
     expect(labels(cmds)).toContain('Continue taxi')
+  })
+})
+
+describe('commandsFor — Tower arrivals', () => {
+  const onFinal = (over: Partial<StripItem> = {}) =>
+    strip({ status: 'onFinal', controlledBy: 'tower', intent: 'arrival', altitude: 1250, finalNm: 4, ...over })
+
+  it('on final → cleared to land (runs) and go around (soon)', () => {
+    const { controller, dispatched } = fakeController()
+    const cmds = commandsFor(controller, onFinal(), [])
+    expect(labels(cmds)).toEqual(['Cleared to land', 'Go around'])
+    const land = cmds[0]!.action
+    if (land.kind === 'run') land.run()
+    expect(dispatched).toEqual([{ type: 'clearedToLand', aircraftId: 'a' }])
+    expect(cmds[1]!.action.kind).toBe('soon')
+  })
+
+  it('gates the landing clearance while another aircraft occupies the runway', () => {
+    const { controller } = fakeController()
+    const other = strip({ id: 'b', callsign: 'UAL2', status: 'lineUpWait', blocksTakeoff: true })
+    const cmds = commandsFor(controller, onFinal(), [other])
+    expect(labels(cmds)[0]).toBe('Cleared to land — runway busy')
+    expect(cmds[0]!.action.kind).toBe('soon')
+  })
+
+  it('never offers a landing clearance twice — cleared traffic only has go around', () => {
+    const { controller } = fakeController()
+    const cmds = commandsFor(controller, onFinal({ status: 'landing' }), [])
+    expect(labels(cmds)).toEqual(['Go around'])
+  })
+
+  it('rollout is an automatic phase — nothing actionable until Ground has it', () => {
+    const { controller } = fakeController()
+    const cmds = commandsFor(controller, onFinal({ status: 'rollout', altitude: 0, finalNm: 0 }), [])
+    expect(cmds.every((c) => c.action.kind === 'soon')).toBe(true)
+  })
+
+  it('blocks a departure line-up and takeoff under traffic on short final', () => {
+    const { controller } = fakeController()
+    const inbound = strip({ id: 'b', callsign: 'UAL2', status: 'landing', controlledBy: 'tower', intent: 'arrival', altitude: 300, finalNm: 1 })
+    const dep = strip({ status: 'holdShort', controlledBy: 'tower', holdingForTakeoff: true })
+    const cmds = commandsFor(controller, dep, [inbound])
+    expect(labels(cmds)).toEqual([
+      'Line up and wait — runway busy',
+      'Cleared for takeoff — runway busy',
+      'Hold position',
+    ])
+  })
+
+  it('leaves a departure alone when the arrival is still well outside short final', () => {
+    const { controller } = fakeController()
+    const inbound = strip({ id: 'b', callsign: 'UAL2', status: 'landing', controlledBy: 'tower', intent: 'arrival', altitude: 1200, finalNm: 3.8 })
+    const dep = strip({ status: 'holdShort', controlledBy: 'tower', holdingForTakeoff: true })
+    const cmds = commandsFor(controller, dep, [inbound])
+    expect(labels(cmds)).toEqual(['Line up and wait', 'Cleared for takeoff', 'Hold position'])
   })
 })

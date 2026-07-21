@@ -13,6 +13,12 @@ export type GroundStatus =
   | 'holdShort'
   | 'lineUpWait'
   | 'departing'
+  /** Arrival established on final approach, awaiting a landing clearance. */
+  | 'onFinal'
+  /** Arrival on final with a landing clearance, flying it to touchdown. */
+  | 'landing'
+  /** Arrival decelerating on the runway after touchdown, before it exits. */
+  | 'rollout'
 
 /** Why the aircraft is on the surface: leaving (to the runway) or arriving (to a gate). */
 export type GroundIntent = 'departure' | 'arrival'
@@ -35,6 +41,7 @@ export type GroundCommand =
   | { type: 'contactTower'; aircraftId: string }
   | { type: 'lineUpAndWait'; aircraftId: string }
   | { type: 'clearedForTakeoff'; aircraftId: string }
+  | { type: 'clearedToLand'; aircraftId: string }
   | { type: 'clearance'; aircraftId: string }
 
 /** Progress of one parallel ground service (fuel, cargo, cabin, …) on a parked departure. */
@@ -67,6 +74,10 @@ export interface GroundAircraft {
   y: number
   /** Direction of travel, degrees true (0 = north, 90 = east). */
   heading: number
+  /** Height above the field in feet; 0 on the surface, > 0 on final approach. */
+  altitude: number
+  /** Distance (nm) still to fly to the landing threshold; 0 unless on final. */
+  finalNm: number
   /** Groundspeed in knots. */
   groundspeed: number
   /** Stopped with a zero-speed target: either at the end of its route, or held mid-route

@@ -35,7 +35,7 @@ const guard = buildRunwayGuard(surface)
 const spawn: SpawnConfig = {
   gates: [{ ref: 'A1', point: [0.2, -0.2] }],
   departureTarget: [1.8, -0.02],
-  arrivalSpawn: [0.2, -0.2],
+  approach: { fix: [-4, 0], threshold: [0, 0] },
   intervalSec: 5,
   maxAircraft: 3,
   seed: 1,

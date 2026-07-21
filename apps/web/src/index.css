@@ -294,6 +294,11 @@ body {
 .strip-departing {
   border-left-color: #7fd4ff;
 }
+.strip-onFinal,
+.strip-landing,
+.strip-rollout {
+  border-left-color: #7fd4ff;
+}
 .strip-selected {
   border-color: #ffd24a;
   border-left-color: #ffd24a;
@@ -344,6 +349,21 @@ body {
 .badge-departing {
   color: #041018;
   background: #7fd4ff;
+}
+/* Arrivals: uncleared final is outlined (an open question for the controller), a landing
+   clearance fills in, and the rollout mutes as it hands back to Ground. */
+.badge-onFinal {
+  color: #7fd4ff;
+  background: #0d2634;
+  box-shadow: inset 0 0 0 1px #3d7f9e;
+}
+.badge-landing {
+  color: #041018;
+  background: #7fe6c0;
+}
+.badge-rollout {
+  color: #c3d3df;
+  background: #1b2833;
 }
 
 /* Takeoff-queue sequence number, shown before the callsign on a Tower departure. */
@@ -405,6 +425,15 @@ body {
   font-size: 10px;
   letter-spacing: 0.08em;
   color: #8fb3a3;
+}
+
+/* Range + altitude readout for traffic on final. */
+.strip-final {
+  margin-top: 5px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #7fd4ff;
 }
 
 .strip-giveway {

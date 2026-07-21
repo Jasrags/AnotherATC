@@ -555,8 +555,18 @@ export function drawAircraft(ctx: Ctx, v: View, aircraft: GroundAircraft[]): voi
       ctx.stroke()
     }
 
-    // target blip — amber when holding short of a runway
+    // target blip — hollow for traffic on final (it's over the field, not on it), amber
+    // when holding short of a runway, otherwise a filled surface target.
     const r = DIMS.targetR
+    if (ac.altitude > 0) {
+      ctx.strokeStyle = COLORS.airborneTarget
+      ctx.lineWidth = 1.6
+      ctx.beginPath()
+      ctx.arc(sx, sy, r + 1, 0, Math.PI * 2)
+      ctx.stroke()
+      drawDataBlock(ctx, ac, sx, sy)
+      continue
+    }
     ctx.save()
     if (!ac.holding) {
       ctx.shadowColor = COLORS.targetHalo
@@ -580,27 +590,38 @@ export function drawAircraft(ctx: Ctx, v: View, aircraft: GroundAircraft[]): voi
       ctx.stroke()
     }
 
-    // data block, offset up-right, with a thin connector
-    const bx = sx + DIMS.blockLeader
-    const by = sy - DIMS.blockLeader
-    ctx.strokeStyle = COLORS.connector
-    ctx.lineWidth = 1
-    ctx.beginPath()
-    ctx.moveTo(sx, sy)
-    ctx.lineTo(bx, by)
-    ctx.stroke()
+    drawDataBlock(ctx, ac, sx, sy)
+  }
+}
 
-    const wake = ac.wake === 'H' ? ' H' : ac.wake === 'J' ? ' J' : ''
-    ctx.fillStyle = COLORS.block1
-    ctx.fillText(`${ac.callsign}${wake}`, bx, by)
-    if (ac.holdShort) {
-      ctx.fillStyle = COLORS.holdShortTarget
-      ctx.fillText('HOLD SHORT', bx, by + DIMS.blockFont + 1)
-    } else {
-      const speed = ac.holding ? '--' : String(ac.groundspeed).padStart(2, '0')
-      ctx.fillStyle = COLORS.block2
-      ctx.fillText(`${ac.type}  ${speed}`, bx, by + DIMS.blockFont + 1)
-    }
+/** The two-line data block beside a target, with its leader line. Line 2 carries the
+ *  phase-relevant readout: hold-short state, or altitude/range on final, else type + speed. */
+function drawDataBlock(ctx: Ctx, ac: GroundAircraft, sx: number, sy: number): void {
+  const bx = sx + DIMS.blockLeader
+  const by = sy - DIMS.blockLeader
+  ctx.strokeStyle = COLORS.connector
+  ctx.lineWidth = 1
+  ctx.beginPath()
+  ctx.moveTo(sx, sy)
+  ctx.lineTo(bx, by)
+  ctx.stroke()
+
+  const wake = ac.wake === 'H' ? ' H' : ac.wake === 'J' ? ' J' : ''
+  ctx.fillStyle = COLORS.block1
+  ctx.fillText(`${ac.callsign}${wake}`, bx, by)
+  const line2 = by + DIMS.blockFont + 1
+  if (ac.altitude > 0) {
+    // Altitude in hundreds of feet, ATC data-block style, plus range to the threshold.
+    ctx.fillStyle = COLORS.airborneTarget
+    const hundreds = String(Math.round(ac.altitude / 100)).padStart(3, '0')
+    ctx.fillText(`${hundreds}↓ ${ac.finalNm.toFixed(1)}`, bx, line2)
+  } else if (ac.holdShort) {
+    ctx.fillStyle = COLORS.holdShortTarget
+    ctx.fillText('HOLD SHORT', bx, line2)
+  } else {
+    const speed = ac.holding ? '--' : String(ac.groundspeed).padStart(2, '0')
+    ctx.fillStyle = COLORS.block2
+    ctx.fillText(`${ac.type}  ${speed}`, bx, line2)
   }
 }
 

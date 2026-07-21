@@ -25,6 +25,9 @@ const STATUS_LABEL: Record<GroundStatus, string> = {
   holdShort: 'HOLD SHORT',
   lineUpWait: 'LUAW',
   departing: 'TAKEOFF',
+  onFinal: 'FINAL',
+  landing: 'CLR LAND',
+  rollout: 'ROLLOUT',
 }
 
 function intentLabel(intent: GroundIntent): string {
@@ -170,6 +173,11 @@ export function StripBay({ controller }: { controller: GroundController }) {
                   </span>
                   {a.squawk && <span className="strip-squawk">{a.squawk}</span>}
                 </div>
+                {a.altitude > 0 && (
+                  <div className="strip-final">
+                    ▼ {a.finalNm.toFixed(1)} NM · {a.altitude} FT
+                  </div>
+                )}
                 {a.via.length > 0 && <div className="strip-route">VIA {a.via.join(' · ')}</div>}
                 {a.giveWayTo && <div className="strip-giveway">◁ GIVE WAY {a.giveWayTo}</div>}
                 {a.wakeHoldSec > 0 && <div className="strip-wake">⚠ WAKE HOLD {a.wakeHoldSec}s</div>}
