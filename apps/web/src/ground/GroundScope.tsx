@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { KSAN_SURFACE } from '@anotheratc/sim'
+import { KSAN_SURFACE, KSAN_RUNWAY_LAYOUT } from '@anotheratc/sim'
 import type { GroundController } from './controller'
 import { fitPoints, fitView, pan, reframe, toWorld, zoomAt, type View } from './view'
 import {
@@ -15,6 +15,7 @@ import {
   drawRouteDraft,
   drawRouteHover,
   drawRunwayExits,
+  drawRunwayMarkings,
   drawSelection,
   drawSpawnPreview,
   drawSurface,
@@ -312,6 +313,7 @@ export function GroundScope({ controller }: { controller: GroundController }) {
         drawSurface(ctx, view, prep, width, height)
         drawAreaLabels(ctx, view, prep)
         drawGates(ctx, view, prep)
+        drawRunwayMarkings(ctx, view, KSAN_RUNWAY_LAYOUT)
         drawHotspots(ctx, view, KSAN_SURFACE)
         drawApproachCourse(ctx, view, controller.approach)
         if (draft) {

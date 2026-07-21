@@ -79,3 +79,35 @@ export function finalFix(r: ActiveRunway, distanceNm: number): Point {
 export function glideAltitudeFt(glidePathDeg: number, distanceNm: number): number {
   return distanceNm * FT_PER_NM * Math.tan((glidePathDeg * Math.PI) / 180)
 }
+
+/**
+ * The physical markings at one end of the runway, for rendering and for rules about which
+ * pavement is usable. Keyed by the designator painted at that end.
+ */
+export interface RunwayEndLayout {
+  /** Designator painted here, e.g. "27". */
+  ident: string
+  /** Physical end of the pavement. */
+  pavementEnd: Point
+  /** Landing threshold — equal to `pavementEnd` when nothing is displaced. */
+  threshold: Point
+  /**
+   * Engineered Materials Arresting System beyond this end of the pavement, or null. A bed of
+   * crushable concrete that decelerates an aircraft that has overrun. Passive: no ATC action,
+   * and nothing may ever be taxied onto it.
+   */
+  emas: { lengthFt: number; widthFt: number } | null
+}
+
+/** Both ends of a runway, as painted. */
+export interface RunwayLayout {
+  /** Runway designation, e.g. "09/27". */
+  ident: string
+  widthFt: number
+  ends: readonly [RunwayEndLayout, RunwayEndLayout]
+}
+
+/** Displacement (nm) of an end's threshold from its pavement end; 0 when not displaced. */
+export function displacedNm(end: RunwayEndLayout): number {
+  return Math.hypot(end.threshold[0] - end.pavementEnd[0], end.threshold[1] - end.pavementEnd[1])
+}

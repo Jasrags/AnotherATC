@@ -1,10 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import type { AirportSurface, Point, SurfaceFeature, TaxiTopology } from '@anotheratc/sim'
+import type { AirportSurface, Point, RunwayLayout, SurfaceFeature, TaxiTopology } from '@anotheratc/sim'
 import {
   polylineLength,
   polylineMidpoint,
   distToSeg,
   drawGraphOverlay,
+  drawRunwayMarkings,
   nearestTaxiwayRef,
   prepareSurface,
 } from './render'
@@ -184,5 +185,115 @@ describe('drawGraphOverlay', () => {
     drawGraphOverlay(ctx, fitView({ minX: 0, minY: 0, maxX: 1, maxY: 1 }, 200, 200), topology)
     expect(strokes).toContain(COLORS.graphEdgeFlag)
     expect(strokes).toContain(COLORS.graphEdge)
+  })
+})
+
+describe('drawRunwayMarkings', () => {
+  /** Canvas stub recording where things were drawn, and in what colour. */
+  function tracingCtx() {
+    const ops: { style: string; pts: [number, number][] }[] = []
+    let pending: [number, number][] = []
+    let strokeStyle = ''
+    let fillStyle = ''
+    const ctx = {
+      get strokeStyle() {
+        return strokeStyle
+      },
+      set strokeStyle(v: string) {
+        strokeStyle = v
+      },
+      get fillStyle() {
+        return fillStyle
+      },
+      set fillStyle(v: string) {
+        fillStyle = v
+      },
+      lineWidth: 0,
+      lineCap: '',
+      lineJoin: '',
+      font: '',
+      textAlign: '',
+      textBaseline: '',
+      save() {},
+      restore() {},
+      translate() {},
+      rotate() {},
+      setLineDash() {},
+      beginPath() {
+        pending = []
+      },
+      closePath() {},
+      moveTo(x: number, y: number) {
+        pending.push([x, y])
+      },
+      lineTo(x: number, y: number) {
+        pending.push([x, y])
+      },
+      arc() {},
+      fillText() {},
+      fill() {
+        ops.push({ style: fillStyle, pts: [...pending] })
+      },
+      stroke() {
+        ops.push({ style: strokeStyle, pts: [...pending] })
+      },
+    }
+    return { ctx: ctx as unknown as CanvasRenderingContext2D, ops }
+  }
+
+  // Runway along y=0 from x=0 to x=2, with end "A" displaced 0.3 and an EMAS bed beyond it.
+  const layout: RunwayLayout = {
+    ident: 'A/B',
+    widthFt: 200,
+    ends: [
+      { ident: 'A', pavementEnd: [0, 0], threshold: [0.3, 0], emas: { lengthFt: 315, widthFt: 218 } },
+      { ident: 'B', pavementEnd: [2, 0], threshold: [1.8, 0], emas: null },
+    ],
+  }
+  const view = fitView({ minX: -1, minY: -1, maxX: 3, maxY: 1 }, 1600, 800)
+  const worldX = (sx: number) => (sx - view.offX) / view.scale
+
+  it('paints the threshold bar at the displaced threshold, not at the end of the pavement', () => {
+    const { ctx, ops } = tracingCtx()
+    drawRunwayMarkings(ctx, view, layout)
+    const bars = ops.filter((o) => o.style === COLORS.runwayThreshold)
+    expect(bars).toHaveLength(2)
+    const xs = bars.map((b) => worldX(b.pts[0]![0])).sort((p, q) => p - q)
+    expect(xs[0]).toBeCloseTo(0.3, 2) // displaced end A — not 0
+    expect(xs[1]).toBeCloseTo(1.8, 2) // displaced end B — not 2
+  })
+
+  it('draws the EMAS bed outside the pavement, never on the runway', () => {
+    const { ctx, ops } = tracingCtx()
+    drawRunwayMarkings(ctx, view, layout)
+    const bed = ops.find((o) => o.style === COLORS.emasFill)
+    expect(bed).toBeDefined()
+    // Every corner of the bed lies beyond the pavement end, away from the runway.
+    for (const [sx] of bed!.pts) expect(worldX(sx)).toBeLessThanOrEqual(0.0001)
+    // …and it is only at the end that has one.
+    expect(ops.filter((o) => o.style === COLORS.emasFill)).toHaveLength(1)
+  })
+
+  it('leads into the threshold with arrows over the pre-threshold pavement', () => {
+    const { ctx, ops } = tracingCtx()
+    drawRunwayMarkings(ctx, view, layout)
+    const arrows = ops.filter((o) => o.style === COLORS.runwayMarking)
+    expect(arrows.length).toBeGreaterThan(0)
+    // Every arrow lies on the pre-threshold pavement of one end or the other — never on the
+    // landable surface between the two thresholds.
+    for (const a of arrows) {
+      for (const [sx] of a.pts) {
+        const x = worldX(sx)
+        const nearA = x > -0.01 && x < 0.32
+        const nearB = x > 1.68 && x < 2.01
+        expect(nearA || nearB).toBe(true)
+      }
+    }
+  })
+
+  it('draws nothing when zoomed too far out to read', () => {
+    const { ctx, ops } = tracingCtx()
+    drawRunwayMarkings(ctx, fitView({ minX: -500, minY: -500, maxX: 500, maxY: 500 }, 400, 400), layout)
+    expect(ops).toHaveLength(0)
   })
 })

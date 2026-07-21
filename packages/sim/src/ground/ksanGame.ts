@@ -3,7 +3,7 @@ import { createRng, type Rng } from '../random'
 import type { Point } from '../world/types'
 import type { AircraftInit, GateSlot, ServicingConfig, SpawnConfig } from './sim'
 import type { NamedDestination, WakeCategory } from './types'
-import { finalFix, type ActiveRunway } from './runway'
+import { finalFix, type ActiveRunway, type RunwayLayout } from './runway'
 
 /** Pre-push ground services, run in parallel (game seconds). Fueling is the long pole, so it
  *  sets when pushback unlocks; the shorter services finish earlier. Tuned for surface pacing. */
@@ -97,6 +97,20 @@ export const KSAN_RUNWAYS: Record<'09' | '27', ActiveRunway> = {
     glidePathDeg: 3.3,
     pattern: 'left',
   },
+}
+
+/**
+ * Runway 09/27 as painted. The EMAS bed is at the **west** end — the FAA remark reads
+ * "EMAS 315 FT IN LENGTH BY 218 FT IN WIDTH LCTD AT DER 27", and the departure end of runway 27
+ * is the west end. It arrests aircraft overrunning westward, i.e. landing or rejecting on 27.
+ */
+export const KSAN_RUNWAY_LAYOUT: RunwayLayout = {
+  ident: '09/27',
+  widthFt: 200,
+  ends: [
+    { ident: '09', pavementEnd: RWY.westEnd, threshold: RWY.thr09, emas: { lengthFt: 315, widthFt: 218 } },
+    { ident: '27', pavementEnd: RWY.eastEnd, threshold: RWY.thr27, emas: null },
+  ],
 }
 
 /**

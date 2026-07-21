@@ -22,7 +22,7 @@ export type {
   ServicingConfig,
 } from './ground/sim'
 export { buildKsanGroundScenario } from './ground/ksanScenario'
-export { buildKsanGroundGame, KSAN_RUNWAYS } from './ground/ksanGame'
+export { buildKsanGroundGame, KSAN_RUNWAYS, KSAN_RUNWAY_LAYOUT } from './ground/ksanGame'
 export {
   finalFix,
   glideAltitudeFt,
@@ -31,7 +31,8 @@ export {
   takeoffRunNm,
   FT_PER_NM,
 } from './ground/runway'
-export type { ActiveRunway } from './ground/runway'
+export { displacedNm } from './ground/runway'
+export type { ActiveRunway, RunwayLayout, RunwayEndLayout } from './ground/runway'
 export { buildTaxiGraph } from './ground/taxiGraph'
 export type { TaxiGraph, TaxiTopology, TopoNode, TopoEdge } from './ground/taxiGraph'
 export { buildRunwayGuard } from './ground/runwayGuard'

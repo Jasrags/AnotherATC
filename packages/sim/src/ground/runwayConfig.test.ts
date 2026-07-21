@@ -1,11 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { buildKsanGroundGame, KSAN_RUNWAYS } from './ksanGame'
+import { buildKsanGroundGame, KSAN_RUNWAYS, KSAN_RUNWAY_LAYOUT } from './ksanGame'
 import { createGroundSim } from './sim'
 import { buildRunwayExits, chooseExit } from './runwayExits'
 import { buildTaxiGraph } from './taxiGraph'
 import { buildRunwayGuard } from './runwayGuard'
 import { KSAN_SURFACE } from '../world/ksan'
 import {
+  displacedNm,
   finalFix,
   glideAltitudeFt,
   landingDistanceNm,
@@ -179,5 +180,58 @@ describe('the sim honours the configuration', () => {
     expect(touchdown).not.toBeNull()
     const off = Math.hypot(touchdown!.x - r.threshold[0], touchdown!.y - r.threshold[1])
     expect(ft(off)).toBeLessThan(200) // touched down at the displaced threshold, not the pavement end
+  })
+})
+
+describe('EMAS and the pre-threshold pavement', () => {
+  const guard = buildRunwayGuard(KSAN_SURFACE)
+  const graph = buildTaxiGraph(KSAN_SURFACE)
+
+  it('sits beyond the west pavement end, clear of the runway', () => {
+    const west = KSAN_RUNWAY_LAYOUT.ends.find((e) => e.ident === '09')!
+    const east = KSAN_RUNWAY_LAYOUT.ends.find((e) => e.ident === '27')!
+    // "EMAS ... LCTD AT DER 27" — the departure end of runway 27 is the *west* end.
+    expect(west.emas).not.toBeNull()
+    expect(east.emas).toBeNull()
+    expect(west.emas!.lengthFt).toBe(315)
+    expect(west.emas!.widthFt).toBe(218)
+    // The bed is outside the pavement: the west end is further west than everything else.
+    expect(west.pavementEnd[0]).toBeLessThan(east.pavementEnd[0])
+  })
+
+  it('records both displaced thresholds in the painted layout', () => {
+    for (const end of KSAN_RUNWAY_LAYOUT.ends) {
+      expect(ft(displacedNm(end))).toBeGreaterThan(900)
+    }
+    const byIdent = Object.fromEntries(KSAN_RUNWAY_LAYOUT.ends.map((e) => [e.ident, e]))
+    expect(ft(displacedNm(byIdent['09']!))).toBeCloseTo(998, -2)
+    expect(ft(displacedNm(byIdent['27']!))).toBeCloseTo(1806, -2)
+  })
+
+  it('a landing on 27 rolls out without running off the pavement into the bed', () => {
+    const game = buildKsanGroundGame(1, '27')
+    const r = game.runway
+    const sim = createGroundSim(
+      [
+        {
+          id: 'a', callsign: 'AAL1', type: 'B738', wake: 'M',
+          path: [game.spawn.approach.fix, game.spawn.approach.threshold],
+          targetSpeed: 140, airborne: true, intent: 'arrival',
+          goalPoint: game.spawn.gates[0]!.point, gate: game.spawn.gates[0]!.ref,
+        },
+      ],
+      { guard, graph, runway: r },
+    )
+    sim.dispatch({ type: 'clearedToLand', aircraftId: 'a' })
+    let westmost = Infinity
+    for (let i = 0; i < 4000; i += 1) {
+      sim.step(0.1)
+      const a = sim.snapshot().aircraft.find((x) => x.id === 'a')
+      if (!a) break
+      westmost = Math.min(westmost, a.x)
+      if (a.vacated) break
+    }
+    // Rolling west, it must stop short of the west pavement end — beyond that is the EMAS bed.
+    expect(westmost).toBeGreaterThan(r.farEnd[0])
   })
 })
