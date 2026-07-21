@@ -320,16 +320,13 @@ is switched on.
 
 ---
 
-## ⬜ Documentation debt
+## ✅ Documentation debt
 
-- ⬜ **Refresh the build docs for the taxi/stand model.** `docs/adding-an-airport.md` and
-  `docs/airport-data-pipeline.md` predate several changes to how the ground layer actually
-  works: stands are now painted lead-in lines rather than gate points (`ground/stands.ts`,
-  charted vs derived, the measured nose setback), gate slots are nose-stop marks with a parked
-  heading, arrivals are marshalled in along the paint and pushback reverses down it, and the
-  routing graph gained runway-entry and turn constraints. A field's `parking_position` coverage
-  is now a first-class data question for a new airport — it belongs in the pipeline doc's
-  "what each source does not carry" section and in the adding-an-airport checklist.
+- ✅ **Build docs refreshed for the stand/routing model.** `adding-an-airport.md` gained sections
+  on stands-as-lead-in-lines, the turn-aware router (including: survey a new field's turn
+  distribution rather than copy KSAN's threshold) and pushback direction;
+  `airport-data-pipeline.md` documents `parking_position` as a pre-commit risk to count and what
+  those ways don't carry; `lessons-from-ksan.md` gained entries 21–26.
 
 ---
 
