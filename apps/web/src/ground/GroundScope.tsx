@@ -16,6 +16,7 @@ import {
   drawRouteHover,
   drawRunwayExits,
   drawRunwayMarkings,
+  runwayMarkingsVisible,
   drawSelection,
   drawSpawnPreview,
   drawSurface,
@@ -334,7 +335,8 @@ export function GroundScope({ controller }: { controller: GroundController }) {
             if (ref && !draft.via.includes(ref)) drawRouteHover(ctx, view, KSAN_SURFACE, ref)
           }
         }
-        drawLabels(ctx, view, prep)
+        // The painted designators replace the schematic map numbers once they're legible.
+        drawLabels(ctx, view, prep, !runwayMarkingsVisible(view, KSAN_RUNWAY_LAYOUT))
         drawAircraft(ctx, view, snap.aircraft)
         const selected = selectedId ? snap.aircraft.find((a) => a.id === selectedId) : undefined
         // Turnoffs are only meaningful for the arrival being worked, so they are drawn for the

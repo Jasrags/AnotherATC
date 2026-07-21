@@ -5,12 +5,14 @@ import { buildRunwayExits, chooseExit } from './runwayExits'
 import { buildTaxiGraph } from './taxiGraph'
 import { buildRunwayGuard } from './runwayGuard'
 import { KSAN_SURFACE } from '../world/ksan'
+import type { Point } from '../world/types'
 import {
   displacedNm,
   finalFix,
   glideAltitudeFt,
   landingDistanceNm,
   pavementAfterThresholdNm,
+  reciprocalIdent,
   takeoffRunNm,
   FT_PER_NM,
 } from './runway'
@@ -273,13 +275,14 @@ describe('a departure needs runway ahead of it', () => {
     // RWY 27 is active (rolls west), but this aircraft is at the west end. Cleared, it used to
     // be given a "takeoff roll" to a point a few feet away and drive straight off the pavement.
     const sim = holdingShortAt(w, '27')
+    // The reason has to say *why*: this is a configuration problem, not a busy runway.
     expect(sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'd' })).toEqual({
       ok: false,
-      reason: 'insufficient runway remaining — RWY 27 is in use',
+      reason: 'RWY 09 is not in use — RWY 27 is the active runway',
     })
     expect(sim.dispatch({ type: 'lineUpAndWait', aircraftId: 'd' })).toEqual({
       ok: false,
-      reason: 'insufficient runway remaining — RWY 27 is in use',
+      reason: 'RWY 09 is not in use — RWY 27 is the active runway',
     })
   })
 
@@ -437,6 +440,43 @@ describe('lining up follows the connector onto the runway', () => {
     expect(Math.abs(((d.heading - takeoff + 540) % 360) - 180)).toBeLessThan(20)
     expect(d.onRunway).toBe(true)
   })
+
+  it('uses the connector geometry rather than one straight cut at the centerline', () => {
+    const game = buildKsanGroundGame(1, '27')
+    const r = game.runway
+    const off = 0.08
+    const l = Math.hypot(r.farEnd[0] - r.departureStart[0], r.farEnd[1] - r.departureStart[1])
+    const ux = (r.farEnd[0] - r.departureStart[0]) / l
+    const uy = (r.farEnd[1] - r.departureStart[1]) / l
+    const sim = createGroundSim(
+      [
+        {
+          id: 'd', callsign: 'DEV01', type: 'B738', wake: 'M',
+          path: [
+            [r.departureStart[0] + uy * off, r.departureStart[1] - ux * off],
+            [r.departureStart[0], r.departureStart[1]],
+            [r.departureStart[0] - uy * off, r.departureStart[1] + ux * off],
+          ],
+          targetSpeed: 15, intent: 'departure', goalPoint: [r.departureStart[0], r.departureStart[1]],
+        },
+      ],
+      { guard, graph, runway: r },
+    )
+    sim.dispatch({ type: 'contactTower', aircraftId: 'd' })
+    sim.dispatch({ type: 'lineUpAndWait', aircraftId: 'd' })
+    const route = sim.routeOf('d')
+
+    // A straight cut onto the centerline is 2–3 points. Following the connector is many more:
+    // the taxi clearance's held portion is only a chord, so the curve has to come from the graph.
+    expect(route.length).toBeGreaterThan(6)
+    // …and no doubling back at the runway edge, which is what going on to the perpendicular
+    // projection after the route had already reached the centerline used to produce.
+    const brg = (a: Point, b: Point) => (((Math.atan2(b[0] - a[0], b[1] - a[1]) * 180) / Math.PI) + 360) % 360
+    for (let i = 2; i < route.length; i += 1) {
+      const turn = Math.abs(((brg(route[i - 2]!, route[i - 1]!) - brg(route[i - 1]!, route[i]!) + 540) % 360) - 180)
+      expect(turn).toBeLessThan(120) // a reversal would be ~155°
+    }
+  })
 })
 
 describe('runway-change cascade', () => {
@@ -521,5 +561,19 @@ describe('runway-change cascade', () => {
     const end = route[route.length - 1]!
     expect(Math.hypot(end[0] - KSAN_RUNWAYS['09'].departureStart[0], end[1] - KSAN_RUNWAYS['09'].departureStart[1]))
       .toBeLessThan(0.2)
+  })
+})
+
+describe('reciprocalIdent', () => {
+  it('pairs the two ends of a runway', () => {
+    expect(reciprocalIdent('09')).toBe('27')
+    expect(reciprocalIdent('27')).toBe('09')
+    expect(reciprocalIdent('36')).toBe('18')
+    expect(reciprocalIdent('18')).toBe('36')
+    expect(reciprocalIdent('01')).toBe('19')
+  })
+
+  it('keeps a parallel-runway suffix', () => {
+    expect(reciprocalIdent('09L')).toBe('27L')
   })
 })

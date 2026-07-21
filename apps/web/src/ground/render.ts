@@ -139,6 +139,12 @@ export function drawSurface(ctx: Ctx, v: View, prep: PreparedSurface, w: number,
   }
 }
 
+/** Whether the painted markings are large enough to draw. Below this the runway is a few pixels
+ *  wide and they are noise — the schematic map label carries the identification instead. */
+export function runwayMarkingsVisible(v: View, layout: RunwayLayout): boolean {
+  return (layout.widthFt / 2 / FT_PER_NM) * v.scale >= 2
+}
+
 /**
  * Runway markings, drawn from the surveyed layout rather than from the pavement polyline.
  *
@@ -153,7 +159,7 @@ export function drawSurface(ctx: Ctx, v: View, prep: PreparedSurface, w: number,
 export function drawRunwayMarkings(ctx: Ctx, v: View, layout: RunwayLayout): void {
   const halfWidthNm = layout.widthFt / 2 / FT_PER_NM
   const halfPx = halfWidthNm * v.scale
-  if (halfPx < 2) return // too small to read as anything but noise
+  if (!runwayMarkingsVisible(v, layout)) return // too small to read as anything but noise
 
   ctx.save()
   ctx.lineCap = 'butt'
@@ -540,8 +546,14 @@ export function drawHotspots(ctx: Ctx, v: View, surface: AirportSurface): void {
   }
 }
 
-/** Taxiway designator (kept off the runway) + runway numbers, with halos. */
-export function drawLabels(ctx: Ctx, v: View, prep: PreparedSurface): void {
+/**
+ * Taxiway designators (kept off the runway) + schematic runway numbers.
+ *
+ * The runway numbers here are a map label beside the pavement. Once zoomed in far enough for the
+ * real painted designators (`drawRunwayMarkings`) they would be a second, differently-placed
+ * copy of the same information, so the caller turns them off.
+ */
+export function drawLabels(ctx: Ctx, v: View, prep: PreparedSurface, runwayNumbers = true): void {
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
   ctx.lineJoin = 'round'
@@ -551,10 +563,12 @@ export function drawLabels(ctx: Ctx, v: View, prep: PreparedSurface): void {
     label(ctx, text, sx, sy, COLORS.labelTaxi)
   }
 
-  ctx.font = '700 13px ui-monospace, "SF Mono", Menlo, monospace'
-  for (const { text, at, dx } of prep.runwayNumbers) {
-    const [sx, sy] = toScreen(v, at[0], at[1])
-    label(ctx, text, sx + dx, sy, COLORS.labelRwy)
+  if (runwayNumbers) {
+    ctx.font = '700 13px ui-monospace, "SF Mono", Menlo, monospace'
+    for (const { text, at, dx } of prep.runwayNumbers) {
+      const [sx, sy] = toScreen(v, at[0], at[1])
+      label(ctx, text, sx + dx, sy, COLORS.labelRwy)
+    }
   }
 
   ctx.textAlign = 'left'

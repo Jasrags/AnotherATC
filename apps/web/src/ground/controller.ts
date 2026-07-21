@@ -341,7 +341,13 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
         intent: 'departure' as const,
         // Give it a departure-runway goal so it's a takeoff (not a crossing) when it holds
         // short — otherwise the Tower handoff / takeoff flow can't engage in the sandbox.
-        ...(departureRunway ? { goalPoint: departureRunway.point } : {}),
+        // Follows the *active* runway, so a test aircraft spawned while 09 is in use aims at
+        // 09's departure end rather than whichever end was configured at startup.
+        ...(sim.runway()
+          ? { goalPoint: sim.runway()!.departureStart }
+          : departureRunway
+            ? { goalPoint: departureRunway.point }
+            : {}),
       }
       sim.add(place.gate ? { ...base, gate: place.gate } : base)
       selected = id

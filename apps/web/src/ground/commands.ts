@@ -137,8 +137,10 @@ export function commandsFor(controller: GroundController, item: StripItem, aircr
     ]
   }
 
-  // Gate departure: deliver the IFR clearance (assigns a squawk), then push back.
-  if (item.status === 'parked' && item.intent === 'departure') {
+  // Gate departure: deliver the IFR clearance (assigns a squawk), then push back. Only an
+  // aircraft actually on a stand goes through this — one placed out on a taxiway by the dev
+  // sandbox has nothing to be pushed back off, so it starts at the taxi vocabulary instead.
+  if (item.status === 'parked' && item.intent === 'departure' && item.gate) {
     if (!item.squawk) {
       return [
         { label: 'Deliver clearance', action: { kind: 'run', run: () => send({ type: 'clearance', aircraftId: id }) } },

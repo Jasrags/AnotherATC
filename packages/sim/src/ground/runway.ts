@@ -51,6 +51,18 @@ export interface ActiveRunway {
   pattern: 'left' | 'right'
 }
 
+/**
+ * The designator of the opposite direction: 09 ↔ 27. Runway numbers are the magnetic heading in
+ * tens, so the reciprocal is 18 away, wrapping at 36.
+ */
+export function reciprocalIdent(ident: string): string {
+  const n = Number.parseInt(ident.replace(/\D/g, ''), 10)
+  if (!Number.isFinite(n)) return ident
+  const other = ((n + 17) % 36) + 1
+  const suffix = ident.replace(/[\d]/g, '')
+  return `${String(other).padStart(2, '0')}${suffix}`
+}
+
 /** Landing distance available (nm), from the declared figure. */
 export function landingDistanceNm(r: ActiveRunway): number {
   return r.ldaFt / FT_PER_NM

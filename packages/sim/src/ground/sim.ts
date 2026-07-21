@@ -13,7 +13,13 @@ import type {
 import { edgeKey, type TaxiGraph } from './taxiGraph'
 import { wakeSeparationSec, WAKE_TIME_SCALE } from './wake'
 import { onRunway, splitRouteAtRunway, type RunwayGuard } from './runwayGuard'
-import { finalFix, glideAltitudeFt, FINAL_APPROACH_NM, type ActiveRunway } from './runway'
+import {
+  finalFix,
+  glideAltitudeFt,
+  reciprocalIdent,
+  FINAL_APPROACH_NM,
+  type ActiveRunway,
+} from './runway'
 import {
   brakeRateFor,
   buildRunwayExits,
@@ -568,12 +574,59 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
   }
 
   /**
+   * The path an aircraft drives to line up: along the connector it is holding on, onto the
+   * runway, then a short roll so it ends pointing down it.
+   *
+   * The geometry has to come from the *graph*, not from the aircraft's held clearance. A taxi
+   * clearance to a point on the runway routes to the hold-short node and then appends the exact
+   * goal, so the held portion is a straight chord from the hold line to somewhere on the
+   * pavement — none of the connector's curve survives in it. Driving that (or driving straight
+   * at the nearest centerline point) makes the aircraft cut across the fillet and kink onto the
+   * runway instead of turning through it.
+   */
+  function lineUpPath(ac: Internal, lineup: Point): Point[] {
+    const pts: Point[] = [[ac.x, ac.y]]
+    if (graph && guard) {
+      const startKey = graph.nearestNode([ac.x, ac.y])
+      // Enter at the nearest point of the runway that is actually a node, so the route runs
+      // through the connector's vertices — which is where its curvature is recorded.
+      const entryKey = graph.nearestNodeWhere(lineup, (n) => onRunway(n, guard))
+      const route = startKey && entryKey ? graph.route(startKey, entryKey) : []
+      for (const p of route) {
+        const last = pts[pts.length - 1]!
+        if (dist(last, p) > 1e-6) pts.push(p)
+      }
+    }
+    // If the route already reached the pavement we are on the centerline; going on to the
+    // perpendicular projection as well would double back and produce a near-reversal right at
+    // the runway edge. Only fall back to the projection when there was no route to follow.
+    let base = pts[pts.length - 1]!
+    if (!(guard && onRunway(base, guard))) {
+      if (dist(base, lineup) > 1e-6) pts.push(lineup)
+      base = lineup
+    }
+    // …then roll far enough up the runway to be aligned with the takeoff direction.
+    const far = farRunwayEnd(base)
+    if (far) {
+      const d = dist(base, far)
+      if (d > 1e-6) {
+        const step = Math.min(LINEUP_ALIGN_NM, d / 2)
+        pts.push([base[0] + ((far[0] - base[0]) / d) * step, base[1] + ((far[1] - base[1]) / d) * step])
+      }
+    }
+    return pts
+  }
+
+  /**
    * Runway (nm) left ahead of an aircraft in the takeoff direction. Negative when it is past the
    * far end — i.e. lined up facing the wrong way for the runway in use.
    */
   function takeoffRunRemaining(ac: Internal): number {
     const far = farRunwayEnd([ac.x, ac.y])
     if (!far) return Infinity
+    // Without a configuration `farRunwayEnd` answers "whichever end is further away", so this
+    // measures toward that end by construction and effectively never trips — the legacy path
+    // never had the wrong-end bug this guards against.
     const from = runway?.departureStart ?? null
     if (!from) return dist([ac.x, ac.y], far)
     const dx = far[0] - from[0]
@@ -583,40 +636,20 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
   }
 
   /**
-   * The path an aircraft drives to line up: along the connector it is already holding on, onto
-   * the centerline, then a short roll up the runway so it ends pointing down it.
-   *
-   * The held route is the part of its taxi clearance beyond the hold-short line, so it carries
-   * the connector's real curve. Driving straight at the nearest centerline point instead makes
-   * the aircraft slide sideways onto the runway and sit there crabbed across it.
+   * Why an aircraft can't roll from where it is, or null if it can. Distinguishes the two very
+   * different reasons: it is at the *other* end of the field, so the runway it is pointing down
+   * simply isn't the one in use — or it is on the right runway but too far along it.
    */
-  function lineUpPath(ac: Internal, lineup: Point): Point[] {
-    const pts: Point[] = [[ac.x, ac.y]]
-    const far = farRunwayEnd(lineup)
-    // Perpendicular offset from the runway, to tell which side of it a point is on.
-    const ux = far ? far[0] - lineup[0] : 1
-    const uy = far ? far[1] - lineup[1] : 0
-    const ulen = Math.hypot(ux, uy) || 1
-    const side = (p: Point): number => ((p[0] - lineup[0]) * uy - (p[1] - lineup[1]) * ux) / ulen
-    const mySide = Math.sign(side([ac.x, ac.y]))
-    // Follow the connector while it is still on our side of the runway; the moment it reaches
-    // or crosses the pavement we take over and go to the centerline instead.
-    for (let i = 1; i < (ac.held?.length ?? 0); i += 1) {
-      const p = ac.held![i]!
-      if (guard && onRunway(p, guard)) break
-      if (mySide !== 0 && Math.sign(side(p)) !== mySide) break
-      pts.push(p)
+  function takeoffBlocked(ac: Internal): string | null {
+    const remaining = takeoffRunRemaining(ac)
+    if (remaining >= MIN_TAKEOFF_RUN_NM) return null
+    if (runway) {
+      const here: Point = [ac.x, ac.y]
+      const atFarEnd = dist(here, runway.farEnd) < dist(here, runway.departureStart)
+      if (atFarEnd)
+        return `RWY ${reciprocalIdent(runway.ident)} is not in use — RWY ${runway.ident} is the active runway`
     }
-    pts.push(lineup)
-    // …then roll far enough up the runway to be aligned with the takeoff direction.
-    if (far) {
-      const d = Math.hypot(far[0] - lineup[0], far[1] - lineup[1])
-      if (d > 1e-6) {
-        const step = Math.min(LINEUP_ALIGN_NM, d / 2)
-        pts.push([lineup[0] + ((far[0] - lineup[0]) / d) * step, lineup[1] + ((far[1] - lineup[1]) / d) * step])
-      }
-    }
-    return pts
+    return 'insufficient runway remaining for takeoff'
   }
 
   /** Seconds of wake separation still owed before this holding-short departure may roll. */
@@ -1095,12 +1128,8 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         if (!ac.holdShort) return refused('not holding short of the runway')
         if (guard && (!ac.goalPoint || !onRunway(ac.goalPoint, guard)))
           return refused('route crosses the runway — clear it to cross, not to line up')
-        if (takeoffRunRemaining(ac) < MIN_TAKEOFF_RUN_NM)
-          return refused(
-            runway
-              ? `insufficient runway remaining — RWY ${runway.ident} is in use`
-              : 'insufficient runway remaining',
-          )
+        const cannotRoll = takeoffBlocked(ac)
+        if (cannotRoll) return refused(cannotRoll)
         // A departure actually ROLLING down the runway (moving away) does NOT block a line-up
         // behind it — that's precisely what "line up and wait" is for (anticipated separation).
         // But one merely *cleared and not yet moving* (departing, still at its spot), any
@@ -1142,13 +1171,8 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
           return refused('route crosses the runway — clear it to cross, not for takeoff')
         // Enough runway ahead to actually get airborne. This is what stops an aircraft at the
         // wrong end being launched into a few hundred feet of pavement and then the grass.
-        const runLeft = takeoffRunRemaining(ac)
-        if (runLeft < MIN_TAKEOFF_RUN_NM)
-          return refused(
-            runway
-              ? `insufficient runway remaining — RWY ${runway.ident} is in use`
-              : 'insufficient runway remaining',
-          )
+        const blocked = takeoffBlocked(ac)
+        if (blocked) return refused(blocked)
         // The runway must be clear of blocking traffic — but a preceding departure that has
         // rotated (near liftoff) no longer blocks, so the next may be cleared behind it.
         if (guard && fleet.some((o) => o !== ac && blocksRunway(o))) return refused('runway occupied')
