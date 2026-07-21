@@ -121,13 +121,12 @@ individual command features below plug into; it generalizes across controller mo
 - ✅ **Contact other frequency** — `Contact tower` wired for a departure holding short (Ground→Tower handoff, completes the departure); stays `soon` in other states until more frequencies/modes exist.
 
 ### Supporting systems shown in the reference
-- ⬜ **Comms: show and filter the channel** (communications-log follow-up) — the panel shows only
-  the position you are currently working, which hides the fact that you are running combined
-  positions: there is no way to see that a call went out on Tower while you were on Ground, and
-  no way to read one frequency's conversation while working the other. Wants (a) each line
-  labelled with the channel it was transmitted on, and (b) a filter — all / Ground / Tower —
-  independent of which bay is selected. The data is already there: every `Transmission` carries
-  its `position`, and `visibleComms` already filters by it.
+- ✅ **Comms: show and filter the channel** — every call is labelled with the frequency it went
+  out on (GND/TWR, Tower's tinted), including a pilot's unprompted check-in after a handoff,
+  which has no controller line above it to inherit one from. The panel has its own ALL/GND/TWR
+  filter defaulting to ALL, independent of the strip bay — tying the transcript to the position
+  tabs was what hid cross-frequency calls in the first place. _Next: a per-aircraft filter
+  (click a strip, see just that flight's exchanges) once transcripts get long._
 - ✅ **Communications log** — the sim writes a radio transcript (`ground/comms.ts`): every accepted
   command emits the controller's instruction and the pilot's read-back in 7110.65/AIM phraseology,
   timestamped in sim time and tagged with the frequency it happened on; refused commands say nothing.
