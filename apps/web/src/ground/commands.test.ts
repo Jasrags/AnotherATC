@@ -109,7 +109,7 @@ describe('commandsFor (strip state machine)', () => {
   it('parked departure without a squawk → deliver clearance', () => {
     const { controller, dispatched } = fakeController()
     const cmds = commandsFor(controller, strip({ status: 'parked', intent: 'departure', squawk: null }), [])
-    expect(labels(cmds)).toEqual(['Deliver clearance', 'Contact tower'])
+    expect(labels(cmds)).toEqual(['Deliver clearance'])
     const clr = cmds[0]!.action
     if (clr.kind === 'run') clr.run()
     expect(dispatched).toEqual([{ type: 'clearance', aircraftId: 'a' }])
@@ -118,7 +118,7 @@ describe('commandsFor (strip state machine)', () => {
   it('cleared departure, servicing done → pushback approved (enabled)', () => {
     const { controller, dispatched } = fakeController()
     const cmds = commandsFor(controller, strip({ status: 'parked', intent: 'departure', squawk: '4231', serviceSec: 0 }), [])
-    expect(labels(cmds)).toEqual(['Pushback approved', 'Contact tower'])
+    expect(labels(cmds)).toEqual(['Pushback approved'])
     const push = cmds[0]!.action
     if (push.kind === 'run') push.run()
     expect(dispatched).toEqual([{ type: 'pushback', aircraftId: 'a' }])
@@ -127,21 +127,20 @@ describe('commandsFor (strip state machine)', () => {
   it('cleared departure still servicing → pushback disabled with a countdown', () => {
     const { controller } = fakeController()
     const cmds = commandsFor(controller, strip({ status: 'parked', intent: 'departure', squawk: '4231', serviceSec: 30 }), [])
-    expect(labels(cmds)).toEqual(['Pushback — servicing 30s', 'Contact tower'])
+    expect(labels(cmds)).toEqual(['Pushback — servicing 30s'])
     expect(cmds[0]!.action.kind).toBe('soon') // gated until services complete
   })
 
-  it('pushback → only a soon "contact tower"', () => {
+  it('pushback → no actions (an automatic maneuver)', () => {
     const { controller } = fakeController()
     const cmds = commandsFor(controller, strip({ status: 'pushback' }), [])
-    expect(labels(cmds)).toEqual(['Contact tower'])
-    expect(cmds[0]!.action.kind).toBe('soon')
+    expect(cmds).toEqual([])
   })
 
-  it('taxi departure → taxi-to submenu of destinations, route via, hold, give way, contact', () => {
+  it('taxi departure → taxi-to submenu of destinations, route via, hold, give way (no contact tower until hold short)', () => {
     const { controller, dispatched } = fakeController()
     const cmds = commandsFor(controller, strip({ status: 'taxi' }), [strip({ status: 'taxi' })])
-    expect(labels(cmds)).toEqual(['Taxi to…', 'Route via…', 'Hold position', 'Give way to…', 'Contact tower'])
+    expect(labels(cmds)).toEqual(['Taxi to…', 'Route via…', 'Hold position', 'Give way to…'])
 
     const taxiTo = cmds[0]!.action
     expect(taxiTo.kind).toBe('submenu')

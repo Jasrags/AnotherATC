@@ -59,6 +59,10 @@ export function StripCommandMenu({
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  // A phase with no controller actions (e.g. an automatic pushback) shows no menu at all,
+  // rather than an empty box. Placed after the hooks so their order stays unconditional.
+  if (commands.length === 0) return null
+
   return (
     <div className="cmd-menu" onClick={stop}>
       {commands.map((c, i) => {

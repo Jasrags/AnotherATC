@@ -74,7 +74,6 @@ export function commandsFor(controller: GroundController, item: StripItem, aircr
     if (!item.squawk) {
       return [
         { label: 'Deliver clearance', action: { kind: 'run', run: () => send({ type: 'clearance', aircraftId: id }) } },
-        { label: 'Contact tower', action: { kind: 'soon' } },
       ]
     }
     // Cleared, but pushback stays gated until ground servicing (fuel/cargo/…) finishes.
@@ -82,10 +81,11 @@ export function commandsFor(controller: GroundController, item: StripItem, aircr
       item.serviceSec > 0
         ? { label: `Pushback — servicing ${item.serviceSec}s`, action: { kind: 'soon' } }
         : { label: 'Pushback approved', action: { kind: 'run', run: () => send({ type: 'pushback', aircraftId: id }) } }
-    return [pushback, { label: 'Contact tower', action: { kind: 'soon' } }]
+    return [pushback]
   }
+  // Pushback is an automatic maneuver — nothing for the controller to do until it's holding.
   if (item.status === 'pushback') {
-    return [{ label: 'Contact tower', action: { kind: 'soon' } }]
+    return []
   }
 
   const dests: MenuLeaf[] = controller.destinations.map((d) => ({
@@ -120,6 +120,7 @@ export function commandsFor(controller: GroundController, item: StripItem, aircr
   if (item.status === 'holding' || item.giveWayTo) {
     cmds.push({ label: 'Continue taxi', action: { kind: 'run', run: () => send({ type: 'resume', aircraftId: id }) } })
   }
-  cmds.push({ label: 'Contact tower', action: { kind: 'soon' } })
+  // Contact tower is deliberately not offered here: it becomes available only once the
+  // aircraft is holding short of its runway (the 'holdShort' branch above).
   return cmds
 }
