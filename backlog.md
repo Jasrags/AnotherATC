@@ -232,7 +232,12 @@ Design note: `docs/atc-tower.md` (one sim, two projections; Ground and Tower own
   Watch for it in play before building more._
 - ⬜ **Turnaround & gate conflict** — an arrival feeds directly into the same aircraft's next departure cycle; short-turn timer; **gate conflict** when an arrival's gate is still occupied by a late departure. High-tension Ground/Ramp mechanic called out in the design docs.
 - ✅ **Sim ↔ UI bridge** — `GroundController` store + `useSyncExternalStore` for strips (canvas stays on rAF; strips re-render only on phase/selection change)
-- ⬜ **Time controls** — pause / 1× / 2× / 4× (fixed timestep already supports it)
+- ✅ **Time controls** — pause / 1× / 2× / 4× in the control bar, Space to pause. Paused stops the
+  sim only: pan, zoom, selection and clearances keep working, so it doubles as a planning tool.
+  The rate shows in the status line so a fast session can't be mistaken for a busy one. The
+  accumulator moved into `simClock.ts` (tested): the background clamp applies to *real* time
+  before the multiplier, and steps are divided rather than subtracted in a loop, which was
+  silently losing one step per 20 to floating-point drift. _Next: step-one-frame for debugging._
 - 🚧 **ATIS / airport config** — **shipped (branch `runway-config-and-declared-distances`):** one
   active runway direction, switchable in-game (`RWY 27` / `RWY 09` control). Arrivals and
   departures always share it — the game previously landed RWY 9 while departing RWY 27, head-on
