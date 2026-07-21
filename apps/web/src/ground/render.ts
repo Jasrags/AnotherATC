@@ -119,8 +119,9 @@ const STOP_BAR_PX = 4
  * An earlier pass drew every `parking_position` way raw and it read as a tangle, because the
  * ways are unoriented and include stands the field doesn't use. These come from `buildStands`,
  * already resolved to one line per gate and ordered taxilane → stop, so the paint reads the way
- * it does on the apron. A *derived* line is inferred rather than surveyed, so it is drawn
- * dashed: the scope should not claim paint that isn't there.
+ * it does on the apron. Charted and derived lines are drawn the same: a real apron has solid
+ * paint on every stand, and where the line came from is a data-quality question for the admin
+ * overlay, not something a controller working the position should be reading off the scope.
  */
 function drawStandLines(ctx: Ctx, v: View, stands: readonly Stand[]): void {
   if (v.scale < STAND_LINE_SCALE) return
@@ -128,7 +129,7 @@ function drawStandLines(ctx: Ctx, v: View, stands: readonly Stand[]): void {
   ctx.lineCap = 'round'
   for (const s of stands) {
     ctx.strokeStyle = COLORS.standLine
-    ctx.setLineDash(s.source === 'derived' ? [3, 4] : [])
+    ctx.setLineDash([])
     ctx.beginPath()
     trace(ctx, v, s.lead)
     ctx.stroke()
