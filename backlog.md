@@ -363,14 +363,12 @@ is switched on.
 ## Testing / infra
 
 - ✅ **Dev/admin sandbox** (`?dev`) — empty surface, spawner off, plus a control bar. **SPAWN**: click the surface to drop a test aircraft (snaps to the nearest routing node, auto `DEVnn`); drive it with the normal commands; **GRAPH** (the routing-graph overlay, and its `g` key) is dev-only — outside the sandbox the bar is just the two gameplay controls, RWY and FIT. **ARRIVAL** puts a test arrival on the final approach of the *active* runway (airborne — it can't be placed by clicking the surface) and switches to the Tower bay; successive spawns stagger 1.2 nm down the final. **X** removes the selected, **CLEAR** wipes all. **PROBE**: click two points to draw the shortest graph path between them with a live length + taxiway-sequence readout (no route → dashed red). Works alongside the **GRAPH** overlay. Sim gained `add`/`remove`/`clear`. _Next: param picker (type/wake/intent), exact (off-network) placement, step/pause, save/replay._
-- ⬜ **Sandbox cleanup ergonomics** — two things that bite while play-testing:
-  - **CLEAR should clear the transcript too.** It wipes the fleet but the comms log keeps every
-    call from the aircraft that no longer exist, so the panel is unreadable after a few rounds.
-    Wants a sim-level reset rather than another `clear()` caller.
-  - **Removing an aircraft is too fiddly.** SPAWN drops one per click and it is easy to
-    over-click, but undoing that means select-then-**X** — two actions, and the selection can
-    land on the wrong target in a cluster. Wants a direct remove (click-to-delete mode, or
-    right-click/alt-click a target), so cleaning up is as cheap as creating.
+- ✅ **Sandbox cleanup ergonomics** — **CLEAR now wipes the transcript with the fleet**
+  (`sim.clear()` resets comms + the sequence counter, so the panel isn't a list of ghosts), and a
+  **DELETE dev tool** removes aircraft by click: arm it, click the extras away, it stays armed and
+  rings the target under the cursor so you never mis-pick in a cluster. `controller.remove(id)`
+  removes a specific aircraft. _Next (nice-to-have): a param picker on SPAWN so a placed aircraft
+  isn't always a `B738` departure._
 - ⬜ Playwright E2E for the interaction flows (needs dependency vetting per policy)
 - ⬜ Socket.dev GitHub app on the repo (CI already runs audit + osv-scanner)
 - ⬜ Coverage reporting + targets
