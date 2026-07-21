@@ -2,6 +2,7 @@ import { createRng, type Rng } from '../random'
 import type { Point } from '../world/types'
 import type {
   ControllerPosition,
+  PushbackOption,
   DispatchResult,
   GroundAircraft,
   GroundCommand,
@@ -13,6 +14,7 @@ import type {
 } from './types'
 import { edgeKey, type TaxiGraph } from './taxiGraph'
 import { distToSegment, findStand, type Stand } from './stands'
+import { MAX_TURN_DEG } from './taxiGraph'
 import {
   COMMS_LOG_LIMIT,
   misheardSquawk,
@@ -133,6 +135,10 @@ const TAXI_ACCEL = 4
 const TAXI_SPEED_KT = 15
 /** Pushback creep speed (kt) — a tug easing the aircraft off the stand. */
 const PUSHBACK_SPEED_KT = 5
+/** How fast the tug swings the nose round during a push (deg/s), so the aircraft ends the
+ *  push already facing the way it will taxi rather than snapping round at the last moment. */
+const PUSH_TURN_RATE_DEG_S = 6
+
 /** Speed (kt) along a stand's lead-in line. An aircraft is marshalled onto a stand at a walking
  *  pace, not at taxi speed — and the line is short enough that arriving at 15 kt means stopping
  *  dead on the mark rather than easing onto it. */
@@ -346,6 +352,14 @@ interface Internal
   avoidEdges: Set<string>
   /** Blocked edges we already tried and failed to divert around (skip recompute until recleared). */
   divertTried: Set<string>
+  /** Heading the tug is swinging the nose toward during a push, or null for a straight push. */
+  pushFacing: number | null
+  /** Compass point of that heading, for the transcript. */
+  pushFacingLabel: string | null
+  /** A direction the aircraft is committed to while stationary — it has just been pushed back
+   *  facing this way and cannot turn round on the alley. Cleared once it is taxiing, after
+   *  which its own heading serves the same purpose. */
+  facingCommitted: number | null
   /** Cleared for takeoff while still holding short: taxi into position first, then roll.
    *  The roll begins on its own once the aircraft is established on the centerline. */
   rollWhenLinedUp: boolean
@@ -433,6 +447,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       towerFreq: frequencies?.tower ?? null,
       groundFreq: frequencies?.ground ?? null,
       vacated: ac.rollingOut ? ac.vacated : true,
+      pushFacing: ac.pushFacingLabel,
     }
   }
 
@@ -593,6 +608,9 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       heldSec: 0,
       avoidEdges: new Set(),
       divertTried: new Set(),
+      pushFacing: null,
+      pushFacingLabel: null,
+      facingCommitted: null,
       rollWhenLinedUp: false,
       lastClearance: null,
       misheard: null,
@@ -1009,12 +1027,12 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     if (!startKey || !goalKey) return
     const avoid = new Set(ac.avoidEdges)
     avoid.add(blocked)
-    const alt = graph.routeAvoiding(startKey, goalKey, avoid)
+    const alt = graph.routeAvoiding(startKey, goalKey, avoid, committedHeading(ac))
     if (alt.length === 0) {
       ac.divertTried.add(blocked)
       return
     }
-    const direct = graph.route(startKey, goalKey)
+    const direct = graph.route(startKey, goalKey, committedHeading(ac))
     if (direct.length > 0 && pathLength(alt) > DIVERSION_COST_FACTOR * pathLength(direct)) {
       ac.divertTried.add(blocked)
       return
@@ -1093,9 +1111,22 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     ac.holdShort = stopped && atEnd && ac.held !== null
     if (stopped) {
       ac.groundspeed = 0
-      if (ac.pushingBack && atEnd) ac.pushingBack = false // finished pushing onto the taxilane
+      if (ac.pushingBack && atEnd) {
+        ac.pushingBack = false // finished pushing onto the taxilane
+        if (ac.pushFacing !== null) {
+          ac.heading = normalizeDeg(ac.pushFacing)
+          // It is now committed: it cannot turn round on the alley, so the next taxi clearance
+          // has to route it out the way it is pointing.
+          ac.facingCommitted = ac.heading
+          ac.pushFacing = null
+        }
+      }
       return
     }
+
+    // Under way, so it is no longer bound to a facing it was pushed into — its own heading
+    // now carries the same constraint.
+    if (!ac.pushingBack && ac.groundspeed > 1) ac.facingCommitted = null
 
     let remaining = (ac.groundspeed * dt) / 3600
     while (remaining > 1e-9 && ac.leg < ac.path.length - 1) {
@@ -1119,6 +1150,15 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         ac.y += (dy * remaining) / segLen
         remaining = 0
       }
+    }
+
+    // A push is a swing, not a straight shove: the tug turns the nose toward the direction the
+    // aircraft will taxi off in, so it arrives on the alley already pointing that way. Applied
+    // after the movement loop, which otherwise leaves the heading along the direction of travel.
+    if (ac.pushingBack && ac.pushFacing !== null) {
+      const diff = ((ac.pushFacing - ac.heading + 540) % 360) - 180
+      const step = Math.min(Math.abs(diff), PUSH_TURN_RATE_DEG_S * dt)
+      ac.heading = normalizeDeg(ac.heading + Math.sign(diff) * step)
     }
   }
 
@@ -1186,10 +1226,10 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
    *  no path reaches the destination, so the caller can report the refusal. */
   function routeTo(ac: Internal, dest: Point, appendExact: boolean): boolean {
     if (!graph) return false
-    const startKey = graph.nearestNode([ac.x, ac.y])
+    const startKey = startNodeFor(ac)
     const goalKey = goalNodeFor(dest, [ac.x, ac.y])
     if (!startKey || !goalKey) return false
-    const route = graph.route(startKey, goalKey)
+    const route = graph.route(startKey, goalKey, committedHeading(ac))
     if (route.length === 0) return false
     clearDiversion(ac)
     applyRoute(ac, route, dest, appendExact)
@@ -1236,6 +1276,59 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     return back
   }
 
+  const COMPASS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'] as const
+  const compassOf = (deg: number): string => COMPASS[Math.round(normalizeDeg(deg) / 45) % 8] as string
+
+  /**
+   * The ways off a stand: the alley runs two directions, and the aircraft leaves facing one of
+   * them. Which one is a real decision — it cannot turn round on the alley, so the direction it
+   * is pushed into is the direction it must taxi off in, and the wrong one can mean a long way
+   * round (or no way at all).
+   */
+  function pushbackOptionsFor(ac: Internal): PushbackOption[] {
+    if (!graph) return []
+    const stand = standFor(ac)
+    const at = stand ? stand.entry : [ac.x, ac.y]
+    const key = graph.nearestNode(at as Point)
+    if (!key) return []
+    const here = graph.nodePoint(key)
+    if (!here) return []
+    const seen = new Set<string>()
+    const opts: PushbackOption[] = []
+    for (const n of graph.neighbours(key)) {
+      const p = graph.nodePoint(n)
+      if (!p) continue
+      const headingDeg = normalizeDeg(bearing(here[0], here[1], p[0], p[1]))
+      let facing = compassOf(headingDeg)
+      // Two ways out that round to the same compass point would be an ambiguous clearance.
+      while (seen.has(facing)) facing = `${facing}'`
+      seen.add(facing)
+      opts.push({ facing, headingDeg, ref: graph.refBetween(key, n) ?? null })
+    }
+    return opts
+  }
+
+  /**
+   * With no direction named, push the aircraft the way that serves it: the direction from which
+   * its own goal is actually reachable, and if both are, the shorter. This keeps an unspecified
+   * pushback sensible rather than arbitrary — and it is what a ramp would do.
+   */
+  function bestPushDirection(ac: Internal, options: PushbackOption[]): PushbackOption | undefined {
+    if (!graph || options.length === 0 || !ac.goalPoint) return options[0]
+    const stand = standFor(ac)
+    const from = graph.nearestNode((stand ? stand.entry : [ac.x, ac.y]) as Point)
+    const to = goalNodeFor(ac.goalPoint, [ac.x, ac.y])
+    if (!from || !to) return options[0]
+    let best: { opt: PushbackOption; cost: number } | undefined
+    for (const opt of options) {
+      const path = graph.route(from, to, opt.headingDeg)
+      if (path.length === 0) continue
+      const cost = pathLength(path)
+      if (!best || cost < best.cost) best = { opt, cost }
+    }
+    return best?.opt ?? options[0]
+  }
+
   /** Length (nm) of a stand's painted lead-in — the zone an aircraft is marshalled through. */
   function leadLengthNm(stand: Stand): number {
     let d = 0
@@ -1257,10 +1350,10 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
    */
   function routeToStand(ac: Internal, stand: Stand): boolean {
     if (!graph) return false
-    const startKey = graph.nearestNode([ac.x, ac.y])
+    const startKey = startNodeFor(ac)
     const goalKey = goalNodeFor(stand.entry, [ac.x, ac.y])
     if (!startKey || !goalKey) return false
-    const route = graph.route(startKey, goalKey)
+    const route = graph.route(startKey, goalKey, committedHeading(ac))
     if (route.length === 0) return false
     clearDiversion(ac)
     applyRoute(ac, [...route, ...stand.lead], stand.stop, false)
@@ -1282,7 +1375,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
    *  Returns false when no route could be applied at all. */
   function routeVia(ac: Internal, taxiways: readonly string[], dest: Point, appendExact: boolean): boolean {
     if (!graph) return false
-    const startKey = graph.nearestNode([ac.x, ac.y])
+    const startKey = startNodeFor(ac)
     const goalKey = goalNodeFor(dest, [ac.x, ac.y])
     if (!startKey || !goalKey) return false
     const via = graph.routeVia(startKey, goalKey, taxiways)
@@ -1341,6 +1434,39 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     if (!ac.rollWhenLinedUp || !ac.lineUpWait) return
     if (ac.leg < ac.path.length - 1) return
     beginTakeoffRoll(ac)
+  }
+
+  /**
+   * A direction the aircraft cannot route against.
+   *
+   * Under way, that is simply its heading — it cannot turn round on a taxiway mid-taxi. Stopped,
+   * it is whatever direction it was pushed back into, which is the whole point of choosing one.
+   * Otherwise undefined: a stationary aircraft that has not been pushed may set off either way.
+   */
+  function committedHeading(ac: Internal): number | undefined {
+    if (ac.pushingBack || ac.departing || ac.airborne) return undefined
+    if (ac.facingCommitted !== null) return ac.facingCommitted
+    return ac.groundspeed > 1 ? ac.heading : undefined
+  }
+
+  /**
+   * Where a route starts from on the graph.
+   *
+   * Not simply the nearest node: an aircraft committed to a direction may have the nearest node
+   * *behind* it, and joining the graph there would have it reverse off the stand before setting
+   * off. The turn limit constrains the route once it is on the graph; this applies the same
+   * limit to getting onto it. Falls back to the nearest node when nothing lies ahead, so a
+   * committed heading can never strand an aircraft outright.
+   */
+  function startNodeFor(ac: Internal): string | null {
+    if (!graph) return null
+    const head = committedHeading(ac)
+    if (head === undefined) return graph.nearestNode([ac.x, ac.y])
+    const ahead = graph.nearestNodeWhere([ac.x, ac.y], (n) => {
+      const to = normalizeDeg(bearing(ac.x, ac.y, n[0], n[1]))
+      return Math.abs((((to - head + 540) % 360) - 180)) <= MAX_TURN_DEG
+    })
+    return ahead ?? graph.nearestNode([ac.x, ac.y])
   }
 
   /** The named taxiways an aircraft's current route follows, in order. */
@@ -1434,6 +1560,21 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         if (ac.groundspeed > 0.1 || ac.path.length > 1) return refused('already moving or routed')
         const svc = serviceRemaining(ac)
         if (svc > 0) return refused(`ground servicing in progress — ${Math.ceil(svc)}s to pushback`)
+        // Which way it ends up facing. Named, because it decides which way the aircraft can
+        // taxi off: it cannot turn round on the alley. Unspecified, the tug picks whichever
+        // direction actually serves this aircraft's goal.
+        const options = pushbackOptionsFor(ac)
+        let facing: PushbackOption | undefined
+        if (command.facing !== undefined) {
+          facing = options.find((o) => o.facing.toUpperCase() === command.facing!.toUpperCase())
+          if (!facing) {
+            const names = options.map((o) => o.facing).join(' or ')
+            return refused(names ? `unable — push back facing ${names}` : 'nowhere to push back to')
+          }
+        } else {
+          facing = bestPushDirection(ac, options)
+        }
+
         // Push back the way the aircraft came in: reversed along its own lead-in line, which
         // ends on the taxilane. Shoving toward the nearest graph node instead is what sent
         // aircraft backing off the stand in directions the paint never goes.
@@ -1454,6 +1595,9 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         ac.held = null
         ac.dwell = -1
         ac.pushingBack = true
+        ac.pushFacing = facing ? facing.headingDeg : null
+        ac.pushFacingLabel = facing ? facing.facing : null
+        ac.facingCommitted = null
         ac.targetSpeed = PUSHBACK_SPEED_KT
         ac.holding = false
         ac.holdShort = false
@@ -2006,6 +2150,10 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     },
     clear(): void {
       fleet.length = 0
+    },
+    pushbackOptions(aircraftId: string): PushbackOption[] {
+      const ac = find(aircraftId)
+      return ac ? pushbackOptionsFor(ac) : []
     },
     taxiwaysOf(aircraftId: string): string[] {
       const ac = find(aircraftId)

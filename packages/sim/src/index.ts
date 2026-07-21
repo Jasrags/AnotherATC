@@ -58,6 +58,7 @@ export type {
   GroundIntent,
   ControllerPosition,
   NamedDestination,
+  PushbackOption,
   ServiceProgress,
   WakeCategory,
 } from './ground/types'

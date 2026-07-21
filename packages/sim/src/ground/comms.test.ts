@@ -11,6 +11,7 @@ const ctx = (over: Partial<PhraseContext> = {}): PhraseContext => ({
   towerFreq: null,
   groundFreq: null,
   vacated: false,
+  pushFacing: null,
   ...over,
 })
 
@@ -101,9 +102,12 @@ describe('phraseFor', () => {
     expect(ex?.readback).toBe('Bravo 4, SKW412.')
   })
 
-  it('phrases pushback', () => {
+  it('phrases pushback, naming the direction when one was chosen', () => {
     expect(phraseFor({ type: 'pushback', aircraftId: 'a' }, ctx())?.instruction).toBe(
       'SKW412, push and start approved.',
     )
+    expect(
+      phraseFor({ type: 'pushback', aircraftId: 'a' }, ctx({ pushFacing: 'E' }))?.instruction,
+    ).toBe('SKW412, push and start approved facing E.')
   })
 })

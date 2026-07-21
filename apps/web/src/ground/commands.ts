@@ -163,10 +163,27 @@ function phaseCommandsFor(controller: GroundController, item: StripItem, aircraf
       ]
     }
     // Cleared, but pushback stays gated until ground servicing (fuel/cargo/…) finishes.
+    if (item.serviceSec > 0) {
+      return [{ label: `Pushback — servicing ${item.serviceSec}s`, action: { kind: 'soon' } }]
+    }
+    // Which way it faces coming off the stand is a real decision: the alley runs two ways and
+    // the aircraft cannot turn round on it, so this picks which way it can then taxi. The
+    // taxiway each direction faces down is named, since that is the consequence.
+    const ways = item.pushbackOptions
     const pushback: MenuCommand =
-      item.serviceSec > 0
-        ? { label: `Pushback — servicing ${item.serviceSec}s`, action: { kind: 'soon' } }
-        : { label: 'Pushback approved', action: { kind: 'run', run: () => send({ type: 'pushback', aircraftId: id }) } }
+      ways.length > 1
+        ? {
+            key: 'push',
+            label: 'Pushback approved…',
+            action: {
+              kind: 'submenu',
+              items: ways.map((w) => ({
+                label: w.ref ? `Facing ${w.facing} (${w.ref})` : `Facing ${w.facing}`,
+                run: () => send({ type: 'pushback', aircraftId: id, facing: w.facing }),
+              })),
+            },
+          }
+        : { key: 'push', label: 'Pushback approved', action: { kind: 'run', run: () => send({ type: 'pushback', aircraftId: id }) } }
     return [pushback]
   }
   // Pushback is an automatic maneuver — nothing for the controller to do until it's holding.

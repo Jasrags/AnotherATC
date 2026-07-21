@@ -18,6 +18,7 @@ import type {
   GroundStatus,
   NamedDestination,
   Point,
+  PushbackOption,
   RunwayExit,
   ServiceProgress,
   TaxiTopology,
@@ -60,6 +61,10 @@ export interface StripItem {
    *  than queried from the sim at render time: the command menu must be built from the same
    *  instant as the numbers printed above it, or the two disagree on a fast final. */
   exitOptions: readonly RunwayExit[]
+  /** The ways this aircraft can be pushed back off its stand. Published for the same reason as
+   *  `exitOptions`, though these are static per stand: the menu reads one snapshot, never the
+   *  live sim. Empty for anything that isn't a parked departure. */
+  pushbackOptions: readonly PushbackOption[]
   /** Landed and fully clear of the runway — ready to be handed to Ground. */
   vacated: boolean
   /** Tower has already issued the frequency change; it applies when the aircraft vacates. */
@@ -305,6 +310,12 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
     const acs = simSnap.aircraft
     const comms = simSnap.comms
     const vias = new Map(acs.map((a) => [a.id, sim.taxiwaysOf(a.id)]))
+    // Only a parked departure on a stand can be pushed back; the options are fixed geometry.
+    const pushOpts = new Map(
+      acs
+        .filter((a) => a.status === 'parked' && a.intent === 'departure' && a.gate !== null)
+        .map((a) => [a.id, sim.pushbackOptions(a.id)] as const),
+    )
     // Only a Tower arrival can be assigned a turnoff, so don't query the rest of the fleet.
     const exitOpts = new Map(
       acs
@@ -341,6 +352,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
         onShortFinal: a.onShortFinal,
         exitRef: a.exitRef,
         exitOptions: exitOpts.get(a.id) ?? [],
+        pushbackOptions: pushOpts.get(a.id) ?? [],
         vacated: a.vacated,
         handoffPending: a.handoffPending,
         altitude: Math.round(a.altitude / 50) * 50,

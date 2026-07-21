@@ -90,6 +90,8 @@ export interface PhraseContext {
   groundFreq: string | null
   /** Arrival is already clear of the runway (drops the "when vacated" qualifier). */
   vacated: boolean
+  /** Compass point the aircraft is being pushed back to face, when one applies. */
+  pushFacing: string | null
 }
 
 /** A controller instruction and the pilot's correct read-back of it. */
@@ -132,8 +134,10 @@ export function phraseFor(cmd: GroundCommand, ctx: PhraseContext): Exchange | nu
       const code = ctx.squawk ?? 'standby'
       return say(`cleared to destination as filed, squawk ${code}`, `Cleared as filed, squawk ${code}`)
     }
-    case 'pushback':
-      return say('push and start approved', 'Push and start approved')
+    case 'pushback': {
+      const face = ctx.pushFacing ? ` facing ${ctx.pushFacing}` : ''
+      return say(`push and start approved${face}`, `Push and start approved${face}`)
+    }
     case 'taxiTo':
     case 'taxiToGoal':
     case 'taxiVia':

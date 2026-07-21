@@ -37,7 +37,10 @@ export type GroundCommand =
   | { type: 'taxiToGoal'; aircraftId: string }
   | { type: 'taxiVia'; aircraftId: string; taxiways: string[]; dest: Point; exact?: boolean }
   | { type: 'taxiViaGoal'; aircraftId: string; taxiways: string[] }
-  | { type: 'pushback'; aircraftId: string }
+  /** `facing` is a compass point from {@link GroundSim.pushbackOptions} — which way the
+   *  aircraft ends up pointing, and therefore which way it can taxi off the stand. Omitted,
+   *  the tug picks whichever direction serves the aircraft's own goal better. */
+  | { type: 'pushback'; aircraftId: string; facing?: string }
   | { type: 'hold'; aircraftId: string }
   | { type: 'resume'; aircraftId: string }
   | { type: 'crossRunway'; aircraftId: string }
@@ -62,6 +65,15 @@ export interface ServiceProgress {
   total: number
   /** Seconds of work still remaining (0 = complete). */
   remaining: number
+}
+
+/** One way an aircraft can be pushed back off its stand: onto the alley, facing this way. */
+export interface PushbackOption {
+  /** Compass point the aircraft ends up facing, e.g. "E" — what the clearance names. */
+  facing: string
+  headingDeg: number
+  /** The taxiway it would be facing down, when that pavement is named. */
+  ref: string | null
 }
 
 /** A pickable, named place a controller can clear an aircraft to. */
@@ -197,4 +209,8 @@ export interface GroundSim {
   remove(aircraftId: string): boolean
   /** Remove every aircraft from the surface. */
   clear(): void
+  /** The ways this aircraft could be pushed back off its stand (empty if it can't be pushed).
+   *  Every stand has two, so this is a real choice: the direction it ends up facing is the
+   *  direction it must taxi off in, since it cannot turn around on the alley. */
+  pushbackOptions(aircraftId: string): PushbackOption[]
 }

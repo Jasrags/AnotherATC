@@ -58,6 +58,8 @@ export interface TaxiGraph {
   keyAt(p: Point): Key | null
   /** The taxiway designator of the edge between two adjacent nodes, or undefined. */
   refBetween(a: Key, b: Key): string | undefined
+  /** Distinct nodes directly connected to `key` — the ways out of it. */
+  neighbours(key: Key): Key[]
   /** Shortest path of node coordinates from start to goal, inclusive; [] if unreachable.
    *  `fromHeadingDeg` commits the aircraft to a direction it is already facing, so the route
    *  cannot begin with a turn it could not physically make (see {@link MAX_TURN_DEG}). */
@@ -153,6 +155,7 @@ export function buildTaxiGraph(surface: AirportSurface): TaxiGraph {
   }
 
   const refBetween = (a: Key, b: Key): string | undefined => adj.get(a)?.find((e) => e.to === b)?.ref
+  const neighbours = (key: Key): Key[] => [...new Set((adj.get(key) ?? []).map((e) => e.to))]
 
   const nearestNodeWhere = (p: Point, ok: (node: Point) => boolean): Key | null => {
     let best: Key | null = null
@@ -428,6 +431,7 @@ export function buildTaxiGraph(surface: AirportSurface): TaxiGraph {
       return nodes.has(k) ? k : null
     },
     refBetween,
+    neighbours,
     route,
     routeAvoiding,
     routeVia,

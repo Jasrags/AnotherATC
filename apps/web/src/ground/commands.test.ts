@@ -27,6 +27,7 @@ function strip(over: Partial<StripItem> = {}): StripItem {
     giveWayTo: null,
     squawk: null,
     hasInstruction: false,
+    pushbackOptions: [],
     wakeHoldSec: 0,
     services: [],
     serviceSec: 0,
@@ -194,6 +195,33 @@ describe('commandsFor (strip state machine)', () => {
     const push = cmds[0]!.action
     if (push.kind === 'run') push.run()
     expect(dispatched).toEqual([{ type: 'pushback', aircraftId: 'a' }])
+  })
+
+  it('offers a direction to push into when the alley runs both ways', () => {
+    const { controller, dispatched } = fakeController()
+    const cmds = commandsFor(
+      controller,
+      strip({
+        status: 'parked',
+        intent: 'departure',
+        gate: '41',
+        squawk: '4231',
+        serviceSec: 0,
+        pushbackOptions: [
+          { facing: 'E', headingDeg: 90, ref: 'P' },
+          { facing: 'W', headingDeg: 270, ref: 'P' },
+        ],
+      }),
+      [],
+    )
+    expect(labels(cmds)).toEqual(['Pushback approved…'])
+    const menu = cmds[0]!.action
+    expect(menu.kind).toBe('submenu')
+    if (menu.kind !== 'submenu') return
+    // The taxiway each way faces down is named: that is the consequence of the choice.
+    expect(menu.items.map((i) => i.label)).toEqual(['Facing E (P)', 'Facing W (P)'])
+    menu.items[1]!.run()
+    expect(dispatched).toEqual([{ type: 'pushback', aircraftId: 'a', facing: 'W' }])
   })
 
   it('cleared departure still servicing → pushback disabled with a countdown', () => {
