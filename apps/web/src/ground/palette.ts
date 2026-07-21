@@ -54,6 +54,10 @@ export const COLORS = {
 } as const
 
 export const DIMS = {
+  /** Heading pip: a triangle outside the target showing which way it faces, at any speed. */
+  headingPipGap: 2,
+  headingPipLen: 4.5,
+  headingPipHalfWidth: 2.6,
   /** Target half-size in px. */
   targetR: 3.2,
   blockFont: 11,

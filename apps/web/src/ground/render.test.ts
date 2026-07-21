@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import type { AirportSurface, Point, RunwayLayout, SurfaceFeature, TaxiTopology } from '@anotheratc/sim'
 import {
+  drawAircraft,
   polylineLength,
   polylineMidpoint,
   distToSeg,
@@ -372,5 +373,82 @@ describe('prepareSurface — stand lines', () => {
       expect(s.stop).toEqual(s.lead[s.lead.length - 1])
       expect(Math.abs(s.entry[1])).toBeLessThan(Math.abs(s.stop[1])) // entry nearer the taxiway
     }
+  })
+})
+
+describe('heading pip', () => {
+  // Reuses the tracing context from the runway-markings suite via a local copy of the shape it
+  // needs: every `fill()` records the path built since the last `beginPath()`.
+  function tracing() {
+    const ops: { pts: [number, number][] }[] = []
+    let pending: [number, number][] = []
+    const ctx = {
+      canvas: { width: 400, height: 400 },
+      save() {}, restore() {}, translate() {}, rotate() {}, setLineDash() {},
+      beginPath() { pending = [] },
+      closePath() {},
+      moveTo(x: number, y: number) { pending.push([x, y]) },
+      lineTo(x: number, y: number) { pending.push([x, y]) },
+      arc() {}, rect() {}, fillText() {}, measureText: () => ({ width: 10 }),
+      fill() { ops.push({ pts: [...pending] }) },
+      stroke() {},
+      fillStyle: '', strokeStyle: '', lineWidth: 0, font: '', textAlign: '', textBaseline: '',
+      shadowColor: '', shadowBlur: 0, lineJoin: '', lineCap: '',
+    }
+    return { ctx: ctx as unknown as CanvasRenderingContext2D, ops }
+  }
+
+  const aircraftAt = (heading: number, groundspeed: number) =>
+    [{
+      id: 'a', callsign: 'AAL1', type: 'B738', wake: 'M', x: 0, y: 0, heading, altitude: 0,
+      finalNm: 0, groundspeed, holding: groundspeed === 0, holdShort: false,
+      holdingForTakeoff: false, status: 'holding', controlledBy: 'ground', intent: 'departure',
+      gate: null, onRunway: false, blocksTakeoff: false, onShortFinal: false, exitRef: null,
+      vacated: false, handoffPending: false, conflict: false, giveWayTo: null,
+      waitingForStand: null, squawk: null, hasInstruction: false, wakeHoldSec: 0,
+      services: [], serviceSec: 0,
+    }] as unknown as Parameters<typeof drawAircraft>[2]
+
+  const view = fitView({ minX: -1, minY: -1, maxX: 1, maxY: 1 }, 400, 400)
+
+  /** The pip is the 3-point path; its tip is the vertex furthest from the target centre. */
+  function tip(ops: { pts: [number, number][] }[]) {
+    const tri = ops.find((o) => o.pts.length === 3)!
+    const [cx, cy] = toScreenCentre()
+    return tri.pts.reduce((far, p) =>
+      Math.hypot(p[0] - cx, p[1] - cy) > Math.hypot(far[0] - cx, far[1] - cy) ? p : far,
+    )
+  }
+  const toScreenCentre = (): [number, number] => [200, 200]
+
+  it('is drawn even when the aircraft is stopped — which is when facing matters most', () => {
+    const { ctx, ops } = tracing()
+    drawAircraft(ctx, view, aircraftAt(90, 0))
+    expect(ops.some((o) => o.pts.length === 3)).toBe(true)
+  })
+
+  it('points the way the aircraft faces, in screen space (north is up)', () => {
+    for (const [heading, expected] of [
+      [0, 'up'], [90, 'right'], [180, 'down'], [270, 'left'],
+    ] as const) {
+      const { ctx, ops } = tracing()
+      drawAircraft(ctx, view, aircraftAt(heading, 0))
+      const [tx, ty] = tip(ops)
+      const [cx, cy] = toScreenCentre()
+      if (expected === 'up') expect(ty).toBeLessThan(cy)
+      if (expected === 'down') expect(ty).toBeGreaterThan(cy)
+      if (expected === 'right') expect(tx).toBeGreaterThan(cx)
+      if (expected === 'left') expect(tx).toBeLessThan(cx)
+    }
+  })
+
+  it('distinguishes two stopped aircraft facing opposite ways', () => {
+    const a = tracing()
+    drawAircraft(a.ctx, view, aircraftAt(90, 0))
+    const b = tracing()
+    drawAircraft(b.ctx, view, aircraftAt(270, 0))
+    // Nose-to-nose vs. back-to-back is now visible: the pips point opposite ways.
+    expect(tip(a.ops)[0]).toBeGreaterThan(200)
+    expect(tip(b.ops)[0]).toBeLessThan(200)
   })
 })

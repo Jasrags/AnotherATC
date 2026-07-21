@@ -899,6 +899,31 @@ export function drawOffscreenTraffic(
   ctx.restore()
 }
 
+/**
+ * A small triangle just outside the target, pointing where the aircraft is facing.
+ *
+ * The velocity vector is scaled by groundspeed, so it disappears exactly when facing matters
+ * most: two aircraft stopped nose-to-nose look identical to two aircraft stopped back-to-back,
+ * and there is no way to tell a head-to-head deadlock from a queue — or to work out which way to
+ * reroute. Heading is meaningful at a standstill, so this is drawn whatever the speed.
+ */
+function drawHeadingPip(ctx: Ctx, sx: number, sy: number, headingDeg: number, color: string): void {
+  const rad = (headingDeg * Math.PI) / 180
+  // Screen space: x = sin(heading), y = -cos(heading), since north is up.
+  const ux = Math.sin(rad)
+  const uy = -Math.cos(rad)
+  const tip = DIMS.targetR + DIMS.headingPipGap + DIMS.headingPipLen
+  const base = DIMS.targetR + DIMS.headingPipGap
+  const half = DIMS.headingPipHalfWidth
+  ctx.fillStyle = color
+  ctx.beginPath()
+  ctx.moveTo(sx + ux * tip, sy + uy * tip)
+  ctx.lineTo(sx + ux * base - uy * half, sy + uy * base + ux * half)
+  ctx.lineTo(sx + ux * base + uy * half, sy + uy * base - ux * half)
+  ctx.closePath()
+  ctx.fill()
+}
+
 export function drawAircraft(ctx: Ctx, v: View, aircraft: GroundAircraft[]): void {
   ctx.setLineDash([])
   ctx.font = `${DIMS.blockFont}px ui-monospace, "SF Mono", Menlo, monospace`
@@ -929,6 +954,7 @@ export function drawAircraft(ctx: Ctx, v: View, aircraft: GroundAircraft[]): voi
       ctx.beginPath()
       ctx.arc(sx, sy, r + 1, 0, Math.PI * 2)
       ctx.stroke()
+      drawHeadingPip(ctx, sx, sy, ac.heading, COLORS.airborneTarget)
       drawDataBlock(ctx, ac, sx, sy)
       continue
     }
@@ -945,6 +971,7 @@ export function drawAircraft(ctx: Ctx, v: View, aircraft: GroundAircraft[]): voi
     ctx.rect(sx - r, sy - r, r * 2, r * 2)
     ctx.fill()
     ctx.restore()
+    drawHeadingPip(ctx, sx, sy, ac.heading, ctx.fillStyle as string)
 
     // separation conflict alert
     if (ac.conflict) {
