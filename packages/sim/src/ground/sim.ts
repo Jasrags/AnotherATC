@@ -287,7 +287,10 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     return dist(from, runwayEnds[0]!) >= dist(from, runwayEnds[1]!) ? runwayEnds[0]! : runwayEnds[1]!
   }
   /** The point on the runway centerline nearest an aircraft — where it lines up when told to
-   *  line up and wait (i.e. onto the runway in front of it, not at some far threshold). */
+   *  line up and wait (i.e. onto the runway in front of it, not at some far threshold).
+   *  NOTE: single-runway assumption. KSAN has one runway (9/27), so "nearest segment" is always
+   *  the right runway. With crossing/second runways, scope this to the aircraft's assigned
+   *  runway (the one its goalPoint sits on) — see docs/atc-tower.md §9 (multiple runways). */
   const nearestRunwayPoint = (from: Point): Point | null => {
     if (!guard) return null
     let best: Point | null = null

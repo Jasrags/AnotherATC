@@ -196,7 +196,9 @@ Sim:
 - **Full go-around cascade** — re-entering the TRACON arrival sequence and displacing traffic.
   Slice 3 ships only the local re-inject stub.
 - **Multiple runways / LAHSO / intersection departures** — KSAN is single-runway (9/27), so out
-  of scope here.
+  of scope here. One coupling to revisit if this changes: `nearestRunwayPoint` (line-up-and-wait)
+  projects onto the *nearest* runway segment, not the aircraft's assigned runway — correct while
+  there's only one runway, but it must be scoped to the goal's runway once a second one exists.
 
 ---
 
