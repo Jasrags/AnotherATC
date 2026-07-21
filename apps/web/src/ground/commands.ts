@@ -31,6 +31,28 @@ export function commandsFor(controller: GroundController, item: StripItem, aircr
     return [{ label: 'Rolling — with tower', action: { kind: 'soon' } }]
   }
 
+  // Tower-owned (handed off from Ground): Local Control's runway actions.
+  if (item.controlledBy === 'tower') {
+    const takeoff: MenuCommand = {
+      label: 'Cleared for takeoff',
+      action: { kind: 'run', run: () => send({ type: 'clearedForTakeoff', aircraftId: id }) },
+    }
+    if (item.status === 'lineUpWait') {
+      return [takeoff, { label: 'Hold position', action: { kind: 'soon' } }]
+    }
+    if (item.status === 'holdShort') {
+      return [
+        {
+          label: 'Line up and wait',
+          action: { kind: 'run', run: () => send({ type: 'lineUpAndWait', aircraftId: id }) },
+        },
+        takeoff,
+        { label: 'Hold position', action: { kind: 'soon' } },
+      ]
+    }
+    return [{ label: 'With tower', action: { kind: 'soon' } }]
+  }
+
   if (item.status === 'holdShort') {
     // Holding short of its own departure runway → done with Ground, hand to Tower for takeoff.
     // Holding short to transit (a crossing, incl. a departure whose route continues past the

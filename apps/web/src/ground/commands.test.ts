@@ -10,6 +10,7 @@ function strip(over: Partial<StripItem> = {}): StripItem {
     type: 'B738',
     wake: 'M',
     status: 'taxi',
+    controlledBy: 'ground',
     intent: 'departure',
     gate: null,
     holdingForTakeoff: false,
@@ -54,6 +55,35 @@ describe('commandsFor (strip state machine)', () => {
     const contact = cmds[0]!.action
     if (contact.kind === 'run') contact.run()
     expect(dispatched).toEqual([{ type: 'contactTower', aircraftId: 'a' }])
+    expect(cmds[1]!.action.kind).toBe('soon')
+  })
+
+  it('tower-owned holdShort → line up and wait (runs), cleared for takeoff (runs), hold (soon)', () => {
+    const { controller, dispatched } = fakeController()
+    const cmds = commandsFor(
+      controller,
+      strip({ status: 'holdShort', controlledBy: 'tower', holdingForTakeoff: true }),
+      [],
+    )
+    expect(labels(cmds)).toEqual(['Line up and wait', 'Cleared for takeoff', 'Hold position'])
+    const luaw = cmds[0]!.action
+    if (luaw.kind === 'run') luaw.run()
+    const cto = cmds[1]!.action
+    if (cto.kind === 'run') cto.run()
+    expect(dispatched).toEqual([
+      { type: 'lineUpAndWait', aircraftId: 'a' },
+      { type: 'clearedForTakeoff', aircraftId: 'a' },
+    ])
+    expect(cmds[2]!.action.kind).toBe('soon')
+  })
+
+  it('tower-owned lineUpWait → cleared for takeoff (runs), hold position (soon)', () => {
+    const { controller, dispatched } = fakeController()
+    const cmds = commandsFor(controller, strip({ status: 'lineUpWait', controlledBy: 'tower' }), [])
+    expect(labels(cmds)).toEqual(['Cleared for takeoff', 'Hold position'])
+    const cto = cmds[0]!.action
+    if (cto.kind === 'run') cto.run()
+    expect(dispatched).toEqual([{ type: 'clearedForTakeoff', aircraftId: 'a' }])
     expect(cmds[1]!.action.kind).toBe('soon')
   })
 

@@ -27,6 +27,7 @@ export type {
   DispatchResult,
   GroundStatus,
   GroundIntent,
+  ControllerPosition,
   NamedDestination,
   ServiceProgress,
   WakeCategory,

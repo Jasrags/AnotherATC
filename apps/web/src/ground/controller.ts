@@ -6,6 +6,7 @@ import {
   createGroundSim,
 } from '@anotheratc/sim'
 import type {
+  ControllerPosition,
   GroundCommand,
   GroundIntent,
   GroundSim,
@@ -25,6 +26,9 @@ export interface StripItem {
   type: string
   wake: WakeCategory
   status: GroundStatus
+  /** Which controller owns the aircraft: Ground, or Tower after a handoff. Gates whether the
+   *  strip offers Ground actions (Contact tower) or Tower actions (line up, cleared for takeoff). */
+  controlledBy: ControllerPosition
   intent: GroundIntent
   gate: string | null
   /** Holding short of its own departure runway (offer Contact tower) vs. to cross (offer
@@ -200,7 +204,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
     let nextSig = selected ?? '-'
     nextSig += draft ? `~${draft.id}:${draft.via.join('.')}` : ''
     for (const a of acs)
-      nextSig += `|${a.id}:${a.status}:${vias.get(a.id)!.join('.')}:${a.giveWayTo ?? ''}:${a.squawk ?? ''}:${a.wakeHoldSec}:${a.serviceSec}`
+      nextSig += `|${a.id}:${a.status}:${a.controlledBy}:${vias.get(a.id)!.join('.')}:${a.giveWayTo ?? ''}:${a.squawk ?? ''}:${a.wakeHoldSec}:${a.serviceSec}`
     if (nextSig === sig) return
     sig = nextSig
     snapshot = {
@@ -212,6 +216,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
         type: a.type,
         wake: a.wake,
         status: a.status,
+        controlledBy: a.controlledBy,
         intent: a.intent,
         gate: a.gate,
         holdingForTakeoff: a.holdingForTakeoff,
