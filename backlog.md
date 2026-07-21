@@ -181,17 +181,15 @@ Design note: `docs/atc-tower.md` (one sim, two projections; Ground and Tower own
 - ⬜ **Flight data model** — one canonical flight object, mode-specific strip projections (per design docs)
 - ⬜ **Flight strip state machine** — shared across modes; phase gates available actions
 - ⬜ **Handoff mechanics** — initiate/accept, frequency change, refusal when overloaded
-- 🚧 **Read-back verification** — **shipped:** a pilot who mishears a clearance reads it back wrong
-  and *acts on the read-back* — the clearance is never withheld, it takes effect wrong. The only cue
-  is the transcript, so catching one is a judgement, not a prompt. **Say again** is the catch: it
-  repeats the last clearance with "negative, …" and restores what the controller actually said; it is
-  offered in every phase once anything has been transmitted and accepted whether or not there was an
-  error. Opt-in `readback: { errorRate, seed }` (absent = never mishears, so every pre-existing test
-  still holds); the game runs 15%, the dev sandbox none. Scored via `readbackErrors`/`readbackCaught`.
-  A clearance the sim voids on its own (go-around, touchdown, handoff, expired give-way) stops being
-  repeatable. _Next: corrupt more than the beacon code — a misheard **runway exit** (real
-  consequence: wrong turnoff, different runway occupancy) and a misheard **hold short** vs. cross,
-  which is the dangerous one. Then surface the score._
+- 🚧 **Read-back verification** — **built, deliberately switched off in the game.** A pilot who
+  mishears a clearance reads it back wrong and *acts on the read-back* — the clearance is never
+  withheld, it takes effect wrong. The only cue is the transcript, so catching one is a judgement,
+  not a prompt. **Say again** is the catch: it repeats the last clearance with "negative, …" and
+  restores what the controller actually said; offered in every phase once anything has been
+  transmitted, and accepted whether or not there was an error. A clearance the sim voids on its own
+  (go-around, touchdown, handoff, expired give-way) stops being repeatable. Opt-in
+  `readback: { errorRate, seed }`; **the running game passes no config, so nothing is ever
+  misheard** — see *Gaming the game* below for why and what turning it on entails.
 - 🚧 **Squawk / transponder codes** — beacon code assigned at clearance delivery (deterministic 4-digit octal), shown on the strip. Note the strip shows the code the aircraft is *squawking*, which is not the issued code when the pilot misheard it — comparing the two is the read-back game. _Next: link the code to a radar target once airborne (feeds TRACON radar contact)._
 - ⬜ **Turnaround & gate conflict** — an arrival feeds directly into the same aircraft's next departure cycle; short-turn timer; **gate conflict** when an arrival's gate is still occupied by a late departure. High-tension Ground/Ramp mechanic called out in the design docs.
 - ✅ **Sim ↔ UI bridge** — `GroundController` store + `useSyncExternalStore` for strips (canvas stays on rAF; strips re-render only on phase/selection change)
@@ -246,6 +244,29 @@ Both are larger fields than KSAN, so the OSM taxiway-naming risk scales. **Befor
 either, pull the Overpass extract and count untagged ways touching the movement area** — that
 number decides whether it is 1.5 weeks or 2.5. Process: `docs/adding-an-airport.md`; sourcing:
 `docs/airport-data-pipeline.md`; do not skip `docs/lessons-from-ksan.md`.
+
+---
+
+## ⬜ Gaming the game (deferred until the base loop is proven)
+
+Mechanics that make the simulation *harder* rather than more complete. Held back on purpose: a
+mechanic that makes a clearance silently take effect wrong is exactly the thing that hides a real
+bug behind "the pilot misheard it". The rule is **prove the loop first** — a full departure and a
+full arrival should be reliably flyable, with no surprises from the sim itself, before any of this
+is switched on.
+
+- ⬜ **Turn read-back errors on.** The mechanism is built, tested and default-off (see Read-back
+  verification). Enabling it is one config object in `apps/web/src/ground/controller.ts`
+  (`readback: { errorRate, seed }`); ~15% reads as a plausible starting rate. Before then:
+  - only the **beacon code** can currently be misheard — a quiet error with no operational
+    consequence. The ones worth having are a misheard **runway exit** (wrong turnoff → different
+    runway occupancy) and **hold short vs. cross**, which is the genuinely dangerous one.
+    `maybeMishear` in `ground/sim.ts` is the single hook for both.
+  - `readbackErrors` / `readbackCaught` are on the snapshot but nothing renders them.
+- ⬜ **Difficulty / traffic pressure** — demand curves, compressed spacing, a rush.
+- ⬜ **Failure states** — what counts as losing (incursion, deadlock, a missed handoff), and how
+  the game says so.
+- ⬜ **Objectives & delay scoring** — beyond the dep/arr counters.
 
 ---
 

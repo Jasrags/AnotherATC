@@ -28,9 +28,10 @@ import type {
 /** How far apart (nm) successive dev-spawned test arrivals sit along the final. */
 const DEV_ARRIVAL_SPACING_NM = 1.2
 
-/** How often a pilot mishears a clearance and reads it back wrong. The controller's job is to
- *  catch it in the transcript ("say again"); uncaught, the aircraft acts on what it heard. */
-const READBACK_ERROR_RATE = 0.15
+// Read-back errors are built and tested in the sim (`readback: { errorRate, seed }`) but are
+// deliberately NOT enabled here: the base loop gets proven first, and a mechanic that makes
+// clearances silently take effect wrong is exactly the kind of thing that hides a real bug
+// behind "the pilot misheard it". Turned on when we game the game — see backlog.md.
 
 /** What a flight strip shows — deliberately excludes fast-changing fields (position,
  *  speed) so the strip bay only re-renders when phase or selection changes. */
@@ -217,10 +218,8 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
   const { destinations } = game
   // Dev mode starts empty: no seeded aircraft, no auto-spawner, no servicing gate.
   const frequencies = { ground: airport.comms.ground, tower: airport.comms.tower }
-  const readback = { errorRate: READBACK_ERROR_RATE, seed: 1 }
   const sim = dev
-    ? // The sandbox is for driving a specific case, so nothing is misheard there.
-      createGroundSim([], { graph, guard, runway: game.runway, frequencies })
+    ? createGroundSim([], { graph, guard, runway: game.runway, frequencies })
     : createGroundSim(game.inits, {
         graph,
         guard,
@@ -228,7 +227,6 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
         servicing: game.servicing,
         runway: game.runway,
         frequencies,
-        readback,
       })
 
   let selected: string | null = null
