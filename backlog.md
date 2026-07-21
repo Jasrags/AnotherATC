@@ -323,11 +323,13 @@ is switched on.
 - ✅ Runway turnoffs drawn along their real geometry for the selected arrival, assigned one emphasized
 - ⬜ Gate docking guidance on arrival (AGNIS/PAPA-style stop/center cue) — the aircraft now parks
   on the painted stop mark, but there is no docking-guidance display
-- ⬜ **Show where a selected arrival is going.** Selecting an arrival gives no indication of the
-  stand it is bound for, so there is no way to see a gate conflict coming or to judge whether the
-  taxi route it will need is sensible. Wants the assigned stand called out on the strip and
-  highlighted on the scope (its lead-in emphasised, the way an assigned runway turnoff already
-  is), from the moment the arrival appears on final.
+- ✅ **Show where a selected arrival is going.** A selected inbound arrival highlights its
+  assigned stand on the scope (lead-in emphasised in the route colour + gate number, like an
+  assigned turnoff) from the moment it appears on final, and the strip carries a `→ GATE nn`
+  destination line. Because occupancy is modelled, the line warns *early* — amber-red
+  `⚠ OCCUPIED` when the stand is already taken, so a gate conflict is visible while the aircraft
+  is still on final. _Next: the conflict is only shown on the *selected* arrival; a field-wide
+  alert (any inbound whose gate is occupied) belongs with the game-loop/alerts work._
 - ⬜ Aircraft symbology by category/phase; selected-target emphasis
 - ⬜ Data-block declutter (leader-line direction, overlap avoidance)
 - ⬜ Theme polish; light/dark intentional (currently dark-only, correct for a scope)
