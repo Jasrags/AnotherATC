@@ -27,6 +27,7 @@ function strip(over: Partial<StripItem> = {}): StripItem {
     giveWayTo: null,
     waitingForStand: null,
     destStandOccupied: false,
+    standOptions: [],
     squawk: null,
     hasInstruction: false,
     pushbackOptions: [],
@@ -165,7 +166,8 @@ describe('commandsFor (strip state machine)', () => {
   it('holdShort + arrival → cross runway (runs), hold position (soon)', () => {
     const { controller, dispatched } = fakeController()
     const cmds = commandsFor(controller, strip({ status: 'holdShort', intent: 'arrival' }), [])
-    expect(labels(cmds)).toEqual(['Cross runway', 'Hold position'])
+    // An arrival can always be sent to a different gate, whatever phase it is in.
+    expect(labels(cmds)).toEqual(['Cross runway', 'Hold position', 'Reassign gate…'])
     const cross = cmds[0]!.action
     if (cross.kind === 'run') cross.run()
     expect(dispatched).toEqual([{ type: 'crossRunway', aircraftId: 'a' }])
@@ -324,7 +326,7 @@ describe('commandsFor — Tower arrivals', () => {
   it('on final → cleared to land (runs), exit assignment, go around (soon)', () => {
     const { controller, dispatched } = fakeController()
     const cmds = commandsFor(controller, onFinal(), [])
-    expect(labels(cmds)).toEqual(['Cleared to land', 'Exit at…', 'Go around'])
+    expect(labels(cmds)).toEqual(['Cleared to land', 'Exit at…', 'Go around', 'Reassign gate…'])
     const land = cmds[0]!.action
     if (land.kind === 'run') land.run()
     expect(dispatched).toEqual([{ type: 'clearedToLand', aircraftId: 'a' }])
@@ -360,7 +362,7 @@ describe('commandsFor — Tower arrivals', () => {
   it('never offers a landing clearance twice — cleared traffic can still be re-assigned an exit', () => {
     const { controller } = fakeController()
     const cmds = commandsFor(controller, onFinal({ status: 'landing' }), [])
-    expect(labels(cmds)).toEqual(['Exit at…', 'Go around'])
+    expect(labels(cmds)).toEqual(['Exit at…', 'Go around', 'Reassign gate…'])
   })
 
   it('on the roll, Tower issues the frequency change — the pilot never self-initiates', () => {
@@ -377,7 +379,7 @@ describe('commandsFor — Tower arrivals', () => {
   it('once clear of the runway the handoff is immediate, and the exit menu is gone', () => {
     const { controller } = fakeController()
     const cmds = commandsFor(controller, onFinal({ status: 'rollout', altitude: 0, finalNm: 0, vacated: true }), [])
-    expect(labels(cmds)).toEqual(['Contact ground'])
+    expect(labels(cmds)).toEqual(['Contact ground', 'Reassign gate…'])
   })
 
   it('an already-issued handoff is shown as pending, not offered again', () => {
@@ -476,5 +478,55 @@ describe('say again', () => {
     expect(cmd.action.kind).toBe('run')
     if (cmd.action.kind === 'run') cmd.action.run()
     expect(dispatched).toEqual([{ type: 'sayAgain', aircraftId: 'a' }])
+  })
+})
+
+describe('reassign gate', () => {
+  const inbound = (over: Partial<StripItem> = {}) =>
+    strip({
+      status: 'onFinal',
+      intent: 'arrival',
+      controlledBy: 'tower',
+      gate: '41',
+      altitude: 1200,
+      standOptions: [
+        { ref: '42', distanceNm: 0.02 },
+        { ref: '43', distanceNm: 0.05 },
+      ],
+      ...over,
+    })
+
+  it('lists the offered stands and dispatches the chosen one', () => {
+    const { controller, dispatched } = fakeController()
+    const cmd = commandsFor(controller, inbound(), []).find((c) => c.key === 'stand')!
+    expect(cmd.action.kind).toBe('submenu')
+    if (cmd.action.kind !== 'submenu') return
+    expect(cmd.action.items.map((i) => i.label)).toEqual(['Gate 42', 'Gate 43'])
+    cmd.action.items[1]!.run()
+    expect(dispatched).toEqual([{ type: 'assignStand', aircraftId: 'a', ref: '43' }])
+  })
+
+  it('says why the menu is worth opening when the assigned gate is taken', () => {
+    const { controller } = fakeController()
+    const clear = commandsFor(controller, inbound(), []).find((c) => c.key === 'stand')!
+    expect(clear.label).toBe('Reassign gate…')
+    const blocked = commandsFor(controller, inbound({ destStandOccupied: true }), []).find(
+      (c) => c.key === 'stand',
+    )!
+    expect(blocked.label).toContain('occupied')
+  })
+
+  it('is disabled rather than empty when the field has nowhere to put it', () => {
+    const { controller } = fakeController()
+    const cmd = commandsFor(controller, inbound({ standOptions: [] }), []).find((c) => c.key === 'stand')!
+    expect(cmd.action.kind).toBe('soon')
+  })
+
+  it('is not offered to a departure, or to an arrival already parked', () => {
+    const { controller } = fakeController()
+    const dep = commandsFor(controller, strip({ intent: 'departure', status: 'taxi' }), [])
+    expect(dep.find((c) => c.key === 'stand')).toBeUndefined()
+    const parked = commandsFor(controller, inbound({ status: 'parked', altitude: 0 }), [])
+    expect(parked.find((c) => c.key === 'stand')).toBeUndefined()
   })
 })

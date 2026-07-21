@@ -60,5 +60,6 @@ export type {
   NamedDestination,
   PushbackOption,
   ServiceProgress,
+  StandOption,
   WakeCategory,
 } from './ground/types'

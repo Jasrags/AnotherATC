@@ -134,6 +134,8 @@ export function phraseFor(cmd: GroundCommand, ctx: PhraseContext): Exchange | nu
       const code = ctx.squawk ?? 'standby'
       return say(`cleared to destination as filed, squawk ${code}`, `Cleared as filed, squawk ${code}`)
     }
+    case 'assignStand':
+      return say(`gate ${cmd.ref}`, `Gate ${cmd.ref}`)
     case 'pushback': {
       const face = ctx.pushFacing ? ` facing ${ctx.pushFacing}` : ''
       return say(`push and start approved${face}`, `Push and start approved${face}`)

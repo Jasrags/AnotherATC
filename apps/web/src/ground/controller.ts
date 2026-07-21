@@ -21,10 +21,15 @@ import type {
   PushbackOption,
   RunwayExit,
   ServiceProgress,
+  StandOption,
   TaxiTopology,
   Transmission,
   WakeCategory,
 } from '@anotheratc/sim'
+
+/** How many alternative stands the reassign menu offers. The field has 51; the nearest handful
+ *  is a decision, the whole list is just a list. */
+const STAND_MENU_LIMIT = 6
 
 /** How far apart (nm) successive dev-spawned test arrivals sit along the final. */
 const DEV_ARRIVAL_SPACING_NM = 1.2
@@ -87,6 +92,9 @@ export interface StripItem {
    *  else — a gate conflict in the making, shown before the aircraft ever gets there. Straight
    *  from the sim's own `gateBlocked`, so the strip and the field-wide alert can't disagree. */
   destStandOccupied: boolean
+  /** Free stands this arrival could be sent to instead, nearest first. Published like the other
+   *  menu inputs so the command list is built from one snapshot, never a live sim query. */
+  standOptions: readonly StandOption[]
   /** The code the aircraft is squawking — not necessarily the one issued, if the pilot
    *  misheard the clearance. */
   squawk: string | null
@@ -319,6 +327,13 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
     const acs = simSnap.aircraft
     const comms = simSnap.comms
     const vias = new Map(acs.map((a) => [a.id, sim.taxiwaysOf(a.id)]))
+    // Only an arrival can be sent to a different stand, and only before it parks. Capped: the
+    // field has 51 stands and a menu of all of them is not a decision, it is a list.
+    const standOpts = new Map(
+      acs
+        .filter((a) => a.intent === 'arrival' && a.status !== 'parked')
+        .map((a) => [a.id, sim.standOptions(a.id).slice(0, STAND_MENU_LIMIT)] as const),
+    )
     // Only a parked departure on a stand can be pushed back; the options are fixed geometry.
     const pushOpts = new Map(
       acs
@@ -370,6 +385,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
         giveWayTo: a.giveWayTo,
         waitingForStand: a.waitingForStand,
         destStandOccupied: a.gateBlocked,
+        standOptions: standOpts.get(a.id) ?? [],
         squawk: a.squawk,
         hasInstruction: a.hasInstruction,
         wakeHoldSec: a.wakeHoldSec,

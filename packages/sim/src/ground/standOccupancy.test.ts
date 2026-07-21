@@ -199,3 +199,107 @@ describe('gateBlocked — a gate conflict before it happens', () => {
     expect(parked.every((a) => a.gateBlocked)).toBe(false)
   })
 })
+
+// Reassigning is the lever the gate alert would otherwise leave you without: the alternative to
+// waiting for a blocked gate is not taking it.
+describe('assignStand — sending an arrival somewhere else', () => {
+  function inboundToOccupied() {
+    const { sim } = field()
+    const blocker = sim.snapshot().aircraft.find((a) => a.gate !== null)!
+    const stand = stands.find((s) => s.ref === blocker.gate)!
+    const ap = sim.approach()!
+    sim.add({
+      id: 'arr', callsign: 'ARR', type: 'B738', wake: 'M',
+      path: [ap.fix, ap.threshold], targetSpeed: 140, airborne: true,
+      intent: 'arrival', gate: blocker.gate!, goalPoint: stand.stop,
+    })
+    return { sim, blocker, arr: () => sim.snapshot().aircraft.find((a) => a.id === 'arr')! }
+  }
+
+  it('offers only stands that are free and unclaimed, nearest first', () => {
+    const { sim, arr } = inboundToOccupied()
+    const opts = sim.standOptions('arr')
+    expect(opts.length).toBeGreaterThan(0)
+
+    const claimed = new Set(sim.snapshot().aircraft.map((a) => a.gate))
+    for (const o of opts) {
+      expect(claimed.has(o.ref)).toBe(false) // nobody else is going there…
+      expect(sim.standOccupied(o.ref)).toBe(false) // …and nobody is on it
+    }
+    expect(opts.some((o) => o.ref === arr().gate)).toBe(false) // not the one it already has
+    // Nearest first, so the top of the menu is the sensible reassignment.
+    const dists = opts.map((o) => o.distanceNm)
+    expect(dists).toEqual([...dists].sort((a, b) => a - b))
+  })
+
+  it('clears the conflict — the arrival is no longer waiting on a blocked gate', () => {
+    const { sim, arr } = inboundToOccupied()
+    expect(arr().gateBlocked).toBe(true)
+
+    const free = sim.standOptions('arr')[0]!
+    expect(sim.dispatch({ type: 'assignStand', aircraftId: 'arr', ref: free.ref })).toEqual({ ok: true })
+    expect(arr().gate).toBe(free.ref)
+    expect(arr().gateBlocked).toBe(false)
+  })
+
+  it('refuses a stand that is occupied, or already promised to someone else', () => {
+    const { sim, blocker } = inboundToOccupied()
+    // Someone else's stand — not the one this arrival already holds, which refuses earlier
+    // with "already assigned".
+    const otherOccupied = sim
+      .snapshot()
+      .aircraft.find((a) => a.gate !== null && a.gate !== blocker.gate && a.id !== 'arr')!
+    const occupied = sim.dispatch({ type: 'assignStand', aircraftId: 'arr', ref: otherOccupied.gate! })
+    expect(occupied.ok).toBe(false)
+    if (!occupied.ok) expect(occupied.reason).toContain('occupied')
+
+    // A second arrival cannot be sent to a gate the first is already going to.
+    const free = sim.standOptions('arr')[0]!
+    sim.dispatch({ type: 'assignStand', aircraftId: 'arr', ref: free.ref })
+    const ap = sim.approach()!
+    sim.add({
+      id: 'arr2', callsign: 'ARR2', type: 'B738', wake: 'M',
+      path: [ap.fix, ap.threshold], targetSpeed: 140, airborne: true,
+      intent: 'arrival', goalPoint: ap.threshold,
+    })
+    const taken = sim.dispatch({ type: 'assignStand', aircraftId: 'arr2', ref: free.ref })
+    expect(taken.ok).toBe(false)
+    if (!taken.ok) expect(taken.reason).toContain('ARR')
+  })
+
+  it('refuses an unknown stand and a departure, and says which it is', () => {
+    const { sim } = inboundToOccupied()
+    const bad = sim.dispatch({ type: 'assignStand', aircraftId: 'arr', ref: 'ZZ9' })
+    expect(bad.ok).toBe(false)
+    if (!bad.ok) expect(bad.reason).toContain('unknown stand')
+
+    const dep = sim.snapshot().aircraft.find((a) => a.intent === 'departure')!
+    const asDeparture = sim.dispatch({ type: 'assignStand', aircraftId: dep.id, ref: '20' })
+    expect(asDeparture.ok).toBe(false)
+    if (!asDeparture.ok) expect(asDeparture.reason).toContain('only arrivals')
+  })
+
+  it('reroutes an arrival already taxiing to the old gate', () => {
+    const { sim } = field()
+    const graph2 = graph
+    const taken = new Set(sim.snapshot().aircraft.map((a) => a.gate))
+    const from = stands.find((s) => s.source === 'charted' && !taken.has(s.ref))!
+    const entryKey = graph2.nearestNode(from.entry)!
+    const start = graph2.nodePoint(graph2.neighbours(entryKey)[0]!)!
+    sim.add({
+      id: 'arr', callsign: 'ARR', type: 'B738', wake: 'M',
+      path: [start, graph2.nodePoint(entryKey)!], targetSpeed: 15,
+      intent: 'arrival', gate: from.ref, goalPoint: from.stop,
+    })
+    sim.dispatch({ type: 'taxiToGoal', aircraftId: 'arr' })
+    for (let i = 0; i < 50; i += 1) sim.step(0.1)
+
+    const other = sim.standOptions('arr')[0]!
+    expect(sim.dispatch({ type: 'assignStand', aircraftId: 'arr', ref: other.ref })).toEqual({ ok: true })
+    // Its route now ends on the new stand, not the old one.
+    const route = sim.routeOf('arr')
+    const end = route[route.length - 1]!
+    const target = stands.find((s) => s.ref === other.ref)!
+    expect(dist(end, target.stop)).toBeLessThan(1e-6)
+  })
+})

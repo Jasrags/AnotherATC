@@ -26,8 +26,31 @@ export interface MenuCommand {
  * as `soon` (disabled) so the menu still communicates the intended flow. Mirrors the
  * strip state machine — see `docs/atc-flight-strips.md`.
  */
+/** "Gate 22" — send an arrival somewhere else. Offered in every phase before it parks, on both
+ *  frequencies, because the gate conflict is usually spotted while it is still on final and the
+ *  answer to a blocked gate is not always to wait for it. Labelled with the conflict when there
+ *  is one, so the reason to open the menu is on the menu. */
+function reassignStand(controller: GroundController, item: StripItem): MenuCommand | null {
+  if (item.intent !== 'arrival' || item.status === 'parked') return null
+  const label = item.destStandOccupied ? 'Reassign gate… (occupied)' : 'Reassign gate…'
+  if (item.standOptions.length === 0) return { key: 'stand', label, action: { kind: 'soon' } }
+  return {
+    key: 'stand',
+    label,
+    action: {
+      kind: 'submenu',
+      items: item.standOptions.map((s) => ({
+        label: `Gate ${s.ref}`,
+        run: () => controller.dispatch({ type: 'assignStand', aircraftId: item.id, ref: s.ref }),
+      })),
+    },
+  }
+}
+
 export function commandsFor(controller: GroundController, item: StripItem, aircraft: StripItem[]): MenuCommand[] {
-  const cmds = phaseCommandsFor(controller, item, aircraft)
+  const cmds = [...phaseCommandsFor(controller, item, aircraft)]
+  const stand = reassignStand(controller, item)
+  if (stand) cmds.push(stand)
   // "Say again" applies in every phase once anything has been said, and is deliberately offered
   // whether or not the read-back was wrong — an always-available correction is a judgement; one
   // that appears only when needed is a prompt.

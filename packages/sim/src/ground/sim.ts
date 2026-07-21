@@ -3,6 +3,7 @@ import type { Point } from '../world/types'
 import type {
   ControllerPosition,
   PushbackOption,
+  StandOption,
   DispatchResult,
   GroundAircraft,
   GroundCommand,
@@ -1271,6 +1272,22 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
   }
 
   /**
+   * Stands this arrival could be sent to instead — neither occupied nor already spoken for by
+   * another aircraft, nearest first. "Spoken for" matters as much as "occupied": two arrivals
+   * assigned the same gate is a conflict that has simply not arrived yet.
+   */
+  function standOptionsFor(ac: Internal): StandOption[] {
+    if (ac.intent !== 'arrival') return []
+    const from = findStand(stands, ac.gate)
+    const origin: Point = from ? from.stop : [ac.x, ac.y]
+    const claimed = new Set(fleet.filter((o) => o !== ac).map((o) => o.gate))
+    return stands
+      .filter((s) => s.ref !== ac.gate && !claimed.has(s.ref) && standOccupant(s.ref, ac) === undefined)
+      .map((s) => ({ ref: s.ref, distanceNm: dist(origin, s.stop) }))
+      .sort((a, b) => a.distanceNm - b.distanceNm)
+  }
+
+  /**
    * Hold short of a stand that is still occupied.
    *
    * Not a refusal: the clearance is good, the aircraft simply cannot have the stand yet. It
@@ -1703,6 +1720,32 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         if (!ac.lastClearance) return refused('nothing has been issued to that aircraft')
         correctMishearing(ac)
         return ACCEPTED
+      case 'assignStand': {
+        // The lever the gate alert would otherwise leave you without. Everything is validated
+        // before anything is mutated — including the reroute, which is rolled back if it fails,
+        // so a refused reassignment never leaves the aircraft pointed at a gate it can't reach.
+        if (ac.intent !== 'arrival') return refused('only arrivals are assigned a stand')
+        const stand = findStand(stands, command.ref)
+        if (!stand) return refused(`unknown stand "${command.ref}"`)
+        if (ac.gate === command.ref) return refused(`already assigned gate ${command.ref}`)
+        const occupant = standOccupant(command.ref, ac)
+        if (occupant) return refused(`gate ${command.ref} occupied by ${occupant.callsign}`)
+        const claimant = fleet.find((o) => o !== ac && o.gate === command.ref)
+        if (claimant) return refused(`gate ${command.ref} assigned to ${claimant.callsign}`)
+
+        const prevGate = ac.gate
+        const prevGoal = ac.goalPoint
+        ac.gate = command.ref
+        ac.goalPoint = stand.stop
+        // Already taxiing to the old gate: send it to the new one now, rather than leaving it
+        // driving to a stand it is no longer assigned.
+        if (!ac.airborne && ac.path.length > 1 && !routeToStand(ac, stand)) {
+          ac.gate = prevGate
+          ac.goalPoint = prevGoal
+          return refused(`no taxi route to gate ${command.ref}`)
+        }
+        return ACCEPTED
+      }
       case 'clearance':
         // Clearance delivery: issue the IFR clearance to a departure, assigning a beacon
         // code. Gates pushback — a gate departure can't push until it's been cleared.
@@ -2237,6 +2280,10 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     },
     standOccupied(ref: string): boolean {
       return standOccupant(ref) !== undefined
+    },
+    standOptions(aircraftId: string): StandOption[] {
+      const ac = find(aircraftId)
+      return ac ? standOptionsFor(ac) : []
     },
     pushbackOptions(aircraftId: string): PushbackOption[] {
       const ac = find(aircraftId)

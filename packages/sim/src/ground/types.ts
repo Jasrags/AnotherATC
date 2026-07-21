@@ -52,6 +52,9 @@ export type GroundCommand =
   | { type: 'assignExit'; aircraftId: string; ref: string }
   | { type: 'contactGround'; aircraftId: string }
   | { type: 'clearance'; aircraftId: string }
+  /** Send an arrival to a different stand. The lever the gate-conflict alert otherwise leaves
+   *  you without: the alternative to waiting for a blocked gate is not taking it. */
+  | { type: 'assignStand'; aircraftId: string; ref: string }
   /** "Negative, …" — re-issue the aircraft's last clearance. If the pilot had misheard it, this
    *  is the catch: they act on what the controller actually said. If they hadn't, it is simply a
    *  repeated transmission, which is what makes catching one a judgement rather than a prompt. */
@@ -65,6 +68,13 @@ export interface ServiceProgress {
   total: number
   /** Seconds of work still remaining (0 = complete). */
   remaining: number
+}
+
+/** A stand an arrival could be reassigned to. */
+export interface StandOption {
+  ref: string
+  /** Distance (nm) from the stand it is currently bound for — nearest alternatives first. */
+  distanceNm: number
 }
 
 /** One way an aircraft can be pushed back off its stand: onto the alley, facing this way. */
@@ -220,6 +230,9 @@ export interface GroundSim {
   clear(): void
   /** Whether an aircraft is physically parked on this stand right now. */
   standOccupied(ref: string): boolean
+  /** Stands this arrival could be sent to instead: neither occupied nor already assigned to
+   *  someone else, nearest first. Empty for anything that isn't an arrival. */
+  standOptions(aircraftId: string): StandOption[]
   /** The ways this aircraft could be pushed back off its stand (empty if it can't be pushed).
    *  Every stand has two, so this is a real choice: the direction it ends up facing is the
    *  direction it must taxi off in, since it cannot turn around on the alley. */
