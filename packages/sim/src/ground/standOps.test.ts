@@ -68,51 +68,55 @@ describe('pushback follows the lead-in line back out', () => {
 })
 
 describe('an arrival is marshalled onto the stand', () => {
-  it('reaches the gate along the lead-in line rather than across the apron', () => {
-    const { game, sim } = ksanSim()
-    // A departure sitting on a stand gives us a known-good gate; taxi it out to the runway and
-    // then send it back to that same stand, which exercises the real arrival routing.
-    const id = game.inits[0]!.id
-    const at = () => sim.snapshot().aircraft.find((a) => a.id === id)!
-    const stand = findStand(stands, at().gate)!
-
-    for (let i = 0; i < 1200; i += 1) sim.step(0.1)
-    sim.dispatch({ type: 'pushback', aircraftId: id })
-    for (let i = 0; i < 900 && at().status === 'pushback'; i += 1) sim.step(0.1)
-    sim.dispatch({ type: 'taxiToGoal', aircraftId: id })
-    for (let i = 0; i < 4000 && !at().holdShort; i += 1) sim.step(0.1)
-    expect(at().holdShort).toBe(true)
-
-    // Now send it back to the stand the way an arrival goes in.
-    expect(sim.dispatch({ type: 'taxiTo', aircraftId: id, dest: stand.stop, exact: true })).toEqual({
-      ok: true,
+  /** An arrival on the alley, a little short of `stand`, already pointing at it — which is how
+   *  one actually approaches a gate. (Taxiing out to the runway and then reversing the aircraft
+   *  back to its stand is not a manoeuvre it can make, and the router now refuses it.) */
+  function inboundTo(sim: ReturnType<typeof createGroundSim>, ref: string) {
+    const graph = buildTaxiGraph(KSAN.surface)
+    const stand = stands.find((s) => s.ref === ref)!
+    const entryKey = graph.nearestNode(stand.entry)!
+    const from = graph.nodePoint(graph.neighbours(entryKey)[0]!)!
+    const id = sim.add({
+      id: 'arr',
+      callsign: 'ARR',
+      type: 'B738',
+      wake: 'M',
+      path: [from, graph.nodePoint(entryKey)!],
+      targetSpeed: 15,
+      intent: 'arrival',
+      gate: ref,
+      goalPoint: stand.stop,
     })
-    for (let i = 0; i < 8000 && dist([at().x, at().y], stand.stop) > 0.005; i += 1) sim.step(0.1)
+    return { id, stand, at: () => sim.snapshot().aircraft.find((a) => a.id === id)! }
+  }
+
+  it('reaches the gate along the lead-in line rather than across the apron', () => {
+    const { sim } = ksanSim()
+    const { id, stand, at } = inboundTo(sim, '41')
+
+    expect(sim.dispatch({ type: 'taxiToGoal', aircraftId: id })).toEqual({ ok: true })
+    for (let i = 0; i < 8000 && dist([at().x, at().y], stand.stop) > 0.004; i += 1) sim.step(0.1)
     expect(dist([at().x, at().y], stand.stop)).toBeLessThan(0.02)
+    expect(offLine([at().x, at().y], stand.lead)).toBeLessThan(0.003)
   })
 
   it('creeps down the lead-in instead of arriving at taxi speed', () => {
-    const { game, sim } = ksanSim()
-    const id = game.inits[0]!.id
-    const at = () => sim.snapshot().aircraft.find((a) => a.id === id)!
-    const stand = findStand(stands, at().gate)!
+    const { sim } = ksanSim()
+    const { id, stand, at } = inboundTo(sim, '41')
+    sim.dispatch({ type: 'taxiToGoal', aircraftId: id })
 
-    for (let i = 0; i < 1200; i += 1) sim.step(0.1)
-    sim.dispatch({ type: 'pushback', aircraftId: id })
-    for (let i = 0; i < 900 && at().status === 'pushback'; i += 1) sim.step(0.1)
-    // Route it back onto its own stand as an arrival would be.
-    sim.dispatch({ type: 'taxiTo', aircraftId: id, dest: stand.entry, exact: true })
-    for (let i = 0; i < 4000 && dist([at().x, at().y], stand.entry) > 0.004; i += 1) sim.step(0.1)
-
-    // Speed on the paint is a marshalling pace, never full taxi speed.
+    // The cap engages at the lead-in's own length from the mark, and the aircraft needs a few
+    // seconds to shed taxi speed — so measure the second half, where it must already be down.
+    const leadLen = dist(stand.entry, stand.stop)
     const onLead: number[] = []
-    for (let i = 0; i < 600; i += 1) {
+    for (let i = 0; i < 8000; i += 1) {
       sim.step(0.1)
       const a = at()
-      if (offLine([a.x, a.y], stand.lead) < 0.002) onLead.push(a.groundspeed)
+      if (dist([a.x, a.y], stand.stop) <= leadLen / 2) onLead.push(a.groundspeed)
       if (a.groundspeed <= 0.1 && dist([a.x, a.y], stand.stop) < 0.01) break
     }
     expect(onLead.length).toBeGreaterThan(0)
+    expect(Math.max(...onLead)).toBeLessThanOrEqual(6) // marshalling pace, not 15 kt taxi
   })
 })
 
@@ -120,21 +124,23 @@ describe('an arrival is marshalled onto the stand', () => {
 // aircraft's path underneath it, which a hold-short split, a crossing release and a congestion
 // diversion all do.
 describe('the lead-in survives a path rewrite', () => {
-  it('a diverted arrival still arrives along the paint, not across the apron', () => {
-    const { game, sim } = ksanSim()
-    const id = game.inits[0]!.id
+  it('a re-cleared arrival still arrives along the paint, not across the apron', () => {
+    const { sim } = ksanSim()
+    const graph = buildTaxiGraph(KSAN.surface)
+    const stand = stands.find((s) => s.ref === '41')!
+    const entryKey = graph.nearestNode(stand.entry)!
+    const from = graph.nodePoint(graph.neighbours(entryKey)[0]!)!
+    const id = sim.add({
+      id: 'arr', callsign: 'ARR', type: 'B738', wake: 'M',
+      path: [from, graph.nodePoint(entryKey)!], targetSpeed: 15,
+      intent: 'arrival', gate: '41', goalPoint: stand.stop,
+    })
     const at = () => sim.snapshot().aircraft.find((a) => a.id === id)!
-    const stand = findStand(stands, at().gate)!
 
-    for (let i = 0; i < 1200; i += 1) sim.step(0.1)
-    sim.dispatch({ type: 'pushback', aircraftId: id })
-    for (let i = 0; i < 900 && at().status === 'pushback'; i += 1) sim.step(0.1)
-    // Route it away and back, so the return leg is a full graph route ending on the stand.
     sim.dispatch({ type: 'taxiToGoal', aircraftId: id })
-    for (let i = 0; i < 4000 && !at().holdShort; i += 1) sim.step(0.1)
-    sim.dispatch({ type: 'taxiTo', aircraftId: id, dest: stand.stop, exact: true })
-
-    // However the route is rebuilt en route, the final approach to the stand is on the line.
+    for (let i = 0; i < 100; i += 1) sim.step(0.1)
+    // Re-clear it mid-taxi: the path is rebuilt underneath it, and must still end on the paint.
+    sim.dispatch({ type: 'taxiToGoal', aircraftId: id })
     for (let i = 0; i < 12000 && dist([at().x, at().y], stand.stop) > 0.004; i += 1) sim.step(0.1)
     expect(offLine([at().x, at().y], stand.lead)).toBeLessThan(0.003)
   })

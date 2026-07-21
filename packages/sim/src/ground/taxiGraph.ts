@@ -68,8 +68,10 @@ export interface TaxiGraph {
    *  inclusive of endpoints; [] if blocking severs every route. */
   routeAvoiding(fromKey: Key, toKey: Key, blocked: ReadonlySet<string>, fromHeadingDeg?: number): Point[]
   /** Shortest path from start to goal that traverses the given taxiways in order,
-   *  inclusive of endpoints; [] if no such path exists (caller may fall back to {@link route}). */
-  routeVia(fromKey: Key, toKey: Key, taxiways: readonly string[]): Point[]
+   *  inclusive of endpoints; [] if no such path exists (caller may fall back to {@link route}).
+   *  Turn-constrained exactly like {@link route}: a via-clearance cannot command a turn the
+   *  aircraft could not make. */
+  routeVia(fromKey: Key, toKey: Key, taxiways: readonly string[], fromHeadingDeg?: number): Point[]
   /** Contract pass-through vertices into geometry-preserving runs, leaving only decision
    *  nodes (junctions, endpoints, taxiway-name changes). See {@link TaxiTopology}. */
   topology(): TaxiTopology
@@ -361,15 +363,26 @@ export function buildTaxiGraph(surface: AirportSurface): TaxiGraph {
    * traversing an edge whose ref matches taxiways[k] advances k. The goal is the
    * destination node with all taxiways consumed. [] if no such path exists.
    */
-  const routeVia = (fromKey: Key, toKey: Key, taxiways: readonly string[]): Point[] => {
+  const routeVia = (
+    fromKey: Key,
+    toKey: Key,
+    taxiways: readonly string[],
+    fromHeadingDeg?: number,
+  ): Point[] => {
     if (!nodes.has(fromKey) || !nodes.has(toKey)) return []
     const seq = taxiways.filter((t) => t.length > 0)
-    if (seq.length === 0) return route(fromKey, toKey)
+    if (seq.length === 0) return dijkstra(fromKey, toKey, undefined, fromHeadingDeg)
     const K = seq.length
-    const state = (nk: Key, k: number): string => `${nk}#${k}`
-    const startState = state(fromKey, 0)
+    // Same product graph as before (node × how many of the required taxiways are consumed),
+    // but carrying the arriving node too, so the turn at each junction is knowable. Without it
+    // a "taxi via B" clearance could command a reversal that a plain taxi clearance refuses.
+    const state = (via: Key | null, at: Key, k: number): string => `${via ?? ''}>${at}#${k}`
+    const startState = state(null, fromKey, 0)
     const dist = new Map<string, number>([[startState, 0]])
     const prev = new Map<string, string>()
+    const info = new Map<string, { via: Key | null; at: Key; k: number }>([
+      [startState, { via: null, at: fromKey, k: 0 }],
+    ])
     const visited = new Set<string>()
     const frontier = new Set<string>([startState])
     let goalState: string | null = null
@@ -387,21 +400,33 @@ export function buildTaxiGraph(surface: AirportSurface): TaxiGraph {
       if (u === null) break
       frontier.delete(u)
       visited.add(u)
-      const hash = u.lastIndexOf('#')
-      const nk = u.slice(0, hash)
-      const k = Number(u.slice(hash + 1))
-      if (nk === toKey && k === K) {
+      const cur = info.get(u)
+      if (!cur) continue
+      if (cur.at === toKey && cur.k === K) {
         goalState = u
         break
       }
-      for (const e of adj.get(nk) ?? []) {
-        const nextK = k < K && e.ref === seq[k] ? k + 1 : k
-        const ns = state(e.to, nextK)
+      const here = nodes.get(cur.at)
+      if (!here) continue
+      const inbound =
+        cur.via !== null ? bearingOf(nodes.get(cur.via) as Point, here) : fromHeadingDeg
+      for (const e of adj.get(cur.at) ?? []) {
+        if (e.to === cur.via) continue
+        const next = nodes.get(e.to)
+        if (!next) continue
+        let turn = 0
+        if (inbound !== undefined) {
+          turn = deviation(inbound, bearingOf(here, next))
+          if (turn > MAX_TURN_DEG) continue
+        }
+        const nextK = cur.k < K && e.ref === seq[cur.k] ? cur.k + 1 : cur.k
+        const ns = state(cur.at, e.to, nextK)
         if (visited.has(ns)) continue
-        const nd = ud + e.w
+        const nd = ud + e.w + (turn / 180) * TURN_COST_NM
         if (nd < (dist.get(ns) ?? Infinity)) {
           dist.set(ns, nd)
           prev.set(ns, u)
+          info.set(ns, { via: cur.at, at: e.to, k: nextK })
           frontier.add(ns)
         }
       }
@@ -411,13 +436,17 @@ export function buildTaxiGraph(surface: AirportSurface): TaxiGraph {
     const out: Point[] = []
     let cur: string | undefined = goalState
     while (cur) {
-      const p = nodes.get(cur.slice(0, cur.lastIndexOf('#')))
-      if (p) out.push(p)
+      const st = info.get(cur)
+      if (st) {
+        const p = nodes.get(st.at)
+        if (p) out.push(p)
+      }
       if (cur === startState) break
       cur = prev.get(cur)
     }
     return out.reverse()
   }
+
 
   return {
     get size() {

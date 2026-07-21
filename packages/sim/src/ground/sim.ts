@@ -1174,6 +1174,8 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     ac.dwell = -1
     ac.giveWayTo = null // a fresh clearance supersedes any give-way hold
     ac.pushingBack = false // …and aborts an in-progress pushback,
+    ac.pushFacing = null // …including the direction it was being swung toward,
+    ac.pushFacingLabel = null
     ac.lineUpWait = false // …a line-up on the runway,
     ac.departing = false // …and a takeoff roll — a taxi clearance means it's taxiing now.
     ac.rollWhenLinedUp = false // …including one that hadn't started yet.
@@ -1378,8 +1380,9 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     const startKey = startNodeFor(ac)
     const goalKey = goalNodeFor(dest, [ac.x, ac.y])
     if (!startKey || !goalKey) return false
-    const via = graph.routeVia(startKey, goalKey, taxiways)
-    const route = via.length > 0 ? via : graph.route(startKey, goalKey)
+    const head = committedHeading(ac)
+    const via = graph.routeVia(startKey, goalKey, taxiways, head)
+    const route = via.length > 0 ? via : graph.route(startKey, goalKey, head)
     if (route.length === 0) return false
     clearDiversion(ac)
     applyRoute(ac, route, dest, appendExact)
@@ -1446,7 +1449,14 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
   function committedHeading(ac: Internal): number | undefined {
     if (ac.pushingBack || ac.departing || ac.airborne) return undefined
     if (ac.facingCommitted !== null) return ac.facingCommitted
-    return ac.groundspeed > 1 ? ac.heading : undefined
+    // Standing on a stand, or freshly placed, with no route of its own: nothing binds it yet —
+    // it gets pushed or towed onto the taxiway facing wherever it needs to.
+    if (ac.groundspeed <= 1 && ac.path.length < 2) return undefined
+    // Anything else on the surface is committed to the way it is pointing, *including while
+    // stopped*. Deriving this from live groundspeed instead meant a hold — the ordinary way a
+    // taxi clearance gets revisited, whether from the controller, a give-way or a reservation —
+    // silently released the aircraft to turn round on the spot.
+    return ac.heading
   }
 
   /**
@@ -1462,11 +1472,15 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     if (!graph) return null
     const head = committedHeading(ac)
     if (head === undefined) return graph.nearestNode([ac.x, ac.y])
-    const ahead = graph.nearestNodeWhere([ac.x, ac.y], (n) => {
+    // No fallback to the plain nearest node: that node can be *behind* the aircraft, and the
+    // join leg from its position onto the graph is drawn as a raw straight line with no turn
+    // accounting — so falling back would reverse the aircraft onto the graph and reopen the
+    // very defect this closes, at the seam between off-graph position and on-graph route.
+    // Nothing ahead means no route, which the caller reports as a refusal.
+    return graph.nearestNodeWhere([ac.x, ac.y], (n) => {
       const to = normalizeDeg(bearing(ac.x, ac.y, n[0], n[1]))
       return Math.abs((((to - head + 540) % 360) - 180)) <= MAX_TURN_DEG
     })
-    return ahead ?? graph.nearestNode([ac.x, ac.y])
   }
 
   /** The named taxiways an aircraft's current route follows, in order. */
