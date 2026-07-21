@@ -2,6 +2,7 @@ import { useRef, useSyncExternalStore } from 'react'
 import type { ControllerPosition, GroundIntent, GroundStatus, Point } from '@anotheratc/sim'
 import type { GroundController, RouteDraft, StripItem } from './controller'
 import { StripCommandMenu } from './StripCommandMenu'
+import { CommsLog } from './CommsLog'
 
 /** Takeoff-queue sequence numbers: rank the departures awaiting takeoff (Tower-owned, holding
  *  short or lined up) in fleet order, so each strip can show its place in line. Deterministic. */
@@ -229,6 +230,12 @@ export function StripBay({ controller }: { controller: GroundController }) {
           )
         })}
       </div>
+      <CommsLog
+        comms={snap.comms}
+        position={position}
+        selectedId={snap.selectedId}
+        onSelect={(id) => controller.select(id)}
+      />
     </aside>
   )
 }

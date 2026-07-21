@@ -358,10 +358,14 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
   // and never when it is refused (a refused clearance was never transmitted).
   const comms: Transmission[] = []
   let commsSeq = 0
+  /** Handed out by `snapshot()`. Rebuilt only when something is said, so the per-frame
+   *  snapshot doesn't copy the whole transcript for a log that usually hasn't changed. */
+  let commsView: readonly Transmission[] = []
   function transmit(from: TransmissionFrom, position: ControllerPosition, ac: Internal, text: string): void {
     commsSeq += 1
     comms.push({ seq: commsSeq, time, from, position, aircraftId: ac.id, callsign: ac.callsign, text })
     if (comms.length > COMMS_LOG_LIMIT) comms.splice(0, comms.length - COMMS_LOG_LIMIT)
+    commsView = [...comms]
   }
 
   /** Runway designator as spoken: no leading zero ("09" → "9"). */
@@ -1623,7 +1627,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         time,
         departed,
         arrived,
-        comms: [...comms],
+        comms: commsView,
         aircraft: fleet.map((ac) => ({
           id: ac.id,
           callsign: ac.callsign,

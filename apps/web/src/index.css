@@ -652,6 +652,102 @@ body {
   color: #3f6f5c;
 }
 
+/* ─── Communications log ───────────────────────────────────────────────────
+   A radio transcript, not a debug console: the controller's instruction reads bright and
+   flush, the pilot's read-back sits indented and dimmer underneath it, so a correct exchange
+   is one visual unit and an odd one breaks the rhythm. */
+
+.comms {
+  flex: none;
+  height: 34%;
+  min-height: 96px;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid #12202c;
+  background: #050a10;
+}
+
+.comms-title {
+  margin: 0;
+  padding: 7px 10px 5px;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  color: #33513f;
+}
+
+.comms-list {
+  flex: 1;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0 4px 8px;
+  list-style: none;
+  scroll-behavior: smooth;
+}
+
+.comms-empty {
+  padding: 4px 8px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: #2b4436;
+}
+
+.comms-entry {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  padding: 2px 6px;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.45;
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background 120ms;
+}
+
+.comms-entry:hover {
+  background: #0c1722;
+}
+
+.comms-entry:focus-visible {
+  outline: 2px solid #2f6df6;
+  outline-offset: -2px;
+}
+
+.comms-entry-selected {
+  background: #0d1c26;
+}
+
+.comms-time {
+  flex: none;
+  color: #2b4436;
+  font-variant-numeric: tabular-nums;
+}
+
+.comms-text {
+  min-width: 0;
+}
+
+.comms-controller .comms-text {
+  color: #aee8c9;
+}
+
+/* The read-back: same exchange, one step quieter and stepped in under the instruction. */
+.comms-pilot .comms-entry {
+  padding-left: 22px;
+}
+
+.comms-pilot .comms-time {
+  display: none;
+}
+
+.comms-pilot .comms-text {
+  color: #5d8a9c;
+}
+
 /* ─── Narrow screens (phones): stack scope over a shorter strip drawer ──── */
 
 @media (max-width: 720px) {
@@ -668,6 +764,11 @@ body {
     flex: none;
     border-left: none;
     border-top: 1px solid #12202c;
+  }
+  /* On a phone the drawer is already short; the transcript takes a smaller share of it. */
+  .comms {
+    height: 30%;
+    min-height: 64px;
   }
   .hud-title {
     font-size: 13px;

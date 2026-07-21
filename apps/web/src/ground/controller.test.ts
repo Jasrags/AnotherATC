@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { createGroundController } from './controller'
 import type { Airport, AirportSurface } from '@anotheratc/sim'
+import { visibleComms } from './CommsLog'
 
 describe('ground controller bridge', () => {
   it('seeds an initial snapshot with the game aircraft and no selection or draft', () => {
@@ -296,5 +297,53 @@ describe('the controller runs whatever airport it is given', () => {
   it('derives that field runway intersections, not another one', () => {
     const c = createGroundController({ airport: KTW2 })
     expect(c.holdShortSpots().map((s) => s.label)).toEqual(['RWY @ A1', 'RWY @ A2'])
+  })
+})
+
+describe('communications log through the bridge', () => {
+  it('publishes the transcript and wakes subscribers when something is said', () => {
+    const c = createGroundController()
+    expect(c.getSnapshot().comms).toHaveLength(0)
+
+    let renders = 0
+    const unsubscribe = c.subscribe(() => {
+      renders += 1
+    })
+    c.dispatch({ type: 'clearance', aircraftId: 'init0' })
+
+    const comms = c.getSnapshot().comms
+    expect(comms).toHaveLength(2)
+    expect(comms[0]!.from).toBe('controller')
+    expect(comms[1]!.from).toBe('pilot')
+    expect(renders).toBeGreaterThan(0)
+
+    // A refused command changes nothing — no line, and nothing to re-render for.
+    const before = renders
+    c.dispatch({ type: 'clearedForTakeoff', aircraftId: 'init0' })
+    expect(c.getSnapshot().comms).toHaveLength(2)
+    expect(renders).toBe(before)
+    unsubscribe()
+  })
+
+  it('the transcript follows the aircraft onto the tower frequency', () => {
+    const c = createGroundController()
+    const id = 'init0'
+    c.dispatch({ type: 'clearance', aircraftId: id })
+    for (let i = 0; i < 1200; i += 1) c.sim.step(0.1) // ground servicing
+    c.dispatch({ type: 'pushback', aircraftId: id })
+    for (let i = 0; i < 600; i += 1) c.sim.step(0.1)
+    c.dispatch({ type: 'taxiToGoal', aircraftId: id })
+    const at = () => c.sim.snapshot().aircraft.find((a) => a.id === id)!
+    for (let i = 0; i < 20000 && !at().holdShort; i += 1) c.sim.step(0.1)
+    expect(at().holdShort).toBe(true)
+    c.dispatch({ type: 'contactTower', aircraftId: id })
+    c.publish()
+
+    const comms = c.getSnapshot().comms
+    expect(comms.filter((t) => t.position === 'ground').length).toBeGreaterThan(4)
+    // Everything after the handoff is Tower's conversation.
+    expect(comms.at(-1)!.position).toBe('tower')
+    expect(visibleComms(comms, 'tower').every((t) => t.position === 'tower')).toBe(true)
+    expect(visibleComms(comms, 'ground').some((t) => t.text.includes('contact tower'))).toBe(true)
   })
 })

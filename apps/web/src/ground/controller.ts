@@ -21,6 +21,7 @@ import type {
   RunwayExit,
   ServiceProgress,
   TaxiTopology,
+  Transmission,
   WakeCategory,
 } from '@anotheratc/sim'
 
@@ -116,6 +117,8 @@ export interface StripSnapshot {
   position: ControllerPosition
   /** The route being built for the selected aircraft, if route mode is active. */
   draft: RouteDraft | null
+  /** The radio transcript, oldest first. Straight from the sim — the UI never writes it. */
+  comms: readonly Transmission[]
 }
 
 /**
@@ -271,6 +274,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
     position: 'ground',
     draft: null,
     activeRunway: game.runway.ident,
+    comms: [],
   }
   let sig = ''
 
@@ -282,7 +286,9 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
   }
 
   const publish = (): void => {
-    const acs = sim.snapshot().aircraft
+    const simSnap = sim.snapshot()
+    const acs = simSnap.aircraft
+    const comms = simSnap.comms
     const vias = new Map(acs.map((a) => [a.id, sim.taxiwaysOf(a.id)]))
     // Only a Tower arrival can be assigned a turnoff, so don't query the rest of the fleet.
     const exitOpts = new Map(
@@ -290,7 +296,8 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
         .filter((a) => a.intent === 'arrival' && a.controlledBy === 'tower')
         .map((a) => [a.id, sim.exitOptions(a.id)] as const),
     )
-    let nextSig = `${position}|${selected ?? '-'}|${sim.runway()?.ident ?? '-'}`
+    // The transcript only ever appends, so its last sequence number is a complete change key.
+    let nextSig = `${position}|${selected ?? '-'}|${sim.runway()?.ident ?? '-'}|${comms.at(-1)?.seq ?? 0}`
     nextSig += draft ? `~${draft.id}:${draft.via.join('.')}` : ''
     // Range-to-threshold is continuous, so it enters the signature at display precision
     // (0.1 nm ≈ one re-render every ~2.5 s on final) rather than every frame.
@@ -303,6 +310,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
       position,
       activeRunway: sim.runway()?.ident ?? game.runway.ident,
       draft: draft ? { id: draft.id, via: [...draft.via] } : null,
+      comms,
       aircraft: acs.map((a) => ({
         id: a.id,
         callsign: a.callsign,
