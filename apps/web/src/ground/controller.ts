@@ -185,8 +185,14 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
     destinations.find((d) => d.id === 'rwy27') ?? destinations.find((d) => d.kind === 'runway')
   // Dev mode starts empty: no seeded aircraft, no auto-spawner, no servicing gate.
   const sim = dev
-    ? createGroundSim([], { graph, guard })
-    : createGroundSim(game.inits, { graph, guard, spawn: game.spawn, servicing: game.servicing })
+    ? createGroundSim([], { graph, guard, runway: game.runway })
+    : createGroundSim(game.inits, {
+        graph,
+        guard,
+        spawn: game.spawn,
+        servicing: game.servicing,
+        runway: game.runway,
+      })
 
   let selected: string | null = null
   let position: ControllerPosition = 'ground'

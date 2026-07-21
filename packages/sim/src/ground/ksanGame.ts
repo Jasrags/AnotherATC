@@ -3,6 +3,7 @@ import { createRng, type Rng } from '../random'
 import type { Point } from '../world/types'
 import type { AircraftInit, GateSlot, ServicingConfig, SpawnConfig } from './sim'
 import type { NamedDestination, WakeCategory } from './types'
+import { finalFix, type ActiveRunway } from './runway'
 
 /** Pre-push ground services, run in parallel (game seconds). Fueling is the long pole, so it
  *  sets when pushback unlocks; the shorter services finish earlier. Tuned for surface pacing. */
@@ -49,55 +50,85 @@ function gates(): GateSlot[] {
   return slots
 }
 
-/** The runway's two threshold points (min-x = RWY 9 / west, max-x = RWY 27 / east). */
-function runwayEnds(): { west: Point; east: Point } {
-  let west: Point | null = null
-  let east: Point | null = null
-  for (const f of KSAN_SURFACE.features) {
-    if (f.kind !== 'runway') continue
-    for (const p of f.points) {
-      if (!p) continue
-      if (!west || p[0] < west[0]) west = p
-      if (!east || p[0] > east[0]) east = p
-    }
-  }
-  return { west: west ?? [0, 0], east: east ?? [0, 0] }
-}
-
 /** Length (nm) of the straight-in final arrivals are established on. */
 const FINAL_NM = 4
 
 /**
- * The KSAN ground game: a few aircraft to start, plus a spawn config that feeds
- * departures (at gates, heading to RWY 27) and arrivals (off RWY 9, heading to a
- * gate). Deterministic for a given seed.
+ * Runway 09/27, from the FAA survey rather than from the pavement polyline — see
+ * docs/SAN/runway-9-27.md. Both ends are displaced, and 27's displacement is 1,810 ft, so the
+ * landing threshold is nowhere near the end of the runway.
+ *
+ * Local nm from the airport reference point (x = east, y = north).
  */
-export function buildKsanGroundGame(seed = 1): {
+const RWY = {
+  westEnd: [-0.7397, 0.2113] as Point, // physical pavement end, RWY 09 departure start
+  eastEnd: [0.7434, -0.2159] as Point, // physical pavement end, RWY 27 departure start
+  thr09: [-0.5819, 0.1659] as Point, // RWY 09 landing threshold — displaced 1,000 ft
+  thr27: [0.4578, -0.1336] as Point, // RWY 27 landing threshold — displaced 1,810 ft
+}
+
+/**
+ * The two runway configurations. KSAN is single-runway, so exactly one is active and **both
+ * arrivals and departures use it** — you cannot land one way and depart the other.
+ *
+ * 27 is the normal configuration (the sea breeze is westerly); 09 is used mainly for early
+ * morning departures. Glide path angles and pattern directions are the published ones.
+ */
+export const KSAN_RUNWAYS: Record<'09' | '27', ActiveRunway> = {
+  '27': {
+    ident: '27',
+    threshold: RWY.thr27,
+    departureStart: RWY.eastEnd,
+    farEnd: RWY.westEnd,
+    toraFt: 9401, // the whole runway, including the pavement before the displaced threshold
+    ldaFt: 7591,
+    glidePathDeg: 3.5, // steep — LOC only, no ILS to 27
+    pattern: 'right', // noise abatement: right turn out over the bay
+  },
+  '09': {
+    ident: '09',
+    threshold: RWY.thr09,
+    departureStart: RWY.westEnd,
+    farEnd: RWY.eastEnd,
+    // 09 declares less than the pavement offers in both cases — 1,121 ft at the east end is
+    // not available in this direction, so LDA is 1,100 ft short of threshold→pavement end.
+    toraFt: 8280,
+    ldaFt: 7280,
+    glidePathDeg: 3.3,
+    pattern: 'left',
+  },
+}
+
+/**
+ * The KSAN ground game: a few aircraft to start, plus a spawn config that feeds departures
+ * (from gates to the active runway) and arrivals (established on the final for that same
+ * runway). Deterministic for a given seed.
+ */
+export function buildKsanGroundGame(
+  seed = 1,
+  config: '09' | '27' = '27',
+): {
   inits: AircraftInit[]
   spawn: SpawnConfig
   destinations: NamedDestination[]
   servicing: ServicingConfig
+  runway: ActiveRunway
 } {
   const slots = gates()
-  const { west, east } = runwayEnds()
-  const departureTarget = east // RWY 27 threshold
-  // Arrivals land on RWY 9 (west threshold), so the final lies west of the field along the
-  // runway centerline extended: the west threshold pushed FINAL_NM further away from the east.
-  const runLen = Math.hypot(west[0] - east[0], west[1] - east[1]) || 1
-  const finalFix: Point = [
-    west[0] + ((west[0] - east[0]) / runLen) * FINAL_NM,
-    west[1] + ((west[1] - east[1]) / runLen) * FINAL_NM,
-  ]
+  const runway = KSAN_RUNWAYS[config]
+  // Departures roll from the pavement end behind the threshold — the displaced portion is
+  // theirs to use, it is only landings that may not touch down on it.
+  const departureTarget = runway.departureStart
 
   const destinations: NamedDestination[] = [
-    { id: 'rwy27', label: 'RWY 27', kind: 'runway', point: east },
-    { id: 'rwy09', label: 'RWY 9', kind: 'runway', point: west },
+    { id: 'rwy27', label: 'RWY 27', kind: 'runway', point: KSAN_RUNWAYS['27'].departureStart },
+    { id: 'rwy09', label: 'RWY 9', kind: 'runway', point: KSAN_RUNWAYS['09'].departureStart },
   ]
 
   const spawn: SpawnConfig = {
     gates: slots,
     departureTarget,
-    approach: { fix: finalFix, threshold: west },
+    approach: { fix: finalFix(runway, FINAL_NM), threshold: runway.threshold },
     intervalSec: 22,
     maxAircraft: 12,
     seed,
@@ -123,5 +154,5 @@ export function buildKsanGroundGame(seed = 1): {
     })
   })
 
-  return { inits, spawn, destinations, servicing: SERVICING }
+  return { inits, spawn, destinations, servicing: SERVICING, runway }
 }

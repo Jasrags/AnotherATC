@@ -13,6 +13,7 @@ import type {
 import { edgeKey, type TaxiGraph } from './taxiGraph'
 import { wakeSeparationSec, WAKE_TIME_SCALE } from './wake'
 import { onRunway, splitRouteAtRunway, type RunwayGuard } from './runwayGuard'
+import { glideAltitudeFt, type ActiveRunway } from './runway'
 import {
   brakeRateFor,
   buildRunwayExits,
@@ -88,6 +89,10 @@ export interface GroundSimOptions {
   guard?: RunwayGuard
   spawn?: SpawnConfig
   servicing?: ServicingConfig
+  /** The runway direction in use. Supplies the real landing threshold (which is *not* the end
+   *  of the pavement where the threshold is displaced) and the far end a takeoff rolls toward,
+   *  instead of guessing both from the polyline endpoints. */
+  runway?: ActiveRunway
 }
 
 const TAXI_ACCEL = 4
@@ -107,8 +112,8 @@ const TAKEOFF_SPEED_KT = 140
 const ROTATE_KT = 120
 
 // ─── Final approach & landing (Tower) ────────────────────────────────────────
-/** Height (ft) at the final fix. With FINAL_NM below this is a ~3° geometric descent. */
-const FINAL_ALT_FT = 1250
+/** Glide path (deg) assumed when no runway configuration supplies a real one. */
+const DEFAULT_GLIDE_DEG = 3
 /** Approach speed (kt) flown down the final, and the speed at touchdown. Exported so a
  *  hand-authored arrival (a scenario, or the dev sandbox) flies the same profile as a
  *  spawned one — it is a parameter, not a rule the caller could get subtly wrong. */
@@ -252,6 +257,8 @@ interface Internal
   threshold: Point | null
   /** Length (nm) of the full final, used to derive the descent profile. */
   finalLenNm: number
+  /** Height (ft) at the final fix, from the runway's published glide path. */
+  finalAltFt: number
   /** Seconds until the next Tower→Ground exit-routing attempt (see {@link EXIT_RETRY_SEC}). */
   exitRetrySec: number
   /** The turnoff this arrival is planning for / rolling out to, or null when none applies. */
@@ -288,7 +295,7 @@ interface Internal
  * in place each tick; {@link GroundSim.snapshot} hands out fresh immutable objects.
  */
 export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimOptions = {}): GroundSim {
-  const { graph, guard, spawn, servicing } = opts
+  const { graph, guard, spawn, servicing, runway } = opts
   let time = 0
   let departed = 0
   let arrived = 0
@@ -325,6 +332,10 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     const next = path[1]
     const heading = init.heading ?? (next ? bearing(start[0], start[1], next[0], next[1]) : 0)
     const threshold = airborne ? (path[path.length - 1] ?? null) : null
+    const finalLenNm = threshold ? pathLength(path) : 0
+    // The descent is the runway's *published* glide path, not one hard-coded angle: KSAN is
+    // 3.3° to 09 and a notably steep 3.5° to 27 (docs/SAN/runway-9-27.md).
+    const finalAltFt = glideAltitudeFt(runway?.glidePathDeg ?? DEFAULT_GLIDE_DEG, finalLenNm)
     return {
       id: init.id,
       callsign: init.callsign,
@@ -333,7 +344,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       x: start[0],
       y: start[1],
       heading: normalizeDeg(heading),
-      altitude: airborne ? FINAL_ALT_FT : 0,
+      altitude: airborne ? finalAltFt : 0,
       groundspeed: airborne ? init.targetSpeed : 0,
       holding: !airborne && path.length < 2,
       holdShort: !airborne && path.length < 2 && held !== null,
@@ -358,7 +369,8 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       clearedToLand: false,
       rollingOut: false,
       threshold,
-      finalLenNm: threshold ? pathLength(path) : 0,
+      finalLenNm,
+      finalAltFt,
       exitRetrySec: 0,
       exit: null,
       assignedExitRef: null,
@@ -397,6 +409,9 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     return a && b ? [a, b] : []
   })()
   const farRunwayEnd = (from: Point): Point | null => {
+    // With a configuration there is one answer: everyone is using the same direction, so the
+    // far end is the same for a takeoff roll and for a landing rollout.
+    if (runway) return runway.farEnd
     if (runwayEnds.length < 2) return null
     return dist(from, runwayEnds[0]!) >= dist(from, runwayEnds[1]!) ? runwayEnds[0]! : runwayEnds[1]!
   }
@@ -1211,7 +1226,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     ac.x = fix[0]
     ac.y = fix[1]
     ac.leg = 0
-    ac.altitude = FINAL_ALT_FT
+    ac.altitude = ac.finalAltFt
     ac.groundspeed = ac.targetSpeed
     ac.clearedToLand = false
     ac.exit = null
@@ -1261,7 +1276,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         else goAround(ac)
         return
       }
-      ac.altitude = FINAL_ALT_FT * Math.min(1, remaining / (ac.finalLenNm || remaining))
+      ac.altitude = ac.finalAltFt * Math.min(1, remaining / (ac.finalLenNm || remaining))
       return
     }
     if (!ac.rollingOut) return

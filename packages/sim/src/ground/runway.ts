@@ -1,0 +1,81 @@
+import type { Point } from '../world/types'
+
+/** Feet in a nautical mile. */
+export const FT_PER_NM = 6076.12
+
+/**
+ * The runway direction currently in use — the airport's *configuration*.
+ *
+ * A single-runway field has one of these active at a time and **both arrivals and departures use
+ * it**. Landing one way while departing the other is not a thing you can do; it was possible in
+ * this sim for a while and it was simply a bug.
+ *
+ * The three points are deliberately distinct, because a displaced threshold makes them so:
+ *
+ * ```
+ *  departureStart                 threshold                                    farEnd
+ *   |                                |                                            |
+ *   ├────── displaced (unusable ─────┤                                            │
+ *   │        for landing)            │                                            │
+ *   ├───────────────────── TORA: takeoff run available ──────────────────────────►│
+ *                                    ├──────── LDA: landing distance ────────────►│
+ * ```
+ *
+ * A departure may use the pavement before the threshold for its takeoff run; an arrival may use
+ * it for rollout, but may not touch down on it. See docs/SAN/runway-9-27.md — at KSAN the
+ * displacement is 1,000 ft on 09 and 1,810 ft on 27, which is not a rounding error.
+ */
+export interface ActiveRunway {
+  /** Designator in use, e.g. "27". */
+  ident: string
+  /** Landing threshold. Arrivals touch down here, and exit distances are measured from it. */
+  threshold: Point
+  /** Physical end of pavement behind the threshold — where a takeoff roll may begin. */
+  departureStart: Point
+  /** The opposite end of the pavement: where a takeoff lifts off and a landing rolls toward. */
+  farEnd: Point
+  /** Takeoff run available (ft), as *declared* — not as measured between the points above.
+   *  The two do not always agree: KSAN's RWY 09 declares 8,280 ft against 9,401 ft of pavement,
+   *  so over a thousand feet at the far end is not usable in that direction even though it is
+   *  physically there. Geometry drives motion; declared distances drive the rules. */
+  toraFt: number
+  /** Landing distance available (ft), declared. Likewise not simply threshold→farEnd: on 09 the
+   *  LDA ends ~1,100 ft before the pavement does. */
+  ldaFt: number
+  /** Glide path angle (deg) for the approach to this end — 3.3° to KSAN 09, 3.5° to 27. */
+  glidePathDeg: number
+  /** Traffic pattern side, for departures turning out. */
+  pattern: 'left' | 'right'
+}
+
+/** Landing distance available (nm), from the declared figure. */
+export function landingDistanceNm(r: ActiveRunway): number {
+  return r.ldaFt / FT_PER_NM
+}
+
+/** Takeoff run available (nm), from the declared figure. */
+export function takeoffRunNm(r: ActiveRunway): number {
+  return r.toraFt / FT_PER_NM
+}
+
+/** Distance (nm) of pavement actually between the threshold and the far end. Exceeds the LDA
+ *  where the declared distance stops short of the physical end. */
+export function pavementAfterThresholdNm(r: ActiveRunway): number {
+  return Math.hypot(r.farEnd[0] - r.threshold[0], r.farEnd[1] - r.threshold[1])
+}
+
+/**
+ * The final approach fix: `distanceNm` out from the threshold on the runway centerline extended,
+ * on the approach side. Straight-in only — TRACON owns anything more interesting.
+ */
+export function finalFix(r: ActiveRunway, distanceNm: number): Point {
+  const dx = r.threshold[0] - r.farEnd[0]
+  const dy = r.threshold[1] - r.farEnd[1]
+  const len = Math.hypot(dx, dy) || 1
+  return [r.threshold[0] + (dx / len) * distanceNm, r.threshold[1] + (dy / len) * distanceNm]
+}
+
+/** Height (ft) on the glide path `distanceNm` from the threshold. */
+export function glideAltitudeFt(glidePathDeg: number, distanceNm: number): number {
+  return distanceNm * FT_PER_NM * Math.tan((glidePathDeg * Math.PI) / 180)
+}

@@ -49,9 +49,15 @@ This is the headline: **RWY 09 and RWY 27 both have displaced thresholds**, and 
 | **LDA (landing distance available)** | **7,280** | **7,591** |
 
 Note RWY 09's TORA is 1,121 ft short of the physical length — a departure on 09 does *not* get
-the whole runway, while a departure on 27 does. LDA is ~1.8–2.1 kft less than TORA on both ends,
+the whole runway, while a departure on 27 does. LDA is ~1.0–1.8 kft less than TORA on both ends,
 which is exactly the pre-threshold pavement: usable for the takeoff run and for landing rollout,
 never for touchdown.
+
+**Declared distances do not reduce to two points.** On 27 the LDA (7,591 ft) does match the
+pavement between the threshold and the far end. On 09 it does not: threshold→far end is ~8,380 ft
+of pavement but only 7,280 ft is declared, so the last ~1,100 ft at the east end is not available
+for landing in that direction even though it is physically there. Geometry drives motion; the
+declared numbers drive the rules, and the model carries both.
 
 ## 4. EMAS
 
