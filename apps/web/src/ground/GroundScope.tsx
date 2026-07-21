@@ -501,11 +501,12 @@ export function GroundScope({ controller }: { controller: GroundController }) {
             </button>
           </>
         )}
+        {/* Shares the control bar's row so the two can't collide as the bar grows. */}
+        <div ref={hintRef} className="hud-hint mono" aria-live="polite" />
       </div>
       {controller.dev && <div ref={devRef} className="hud hud-dev mono" aria-live="polite" />}
       <div ref={statusRef} className="hud hud-tr mono" />
       <div ref={alertRef} className="hud hud-alert mono" role="alert" />
-      <div ref={hintRef} className="hud hud-bc mono" aria-live="polite" />
     </div>
   )
 }

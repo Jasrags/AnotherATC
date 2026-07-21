@@ -69,14 +69,16 @@ body {
   color: #4f7d6c;
 }
 
-.hud-bc {
-  bottom: 16px;
-  left: 50%;
-  transform: translateX(-50%);
-  text-align: center;
+/* Hint text shares the control bar's row (see .hud-controls) rather than being independently
+   centred at the same height, where it collided with the bar once that grew past a few buttons.
+   Right-aligned in whatever width the buttons leave, and free to wrap on a narrow scope. */
+.hud-hint {
+  flex: 1;
+  min-width: 0;
+  text-align: right;
   font-size: 12px;
+  line-height: 1.5;
   color: #7fbfa4;
-  white-space: nowrap;
 }
 
 .mono {
@@ -117,8 +119,10 @@ body {
 .hud-controls {
   bottom: 14px;
   left: 18px;
+  right: 18px; /* spans the scope so the hint has room beside the buttons */
   display: flex;
-  align-items: center;
+  flex-wrap: wrap;
+  align-items: flex-end;
   gap: 6px;
 }
 
@@ -143,7 +147,9 @@ body {
   border: 1px solid #2a2350;
   background: rgba(12, 10, 26, 0.72);
   color: #b9a3ff;
-  transition: color var(--duration-fast, 150ms) ease, border-color var(--duration-fast, 150ms) ease;
+  transition:
+    color var(--duration-fast, 150ms) ease,
+    border-color var(--duration-fast, 150ms) ease;
 }
 
 .ctl-btn:hover {
@@ -156,14 +162,14 @@ body {
   outline-offset: 2px;
 }
 
-.ctl-btn[aria-pressed='true'] {
+.ctl-btn[aria-pressed="true"] {
   border-color: #7c5cff;
   color: #efe8ff;
 }
 
 /* Dev readout (probe length / tool hint), just above the control bar. */
 .hud-dev {
-  bottom: 46px;
+  bottom: 48px;
   left: 18px;
   font-size: 11px;
   letter-spacing: 0.06em;
@@ -204,7 +210,10 @@ body {
   border: none;
   border-bottom: 2px solid transparent;
   cursor: pointer;
-  transition: color 120ms, background 120ms, border-color 120ms;
+  transition:
+    color 120ms,
+    background 120ms,
+    border-color 120ms;
 }
 
 .strip-tab:hover {
