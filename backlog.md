@@ -71,14 +71,14 @@ The core ground-control loop. Ordered roughly by priority.
   hand-digitise T1's lead-ins from the airport diagram (see `docs/airport-data-pipeline.md`)._
 - ✅ **Flight strip bay (ground)** — status-driven strips beside the scope, phase-gated actions, selection synced with the scope. _Next: squawk/route fields, drag-reorder/sequence._
 - ✅ **Routing-graph contraction + admin overlay** — the OSM surface gave the router ~1157 vertices when the network has only ~159 real decision points (junctions, endpoints, name changes). `graph.topology()` contracts pass-through vertices into geometry-preserving edges (edges keep the full polyline + true length, so driving still follows the curve) and flags long dead-straight runs for chart review. Admin overlay (GRAPH button / `g` key) draws the graph over the surface — junctions emphasized, flagged straight edges in pink — to spot geometry issues fast. _Next (**#2**): eyeball the ~4 flagged 2-point chords (taxiway C 936ft past the North Ramp is the "drove through the terminal" one) against the airport diagram and patch missing centerline vertices in `tools/ingest`. Later: optionally migrate routing itself onto the contracted graph (needs edge-snapping so gate stubs don't regress)._
-- ⬜ **Make the non-terminal stands usable** — KSAN's surface carries 72 `parking_position` lines
-  but only 32 become stands, because `buildStands` builds one per *gate node* and the rest have no
-  node to pair with: **W2–W4** (West/Island ramp), **N1–N10** (North Ramp), **1–5** (east side) and
-  **11–14** (commuter). That is ~22 real parking spots the field cannot use — cargo, GA and
-  commuter traffic have nowhere to go, and the terminal gates carry all the load. Needs a stand
-  built from a parking line alone, which means resolving orientation *without* a gate node to
-  measure against (the taxi-network end is the entry; see the pipeline doc), plus deciding which
-  of them the spawner may use and for what kind of traffic.
+- ✅ **The non-terminal stands are usable** — 23 painted lines with no gate node (**N1–N10** North
+  Ramp, **W2–W4** West/Island, **11–14** commuter, **1–5** east side, 50A) are now stands built
+  from the line alone, oriented on the taxi network instead of a gate node: the end nearer the
+  pavement is the entry. `Stand.kind` separates `terminal` from `remote`; the spawner stays on
+  terminal gates (what belongs on a freight apron is a scenario question), but everything else
+  treats them the same — drawn, occupied, holding arrivals off, and offered by gate reassignment.
+  Refs are case-normalised (OSM had a lone lowercase `n6`). _Next: traffic that actually belongs
+  there — cargo/GA types with their own spawn rules — and the 17 untagged parking lines._
 - ⬜ **HS1 hotspot** — render the KSAN hot spot; incursion-risk awareness
 - ⬜ **Ground conflict / incursion alerts** — two aircraft converging, or one entering an occupied runway
 - 🚧 **Handoff to/from Tower** — **Contact tower** now performs a real Ground→Tower control transfer (`controlledBy` flips; the strip moves to the TWR bay). Tower then issues **line up and wait** and an explicit **cleared for takeoff** (full-power accel to 140 kt, exempt from taxi caps/conflict; lifts off the far end, counted `departed`). Runway single-occupancy + wake separation gate the takeoff clearance. Cross runway is only for transiting traffic. **Tower→Ground on arrival** also works now: a landed aircraft flips back to Ground once it has rolled out to taxi speed and can leave the runway (Slice 2). See **Tower (Local Control)** epic + `docs/atc-tower.md`. _Next: refuse a handoff when Tower is overloaded._
