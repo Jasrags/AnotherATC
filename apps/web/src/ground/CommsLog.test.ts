@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Transmission } from '@anotheratc/sim'
-import { clock, visibleComms } from './CommsLog'
+import { CHANNEL_LABEL, clock, visibleComms } from './CommsLog'
 
 const t = (over: Partial<Transmission> & { seq: number }): Transmission => ({
   time: 0,
@@ -44,5 +44,20 @@ describe('visibleComms', () => {
   it('returns oldest-first so the newest call is at the bottom', () => {
     const shown = visibleComms(log, 'ground', 20)
     expect(shown[0]!.seq).toBeLessThan(shown[shown.length - 1]!.seq)
+  })
+
+  it('shows every frequency under "all", interleaved in the order they were said', () => {
+    // The default: running combined positions, the point of the transcript is hearing both.
+    expect(visibleComms(log, 'all', 20).map((x) => x.seq)).toEqual([1, 2, 3, 4])
+  })
+
+  it('caps "all" by the most recent calls, across both frequencies', () => {
+    expect(visibleComms(log, 'all', 2).map((x) => x.seq)).toEqual([3, 4])
+  })
+
+  it('labels each frequency distinctly, so a mixed transcript reads unambiguously', () => {
+    expect(CHANNEL_LABEL.ground).toBe('GND')
+    expect(CHANNEL_LABEL.tower).toBe('TWR')
+    expect(CHANNEL_LABEL.ground).not.toBe(CHANNEL_LABEL.tower)
   })
 })

@@ -241,12 +241,9 @@ export function StripBay({ controller }: { controller: GroundController }) {
           )
         })}
       </div>
-      <CommsLog
-        comms={snap.comms}
-        position={position}
-        selectedId={snap.selectedId}
-        onSelect={controller.select}
-      />
+      {/* Deliberately not tied to `position`: the transcript carries its own frequency filter,
+          because reading one frequency while working the other is a normal thing to want. */}
+      <CommsLog comms={snap.comms} selectedId={snap.selectedId} onSelect={controller.select} />
     </aside>
   )
 }

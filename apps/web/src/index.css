@@ -692,13 +692,55 @@ body {
   background: #050a10;
 }
 
+.comms-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px 4px 10px;
+}
+
 .comms-title {
   margin: 0;
-  padding: 7px 10px 5px;
   font-size: 10px;
   font-weight: 500;
   letter-spacing: 0.18em;
   color: #33513f;
+}
+
+/* Frequency filter. Independent of the strip bay's position tabs — reading one frequency while
+   working the other is a normal thing to want. */
+.comms-filters {
+  display: flex;
+  gap: 2px;
+}
+
+.comms-filter {
+  padding: 2px 6px;
+  font: inherit;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  color: #2b4436;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  cursor: pointer;
+  transition:
+    color 120ms,
+    border-color 120ms;
+}
+
+.comms-filter:hover {
+  color: #6f9d84;
+}
+
+.comms-filter:focus-visible {
+  outline: 2px solid #2f6df6;
+  outline-offset: -1px;
+}
+
+.comms-filter-on {
+  color: #aee8c9;
+  border-color: #2a4535;
 }
 
 .comms-list {
@@ -746,6 +788,20 @@ body {
   background: #0d1c26;
 }
 
+/* Which frequency the call went out on. On every line, including a pilot's — an unprompted
+   check-in after a handoff has no controller line above it to inherit a channel from. */
+.comms-chan {
+  flex: none;
+  width: 22px;
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: #33513f;
+}
+
+.comms-on-tower .comms-chan {
+  color: #4d7d99;
+}
+
 .comms-time {
   flex: none;
   color: #2b4436;
@@ -760,13 +816,14 @@ body {
   color: #aee8c9;
 }
 
-/* The read-back: same exchange, one step quieter and stepped in under the instruction. */
-.comms-pilot .comms-entry {
-  padding-left: 22px;
+/* The read-back: same exchange, one step quieter and stepped in under the instruction. The
+   channel column stays — only the timestamp goes, since it repeats the line above. */
+.comms-pilot .comms-text {
+  padding-left: 14px;
 }
 
 .comms-pilot .comms-time {
-  display: none;
+  visibility: hidden;
 }
 
 .comms-pilot .comms-text {
