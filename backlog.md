@@ -120,8 +120,23 @@ Design note: `docs/atc-tower.md` (one sim, two projections; Ground and Tower own
   inside 1.5 nm final — now gates line-up, takeoff, crossing, and landing alike. Web: Tower arrival
   menu with a visible "runway busy" reason, FINAL/CLR LAND/ROLLOUT strips with range + altitude,
   hollow airborne targets on the scope. _Next: arrival sequence numbers; pick the turnoff exit._
-- ⬜ **Slice 3 — tension & polish**: wake spacing on final, arrival sequence numbers, a
-  player-issued go-around, ATIS/weather line, assign-exit.
+- ✅ **Slice 3a–3c — runway exits & the real post-landing procedure.** Turnoffs are first-class
+  objects derived from the ingested geometry (`runwayExits.ts`): the leg making the shallowest
+  angle with the landing direction classifies a connector as a **rapid exit** (≤60°, 40 kt) or
+  **standard** (~90°, 12 kt), and a connector pointing back down the runway is correctly excluded
+  as the *other* direction's exit. The rollout now aims at a turnoff with a **solved** braking
+  rate so it arrives at that turn's speed, making runway occupancy vary with the choice (high-speed
+  vs. far end = 15+ s). Tower owns both decisions: **`assignExit`** (on final or mid-roll, refused
+  as "unable B5" when it can't slow down in time) and **`contactGround`**, which replaces the
+  automatic handoff — issued on the roll it is the real *"when vacated, contact ground"*. **Vacated
+  now means past the turnoff's hold-short point**, so a landing holds the runway as long as it
+  really would. _Next: 3d._
+- ⬜ **Slice 3d — communications log + read-back**: the arrival procedure is 4–5 transmissions and
+  none are visible today. Also open: wake spacing on final, arrival sequence numbers, a
+  player-issued go-around, hold-short during rollout, ATIS/weather line.
+- 💭 **Ramp Control** — a third layer after Ground at large hubs (airline/airport-run, not FAA).
+  Deferred: adds a frequency without adding a decision until gate conflicts + pushback contention
+  exist (see Turnaround).
 - ⬜ Departure releases / wheels-up windows from TRACON _(deferred — needs TRACON)_
 - ⬜ **Naming debt** — the sim module is `packages/sim/src/ground/` / `createGroundSim` but now
   models Tower (airborne) state too. Revisit the name after Tower lands (likely `local/` or `atct/`,
@@ -170,6 +185,7 @@ Design note: `docs/atc-tower.md` (one sim, two projections; Ground and Tower own
 - ✅ **Zoom-to-fit + off-screen traffic** — **FIT** button / `f` frames the airport *and* all traffic (`fitPoints` takes arbitrary world points, so it generalizes to climb-outs and TRACON). The final approach course is drawn as the extended centerline with 1-nm range ticks, and airborne traffic outside the viewport gets an edge chevron labelled callsign + range. _Next: scale bar / range rings._
 - ⬜ Scale bar / range rings
 - ⬜ Pan/zoom clamping (don't lose the airport off-screen)
+- ✅ Runway turnoffs drawn along their real geometry for the selected arrival, assigned one emphasized
 - ⬜ Gate docking guidance on arrival (AGNIS/PAPA-style stop/center cue), park on the painted stop mark
 - ⬜ Aircraft symbology by category/phase; selected-target emphasis
 - ⬜ Data-block declutter (leader-line direction, overlap avoidance)

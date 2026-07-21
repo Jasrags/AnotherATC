@@ -202,10 +202,52 @@ Web (`apps/web`):
   strip-bay re-render signature at 0.1 nm precision, so a final costs ~one re-render per 2.5 s
   rather than one per frame.
 
-### Slice 3 — tension & polish
-- Wake spacing on final (arrival-behind-heavy) + assign-exit; arrival sequence numbering; a
-  player-issued `goAround` (the automatic stub already exists — see Slice 2); ATIS/weather line.
-  Each independently testable.
+### Slice 3 — runway exits & the real post-landing procedure — **shipped (3a–3c)**
+
+Slice 2 got the aircraft onto the ground but ended the arrival as a physics trigger: it braked
+to taxi speed wherever that happened to be, then handed itself to Ground. Two things were wrong
+with that — the turnoff wasn't a *place*, and the handoff wasn't a *player action*.
+
+**3a — exits are objects** (`runwayExits.ts`). A connector meets the runway with several legs:
+an acute lead-in, a perpendicular, and the mirrored acute lead-in for the opposite landing
+direction. The leg making the shallowest angle *with the direction of landing* is the one an
+arrival would use, and its angle classifies the turnoff:
+
+| kind | angle | speed | note |
+|---|---|---|---|
+| rapid exit (RET / high-speed) | ≤ 60° | 40 kt | mid-field; the throughput lever |
+| standard | 60–100° | 12 kt | right-angle turnoff, usually near the ends |
+| — | > 100° | — | points back down the runway: it is the *other* direction's exit |
+
+So classification falls out of geometry already in the surface data. KSAN yields 8+ named
+turnoffs on both sides of 9/27, and the set correctly mirrors when the landing direction
+reverses. **Still worth eyeballing against the airport diagram in `docs/SAN/`.**
+
+**3b — the rollout is planned.** At touchdown the aircraft aims at a turnoff, and the braking
+rate is *solved* (`brakeRateFor`, v² = v₀² + 2·a·x in kt and nm) so it arrives there at the speed
+that turn can be taken. Runway occupancy therefore varies with the choice — taking the
+high-speed versus being sent to the far end is a 15+ second difference — which is the whole
+reason RETs exist and the lever arrival spacing was previously missing.
+
+**3c — Tower owns the exit and the frequency change.**
+- `assignExit` on final (planning ahead) or mid-rollout (re-solving the braking). Refused for a
+  turnoff the aircraft cannot slow down enough to make: *"unable B5"*.
+- `contactGround` replaces the automatic handoff. Issued during the roll it is the real
+  *"when vacated, contact ground"* — it arms the change, which applies the moment the aircraft is
+  clear. **Nothing switches frequency on its own**, matching the rule that a pilot stays on Tower
+  until told otherwise.
+- **"Vacated" means past the turnoff's hold-short point**, not merely outside the pavement band,
+  so a landing aircraft holds the runway against a departure for as long as it really would.
+
+### Slice 3d and beyond — still open
+- **Communications log + read-back** — the arrival procedure is 4–5 transmissions and none of
+  them are visible; the Tower↔Ground conversation is currently invisible state.
+- Wake spacing on final (arrival-behind-heavy); arrival sequence numbering; a player-issued
+  `goAround` (the automatic stub exists — see Slice 2); ATIS/weather line.
+- Hold-short instructions during rollout (*"hold short of taxiway X"*).
+- **Ramp Control** — at large hubs Ground hands off to a (non-FAA) ramp controller near the
+  terminal. Deliberately deferred: it adds a frequency without adding a decision until gate
+  conflicts and pushback contention exist, which belong to Turnaround.
 
 **Docs win over realism** where they conflict (`CLAUDE.md`): the 3° final, fixed final fix, and
 "despawn on climb-out" are deliberate simplifications until TRACON exists.
