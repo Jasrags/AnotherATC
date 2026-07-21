@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { GroundController } from './controller'
-import { fitPoints, fitView, pan, reframe, toWorld, zoomAt, type View } from './view'
+import { centerOn, fitPoints, fitView, pan, reframe, toWorld, zoomAt, type View } from './view'
 import {
   drawAircraft,
   drawApproachCourse,
@@ -249,6 +249,8 @@ export function GroundScope({ controller }: { controller: GroundController }) {
         controller.removeViaAt(draft.via.length - 1) // drop the last taxiway
       } else if ((e.key === 'c' || e.key === 'C') && id) {
         controller.dispatch({ type: 'crossRunway', aircraftId: id })
+      } else if ((e.key === 'z' || e.key === 'Z') && id) {
+        controller.focusOn(id) // keyboard equivalent of double-clicking the strip
       } else if (e.key === 'f' || e.key === 'F') {
         refitRef.current = true // frame the field + all traffic (incl. aircraft on final)
       } else if (controller.dev && (e.key === 'g' || e.key === 'G')) {
@@ -340,6 +342,13 @@ export function GroundScope({ controller }: { controller: GroundController }) {
 
       if (view) {
         const snap = sim.snapshot()
+        // Centre on an aircraft the strip bay (or the z key) asked for, keeping the zoom.
+        // Resolved here rather than at the request site because the canvas owns the view.
+        const focusId = controller.takeFocus()
+        if (focusId) {
+          const target = snap.aircraft.find((a) => a.id === focusId)
+          if (target) view = centerOn(view, target.x, target.y, width, height)
+        }
         if (refitRef.current) {
           refitRef.current = false
           // Frame the field plus every aircraft — including traffic still several nm out
@@ -476,7 +485,7 @@ export function GroundScope({ controller }: { controller: GroundController }) {
                 ? `${selected.callsign} holding short — use the strip's Contact tower (or C) to release for departure · Esc to deselect`
                 : `${selected.callsign} holding short of the runway — press C to clear across · Esc to deselect`
           } else if (selected) {
-            hint = `${selected.callsign} selected — click a point to assign taxi · right-click to hold · Esc to deselect`
+            hint = `${selected.callsign} selected — click a point to assign taxi · right-click to hold · z centres on it · Esc to deselect`
           } else {
             hint = 'click an aircraft (scope or strip) to select · drag to pan · scroll to zoom'
           }

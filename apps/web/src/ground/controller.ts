@@ -228,6 +228,11 @@ export interface GroundController {
   probeClick(point: Point): void
   /** Discard the active probe. */
   clearProbe(): void
+  /** Ask the scope to centre on an aircraft, keeping the current zoom. The canvas owns the
+   *  view, so this is a request it picks up on its next frame — the same way FIT works. */
+  focusOn(id: string): void
+  /** Take the pending focus request, if any. Consuming it clears it. */
+  takeFocus(): string | null
 }
 
 export function createGroundController(opts: GroundControllerOptions = {}): GroundController {
@@ -260,6 +265,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
   let draft: RouteDraft | null = null
   let devSeq = 0
   let probeState: ProbeResult | null = null
+  let pendingFocus: string | null = null
 
   // Gate stands aren't routing nodes (they sit off the taxiway network), so include them as
   // snap targets — otherwise a click on a gate jumps to the nearest taxiway node instead.
@@ -526,6 +532,14 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
         lengthNm += Math.hypot(path[i]![0] - path[i - 1]![0], path[i]![1] - path[i - 1]![1])
       }
       probeState = { from: probeState.from, to: at, path, taxiways: taxiwaysAlong(path), lengthNm }
+    },
+    focusOn: (id) => {
+      pendingFocus = id
+    },
+    takeFocus: () => {
+      const id = pendingFocus
+      pendingFocus = null
+      return id
     },
     clearProbe: () => {
       probeState = null

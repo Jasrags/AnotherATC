@@ -418,3 +418,31 @@ describe('arrival destination stand', () => {
     expect(c.getSnapshot().aircraft.find((a) => a.id === 'arr2')!.destStandOccupied).toBe(false)
   })
 })
+
+describe('focus request', () => {
+  it('is empty until asked for, and is consumed once taken', () => {
+    const c = createGroundController()
+    expect(c.takeFocus()).toBeNull()
+
+    c.focusOn('init0')
+    expect(c.takeFocus()).toBe('init0')
+    // Consumed: the canvas must not keep re-centring on it every frame afterwards.
+    expect(c.takeFocus()).toBeNull()
+  })
+
+  it('keeps only the latest request', () => {
+    const c = createGroundController()
+    c.focusOn('init0')
+    c.focusOn('init1') // double-clicked a second strip before the frame ran
+    expect(c.takeFocus()).toBe('init1')
+    expect(c.takeFocus()).toBeNull()
+  })
+
+  it('is independent of the selection — focusing does not change who is selected', () => {
+    const c = createGroundController()
+    c.select('init0')
+    c.focusOn('init1')
+    expect(c.selectedId()).toBe('init0')
+    expect(c.takeFocus()).toBe('init1')
+  })
+})

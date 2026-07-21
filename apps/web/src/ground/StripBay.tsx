@@ -167,6 +167,10 @@ export function StripBay({ controller }: { controller: GroundController }) {
                 className="strip-summary"
                 aria-pressed={selected}
                 onClick={() => controller.select(a.id)}
+                // Double-click jumps the scope to it at the current zoom. Keyboard users get
+                // the same thing from `z` on the scope once the strip has selected it.
+                onDoubleClick={() => controller.focusOn(a.id)}
+                title={`${a.callsign} — double-click to centre the scope on it`}
               >
                 <div className="strip-row1">
                   <span className="strip-cs">

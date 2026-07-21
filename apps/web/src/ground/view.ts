@@ -43,6 +43,16 @@ export function toScreen(v: View, x: number, y: number): [number, number] {
   return [x * v.scale + v.offX, -y * v.scale + v.offY]
 }
 
+/**
+ * Put a world point at the centre of the viewport, keeping the current zoom.
+ *
+ * Deliberately not a fit: jumping to an aircraft should not also change how much of the field
+ * you can see. The scale you were working at is part of what you were looking at.
+ */
+export function centerOn(v: View, x: number, y: number, width: number, height: number): View {
+  return { scale: v.scale, offX: width / 2 - x * v.scale, offY: height / 2 + y * v.scale }
+}
+
 /** Inverse of toScreen: screen px → world nm. */
 export function toWorld(v: View, sx: number, sy: number): [number, number] {
   return [(sx - v.offX) / v.scale, (v.offY - sy) / v.scale]

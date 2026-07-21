@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { fitPoints, fitView, toScreen, toWorld, zoomAt, pan, reframe, MIN_SCALE, MAX_SCALE } from './view'
+import { centerOn, fitPoints, fitView, toScreen, toWorld, zoomAt, pan, reframe, MIN_SCALE, MAX_SCALE } from './view'
 import type { Bounds } from '@anotheratc/sim'
 
 const bounds: Bounds = { minX: -1, minY: -0.5, maxX: 1, maxY: 0.5 }
@@ -105,5 +105,27 @@ describe('view transforms', () => {
       expect(sy).toBeGreaterThanOrEqual(0)
       expect(sy).toBeLessThanOrEqual(600)
     }
+  })
+})
+
+describe('centerOn', () => {
+  const v = { scale: 500, offX: 123, offY: -45 }
+
+  it('puts the world point at the middle of the viewport', () => {
+    const c = centerOn(v, 0.4, -0.2, 800, 600)
+    const [sx, sy] = toScreen(c, 0.4, -0.2)
+    expect(sx).toBeCloseTo(400, 9)
+    expect(sy).toBeCloseTo(300, 9)
+  })
+
+  it('keeps the zoom — jumping to an aircraft is not a re-fit', () => {
+    expect(centerOn(v, 1, 1, 800, 600).scale).toBe(v.scale)
+  })
+
+  it('round-trips: the centre of the screen is the point asked for', () => {
+    const c = centerOn(v, -0.75, 0.33, 1024, 768)
+    const [wx, wy] = toWorld(c, 512, 384)
+    expect(wx).toBeCloseTo(-0.75, 9)
+    expect(wy).toBeCloseTo(0.33, 9)
   })
 })
