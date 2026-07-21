@@ -41,8 +41,10 @@ export function commandsFor(controller: GroundController, item: StripItem, aircr
     // what the sim gates the landing clearance on, so mirror it in the disabled label.
     if (item.intent === 'arrival') {
       // "Turn left at Bravo Five" — the turnoff the aircraft will take. Only the exits it can
-      // still slow down for are listed, so an unmakeable one is never offered.
-      const exits = controller.exitOptions(id)
+      // still slow down for are listed, so an unmakeable one is never offered. These come off
+      // the published snapshot, not a live sim query, so the menu and the strip above it are
+      // always the same instant.
+      const exits = item.exitOptions
       const exitMenu: MenuCommand =
         exits.length > 0
           ? {

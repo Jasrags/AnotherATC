@@ -47,6 +47,10 @@ export interface StripItem {
   blocksTakeoff: boolean
   /** Designator of the runway turnoff this arrival is planning for / rolling out to, or null. */
   exitRef: string | null
+  /** Turnoffs this arrival could still be assigned. Published with the rest of the strip rather
+   *  than queried from the sim at render time: the command menu must be built from the same
+   *  instant as the numbers printed above it, or the two disagree on a fast final. */
+  exitOptions: readonly RunwayExit[]
   /** Landed and fully clear of the runway — ready to be handed to Ground. */
   vacated: boolean
   /** Tower has already issued the frequency change; it applies when the aircraft vacates. */
@@ -117,7 +121,9 @@ export interface GroundController {
   readonly destinations: NamedDestination[]
   /** The final-approach geometry arrivals fly in on, so the scope can draw the course. */
   readonly approach: ApproachConfig
-  /** Runway turnoffs this arrival could still be assigned (ahead of it and reachable). */
+  /** Runway turnoffs this arrival could still be assigned (ahead of it and reachable).
+   *  For the canvas only, which draws outside React's render cycle — anything rendered by
+   *  React must use `StripItem.exitOptions` off the published snapshot instead. */
   exitOptions(id: string): RunwayExit[]
   /** The contracted routing graph (decision nodes + geometry edges) for the admin overlay. */
   readonly topology: TaxiTopology
@@ -243,12 +249,18 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
   const publish = (): void => {
     const acs = sim.snapshot().aircraft
     const vias = new Map(acs.map((a) => [a.id, sim.taxiwaysOf(a.id)]))
+    // Only a Tower arrival can be assigned a turnoff, so don't query the rest of the fleet.
+    const exitOpts = new Map(
+      acs
+        .filter((a) => a.intent === 'arrival' && a.controlledBy === 'tower')
+        .map((a) => [a.id, sim.exitOptions(a.id)] as const),
+    )
     let nextSig = `${position}|${selected ?? '-'}`
     nextSig += draft ? `~${draft.id}:${draft.via.join('.')}` : ''
     // Range-to-threshold is continuous, so it enters the signature at display precision
     // (0.1 nm ≈ one re-render every ~2.5 s on final) rather than every frame.
     for (const a of acs)
-      nextSig += `|${a.id}:${a.status}:${a.controlledBy}:${a.onRunway ? 'R' : ''}${a.blocksTakeoff ? 'B' : ''}${a.onShortFinal ? 'F' : ''}${a.vacated ? 'V' : ''}${a.handoffPending ? 'H' : ''}:${a.exitRef ?? ''}:${vias.get(a.id)!.join('.')}:${a.giveWayTo ?? ''}:${a.squawk ?? ''}:${a.wakeHoldSec}:${a.serviceSec}:${a.finalNm.toFixed(1)}`
+      nextSig += `|${a.id}:${a.status}:${a.controlledBy}:${a.onRunway ? 'R' : ''}${a.blocksTakeoff ? 'B' : ''}${a.onShortFinal ? 'F' : ''}${a.vacated ? 'V' : ''}${a.handoffPending ? 'H' : ''}:${a.exitRef ?? ''}:${(exitOpts.get(a.id) ?? []).map((e) => e.ref).join('+')}:${vias.get(a.id)!.join('.')}:${a.giveWayTo ?? ''}:${a.squawk ?? ''}:${a.wakeHoldSec}:${a.serviceSec}:${a.finalNm.toFixed(1)}`
     if (nextSig === sig) return
     sig = nextSig
     snapshot = {
@@ -269,6 +281,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
         blocksTakeoff: a.blocksTakeoff,
         onShortFinal: a.onShortFinal,
         exitRef: a.exitRef,
+        exitOptions: exitOpts.get(a.id) ?? [],
         vacated: a.vacated,
         handoffPending: a.handoffPending,
         altitude: Math.round(a.altitude / 50) * 50,

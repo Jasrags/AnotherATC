@@ -609,7 +609,8 @@ export function drawRunwayExits(
     // Label just past the vacate point, offset along the turnoff so it clears the pavement.
     const dx = bx - ax
     const dy = by - ay
-    const len = Math.hypot(dx, dy) || 1
+    const len = Math.hypot(dx, dy)
+    if (len < 1e-6) continue // degenerate turnoff — nothing to label
     ctx.fillStyle = on ? COLORS.exitAssigned : COLORS.exitAvailable
     ctx.fillText(e.ref, bx + (dx / len) * 12, by + (dy / len) * 12)
   }

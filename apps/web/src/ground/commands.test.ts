@@ -18,6 +18,7 @@ function strip(over: Partial<StripItem> = {}): StripItem {
     blocksTakeoff: false,
     onShortFinal: false,
     exitRef: null,
+    exitOptions: [],
     vacated: false,
     handoffPending: false,
     altitude: 0,
@@ -32,12 +33,13 @@ function strip(over: Partial<StripItem> = {}): StripItem {
   }
 }
 
-function fakeController(exits: RunwayExit[] = []) {
+// Deliberately has no `exitOptions` method: the command menu must build itself from the
+// published StripItem, never from a live sim query during render. A regression would throw here.
+function fakeController() {
   const dispatched: GroundCommand[] = []
   const beganRoute: string[] = []
   const controller = {
     dispatch: (cmd: GroundCommand) => dispatched.push(cmd),
-    exitOptions: () => exits,
     beginRoute: (id: string) => beganRoute.push(id),
     destinations: [
       { id: 'rwy27', label: 'RWY 27', kind: 'runway', point: [1, 0] },
@@ -294,11 +296,12 @@ describe('commandsFor — Tower arrivals', () => {
   })
 
   it('lists only the turnoffs the sim says are still makeable', () => {
-    const { controller, dispatched } = fakeController([
+    const { controller, dispatched } = fakeController()
+    const exitOptions: RunwayExit[] = [
       { ref: 'B6', point: [0, 0], vacatePoint: [0, -0.1], angleDeg: 30, kind: 'rapid', turn: 'left', distanceNm: 0.7, speedKt: 40 },
       { ref: 'C2', point: [1, 0], vacatePoint: [1, -0.1], angleDeg: 90, kind: 'standard', turn: 'right', distanceNm: 1.4, speedKt: 12 },
-    ])
-    const cmds = commandsFor(controller, onFinal(), [])
+    ]
+    const cmds = commandsFor(controller, onFinal({ exitOptions }), [])
     const exit = cmds.find((c) => c.key === 'exit')!.action
     expect(exit.kind).toBe('submenu')
     if (exit.kind !== 'submenu') return
