@@ -1,14 +1,15 @@
 import {
-  KSAN_SURFACE,
-  buildKsanGroundGame,
+  KSAN,
   buildRunwayGuard,
-  buildTaxiGraph,
-  createGroundSim,
-  APPROACH_SPEED_KT,
-  KSAN_RUNWAYS,
   buildRunwayIntersections,
+  buildTaxiGraph,
+  createAirportGame,
+  createGroundSim,
+  findRunway,
+  APPROACH_SPEED_KT,
 } from '@anotheratc/sim'
 import type {
+  Airport,
   ApproachConfig,
   ControllerPosition,
   GroundCommand,
@@ -100,6 +101,9 @@ export interface ProbeResult {
  *  off) and unlocks the spawn/probe sandbox tools. */
 export interface GroundControllerOptions {
   dev?: boolean
+  /** Which field to run. Defaults to KSAN; anything satisfying `Airport` works, which is what
+   *  keeps this layer free of airport specifics. */
+  airport?: Airport
 }
 
 export interface StripSnapshot {
@@ -122,6 +126,8 @@ export interface StripSnapshot {
  * actually changes.
  */
 export interface GroundController {
+  /** The field being run — surface, runways, comms, everything airport-specific. */
+  readonly airport: Airport
   readonly sim: GroundSim
   readonly destinations: NamedDestination[]
   /** The final-approach geometry arrivals fly in on, so the scope can draw the course.
@@ -132,7 +138,9 @@ export interface GroundController {
   /** Switch the airport configuration. Single runway: this moves *both* the arrival final and
    *  the departure end, because they are always the same direction. Refused (with a notice)
    *  while traffic is committed to the runway in use. */
-  setRunway(ident: '09' | '27'): void
+  setRunway(ident: string): void
+  /** The runway directions this field can be configured to, in display order. */
+  runwayIdents(): string[]
   /** Every named taxiway where it meets the runway, ordered along the direction in use — the
    *  places a departure can be taxied to and hold short of for an intersection departure. */
   holdShortSpots(): NamedDestination[]
@@ -190,14 +198,12 @@ export interface GroundController {
 
 export function createGroundController(opts: GroundControllerOptions = {}): GroundController {
   const dev = opts.dev ?? false
-  const graph = buildTaxiGraph(KSAN_SURFACE)
+  const airport = opts.airport ?? KSAN
+  const graph = buildTaxiGraph(airport.surface)
   const topology = graph.topology()
-  const guard = buildRunwayGuard(KSAN_SURFACE)
-  const game = buildKsanGroundGame(1)
+  const guard = buildRunwayGuard(airport.surface)
+  const game = createAirportGame(airport)
   const { destinations } = game
-  // The runway a dev-spawned departure aims to take off from (RWY 27 = KSAN's departure runway).
-  const departureRunway =
-    destinations.find((d) => d.id === 'rwy27') ?? destinations.find((d) => d.kind === 'runway')
   // Dev mode starts empty: no seeded aircraft, no auto-spawner, no servicing gate.
   const sim = dev
     ? createGroundSim([], { graph, guard, runway: game.runway })
@@ -217,7 +223,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
 
   // Gate stands aren't routing nodes (they sit off the taxiway network), so include them as
   // snap targets — otherwise a click on a gate jumps to the nearest taxiway node instead.
-  const gatePoints: { ref: string; point: Point }[] = KSAN_SURFACE.features
+  const gatePoints: { ref: string; point: Point }[] = airport.surface.features
     .filter((f) => f.kind === 'gate' && f.ref && f.points[0])
     .map((f) => ({ ref: f.ref as string, point: f.points[0] as Point }))
   const dist2 = (a: Point, b: Point): number => (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2
@@ -328,6 +334,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
   publish() // seed the initial snapshot
 
   return {
+    airport,
     sim,
     destinations,
     approach: () => sim.approach() ?? game.spawn.approach,
@@ -341,8 +348,14 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
       }))
     },
     activeRunway: () => sim.runway()?.ident ?? game.runway.ident,
+    runwayIdents: () => airport.runways.map((r) => r.ident),
     setRunway: (ident) => {
-      const res = sim.setRunway(KSAN_RUNWAYS[ident])
+      const next = findRunway(airport, ident)
+      if (!next) {
+        flashNotice(`${airport.icao} has no runway ${ident}`)
+        return
+      }
+      const res = sim.setRunway(next)
       // Announce either way. A successful change silently moves every arrival's final and every
       // departure's roll direction, so it needs saying as much as a refusal does — and the
       // notice lands in an aria-live region, which is the only announcement a screen reader gets.
@@ -369,11 +382,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
         // short — otherwise the Tower handoff / takeoff flow can't engage in the sandbox.
         // Follows the *active* runway, so a test aircraft spawned while 09 is in use aims at
         // 09's departure end rather than whichever end was configured at startup.
-        ...(sim.runway()
-          ? { goalPoint: sim.runway()!.departureStart }
-          : departureRunway
-            ? { goalPoint: departureRunway.point }
-            : {}),
+        ...(sim.runway() ? { goalPoint: sim.runway()!.departureStart } : {}),
       }
       sim.add(place.gate ? { ...base, gate: place.gate } : base)
       selected = id

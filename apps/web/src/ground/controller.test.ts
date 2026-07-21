@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { createGroundController } from './controller'
+import type { Airport, AirportSurface } from '@anotheratc/sim'
 
 describe('ground controller bridge', () => {
   it('seeds an initial snapshot with the game aircraft and no selection or draft', () => {
@@ -223,5 +224,77 @@ describe('dev sandbox', () => {
     expect(controller.probe()).not.toBeNull()
     controller.clearAll()
     expect(controller.probe()).toBeNull()
+  })
+})
+
+describe('the controller runs whatever airport it is given', () => {
+  // A minimal second field, defined here and nowhere else — if the web layer still had KSAN
+  // baked into it, none of this would take.
+  const surface: AirportSurface = {
+    icao: 'KTW2',
+    name: 'Twofield',
+    ref: { lat: 40, lon: -100, elevationFt: 500 },
+    units: 'nm',
+    source: 'synthetic',
+    bounds: { minX: -0.6, minY: -0.2, maxX: 0.6, maxY: 2.2 },
+    features: [
+      { kind: 'runway', ref: '18/36', points: [[0, 0], [0, 2]] },
+      { kind: 'taxiway', ref: 'A', points: [[0.3, 0], [0.3, 1], [0.3, 2]] },
+      { kind: 'taxiway', ref: 'A1', points: [[0.3, 0], [0.02, 0]] },
+      { kind: 'taxiway', ref: 'A2', points: [[0.3, 2], [0.02, 2]] },
+      { kind: 'gate', ref: 'G1', points: [[0.5, 1]] },
+    ],
+  }
+  const runway = (ident: string, from: [number, number], to: [number, number]) => ({
+    ident,
+    threshold: from,
+    departureStart: from,
+    farEnd: to,
+    toraFt: 12152,
+    ldaFt: 12152,
+    glidePathDeg: 3,
+    pattern: 'left' as const,
+  })
+  const KTW2: Airport = {
+    icao: 'KTW2',
+    name: 'TWOFIELD',
+    surface,
+    runways: [runway('36', [0, 0], [0, 2]), runway('18', [0, 2], [0, 0])],
+    defaultRunway: '36',
+    layout: {
+      ident: '18/36',
+      widthFt: 150,
+      ends: [
+        { ident: '36', pavementEnd: [0, 0], threshold: [0, 0], emas: null },
+        { ident: '18', pavementEnd: [0, 2], threshold: [0, 2], emas: null },
+      ],
+    },
+    gates: [{ ref: 'G1', point: [0.5, 1] }],
+    servicing: { services: [{ kind: 'fuel', sec: 10 }] },
+    comms: { ground: '121.7', tower: '119.1', atis: '127.4' },
+    traffic: { intervalSec: 15, maxAircraft: 3, initialDepartures: 1 },
+    identity: (rng) => ({ callsign: `TW${rng.int(10, 99)}`, type: 'E75L', wake: 'M' as const }),
+  }
+
+  it('adopts the field identity, comms, runways and stands', () => {
+    const c = createGroundController({ airport: KTW2 })
+    expect(c.airport.icao).toBe('KTW2')
+    expect(c.airport.comms.tower).toBe('119.1')
+    expect(c.runwayIdents()).toEqual(['36', '18'])
+    expect(c.getSnapshot().activeRunway).toBe('36')
+    expect(c.destinations.map((d) => d.label)).toEqual(['RWY 36', 'RWY 18'])
+    expect(c.getSnapshot().aircraft).toHaveLength(1) // its own initialDepartures
+    expect(c.getSnapshot().aircraft[0]!.callsign.startsWith('TW')).toBe(true)
+  })
+
+  it('switches between that field own configurations', () => {
+    const c = createGroundController({ airport: KTW2 })
+    c.setRunway('18')
+    expect(c.getSnapshot().activeRunway).toBe('18')
+  })
+
+  it('derives that field runway intersections, not another one', () => {
+    const c = createGroundController({ airport: KTW2 })
+    expect(c.holdShortSpots().map((s) => s.label)).toEqual(['RWY @ A1', 'RWY @ A2'])
   })
 })

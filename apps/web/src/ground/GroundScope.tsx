@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import { KSAN_SURFACE, KSAN_RUNWAY_LAYOUT } from '@anotheratc/sim'
 import type { GroundController } from './controller'
 import { fitPoints, fitView, pan, reframe, toWorld, zoomAt, type View } from './view'
 import {
@@ -41,6 +40,9 @@ function setText(el: HTMLElement, text: string): void {
 }
 
 export function GroundScope({ controller }: { controller: GroundController }) {
+  // Everything field-specific comes off the airport bundle, so this component is the same code
+  // whichever airport it is pointed at.
+  const airport = controller.airport
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const statusRef = useRef<HTMLDivElement>(null)
   const hintRef = useRef<HTMLDivElement>(null)
@@ -68,7 +70,12 @@ export function GroundScope({ controller }: { controller: GroundController }) {
   // published snapshot, not mirrored in local state: the sim can refuse a change, and anything
   // else that switches the runway has to be reflected here too.
   const activeRunway = useSyncExternalStore(controller.subscribe, controller.getSnapshot).activeRunway
-  const toggleRunway = () => controller.setRunway(activeRunway === '27' ? '09' : '27')
+  const toggleRunway = () => {
+    // Cycle the field's configurations, whatever they are — two on a single-runway airport.
+    const idents = controller.runwayIdents()
+    const next = idents[(idents.indexOf(activeRunway) + 1) % idents.length]
+    if (next) controller.setRunway(next)
+  }
 
   // Dev sandbox: which surface-click tool is armed. Ref drives the click/render loop;
   // state drives the toolbar's pressed styling.
@@ -83,8 +90,11 @@ export function GroundScope({ controller }: { controller: GroundController }) {
   }
 
   // Surface-derived draw data (feature buckets, label anchors) is static — compute it once,
-  // not every animation frame (WEB-1). KSAN_SURFACE is a constant, so this never recomputes.
-  const prep = useMemo(() => prepareSurface(KSAN_SURFACE), [])
+  // not every animation frame (WEB-1). The surface never changes, so this never recomputes.
+  const prep = useMemo(
+    () => prepareSurface(airport.surface, airport.areaLabelOffsetsNm),
+    [airport],
+  )
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -108,7 +118,7 @@ export function GroundScope({ controller }: { controller: GroundController }) {
       canvas.height = Math.round(newH * dpr)
       // First layout fits to bounds; later resizes/reflows preserve the controller's
       // pan/zoom by holding the world point at screen center (WEB-2).
-      view = view ? reframe(view, width, height, newW, newH) : fitView(KSAN_SURFACE.bounds, newW, newH)
+      view = view ? reframe(view, width, height, newW, newH) : fitView(airport.surface.bounds, newW, newH)
       width = newW
       height = newH
     }
@@ -260,7 +270,7 @@ export function GroundScope({ controller }: { controller: GroundController }) {
       } else if (draft) {
         // Route-building mode: a click on a taxiway appends it to the via-sequence.
         const [wx, wy] = toWorld(view, sx, sy)
-        const ref = nearestTaxiwayRef(KSAN_SURFACE, wx, wy, TAXI_HIT_PX / view.scale)
+        const ref = nearestTaxiwayRef(airport.surface, wx, wy, TAXI_HIT_PX / view.scale)
         if (ref) controller.addVia(ref)
       } else if (selectedId) {
         const [wx, wy] = toWorld(view, sx, sy)
@@ -308,7 +318,7 @@ export function GroundScope({ controller }: { controller: GroundController }) {
           // Frame the field plus every aircraft — including traffic still several nm out
           // on final, which sits far outside the surface bounds.
           view = fitPoints(
-            KSAN_SURFACE.bounds,
+            airport.surface.bounds,
             snap.aircraft.map((a) => [a.x, a.y] as [number, number]),
             width,
             height,
@@ -321,19 +331,19 @@ export function GroundScope({ controller }: { controller: GroundController }) {
         drawSurface(ctx, view, prep, width, height)
         drawAreaLabels(ctx, view, prep)
         drawGates(ctx, view, prep)
-        drawRunwayMarkings(ctx, view, KSAN_RUNWAY_LAYOUT)
-        drawHotspots(ctx, view, KSAN_SURFACE)
+        drawRunwayMarkings(ctx, view, airport.layout)
+        drawHotspots(ctx, view, airport.surface)
         drawApproachCourse(ctx, view, controller.approach())
         if (draft) {
-          drawRouteDraft(ctx, view, KSAN_SURFACE, draft.via)
+          drawRouteDraft(ctx, view, airport.surface, draft.via)
           if (hovering) {
             const [wx, wy] = toWorld(view, hoverX, hoverY)
-            const ref = nearestTaxiwayRef(KSAN_SURFACE, wx, wy, TAXI_HIT_PX / view.scale)
-            if (ref && !draft.via.includes(ref)) drawRouteHover(ctx, view, KSAN_SURFACE, ref)
+            const ref = nearestTaxiwayRef(airport.surface, wx, wy, TAXI_HIT_PX / view.scale)
+            if (ref && !draft.via.includes(ref)) drawRouteHover(ctx, view, airport.surface, ref)
           }
         }
         // The painted designators replace the schematic map numbers once they're legible.
-        drawLabels(ctx, view, prep, !runwayMarkingsVisible(view, KSAN_RUNWAY_LAYOUT))
+        drawLabels(ctx, view, prep, !runwayMarkingsVisible(view, airport.layout))
         drawAircraft(ctx, view, snap.aircraft)
         const selected = selectedId ? snap.aircraft.find((a) => a.id === selectedId) : undefined
         // Turnoffs are only meaningful for the arrival being worked, so they are drawn for the
@@ -431,11 +441,15 @@ export function GroundScope({ controller }: { controller: GroundController }) {
         className="scope-canvas"
         tabIndex={0}
         role="application"
-        aria-label="KSAN tower and ground radar: the airport surface plus the final approach. Tab to a flight strip to select and command an aircraft; drag to pan, scroll to zoom, press f to frame all traffic."
+        aria-label={`${airport.icao} tower and ground radar: the airport surface plus the final approach. Tab to a flight strip to select and command an aircraft; drag to pan, scroll to zoom, press f to frame all traffic.`}
       />
       <div className="hud hud-tl">
-        <div className="hud-title">KSAN · SAN DIEGO INTL</div>
-        <div className="hud-sub">GND CON 123.9 · D-ATIS 134.8 · SURFACE (ASDE-X)</div>
+        <div className="hud-title">
+          {airport.icao} · {airport.name}
+        </div>
+        <div className="hud-sub">
+          GND CON {airport.comms.ground} · TWR {airport.comms.tower} · D-ATIS {airport.comms.atis}
+        </div>
       </div>
       <div className="hud hud-controls">
         {controller.dev && <span className="dev-tag mono">DEV</span>}

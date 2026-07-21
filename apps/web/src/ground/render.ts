@@ -324,12 +324,6 @@ function label(ctx: Ctx, text: string, x: number, y: number, color: string): voi
   ctx.fillText(text, Math.round(x), Math.round(y))
 }
 
-/** Per-area label nudges (nm) where the centroid overlaps gates/pavement. */
-const AREA_OFFSET_NM: Record<string, Point> = {
-  'Terminal 2 West': [0, -0.05],
-  'Terminal 2 East': [0, -0.05],
-}
-
 /** Ramp / terminal / apron area names, centered on each named area. */
 export function drawAreaLabels(ctx: Ctx, v: View, prep: PreparedSurface): void {
   ctx.textAlign = 'center'
@@ -404,7 +398,15 @@ export interface PreparedSurface {
   runwayNumbers: RunwayNumber[]
 }
 
-export function prepareSurface(surface: AirportSurface): PreparedSurface {
+/**
+ * Bucket the surface into draw lists and label anchors, once. `areaLabelOffsetsNm` nudges area
+ * labels whose centroid sits over pavement — a per-airport cosmetic, so it comes in as data
+ * rather than living here as a table of one field's terminal names.
+ */
+export function prepareSurface(
+  surface: AirportSurface,
+  areaLabelOffsetsNm: Record<string, Point> = {},
+): PreparedSurface {
   const runways = surface.features.filter((f) => f.kind === 'runway')
 
   const holdShort: Point[] = []
@@ -435,7 +437,7 @@ export function prepareSurface(surface: AirportSurface): PreparedSurface {
   }
   const areaLabels: LabelAnchor[] = []
   for (const [name, g] of groups) {
-    const off = AREA_OFFSET_NM[name] ?? [0, 0]
+    const off = areaLabelOffsetsNm[name] ?? [0, 0]
     areaLabels.push({ text: name.toUpperCase(), at: [g.x / g.n + off[0], g.y / g.n + off[1]] })
   }
 

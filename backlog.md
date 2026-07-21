@@ -193,7 +193,14 @@ Design note: `docs/atc-tower.md` (one sim, two projections; Ground and Tower own
 - 🚧 **Game loop & scoring** — dep/arr counters in place; want objectives, delays, incidents, difficulty, fail states
 - 💭 **Replay / save** — determinism enables record + replay (and later multiplayer)
 - 💭 **Voice / phraseology** — TTS readbacks, speech input
-- ⬜ **More airports** — data pipeline generalizes beyond KSAN
+- 🚧 **More airports** — **the abstraction is in** (`Airport` bundle in `world/airport.ts`; KSAN is
+  now just data in `world/ksanAirport.ts`). The engine holds no airport knowledge and the web
+  layer reads the field off `controller.airport`; `world/airport.test.ts` builds a fictional
+  north–south field from scratch and plays a full arrival and departure on it. Adding a
+  **single-runway** field is now a data exercise — see `docs/adding-an-airport.md` (~1.5–2.5
+  days, dominated by OSM taxiway-naming quality and whether the field has tagged gate nodes).
+  _Blocked for multi-runway fields: occupancy is field-wide and `ActiveRunway` is one direction —
+  see §4 of that doc._
 
 ---
 

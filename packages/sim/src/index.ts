@@ -2,6 +2,9 @@ export { createRng } from './random'
 export type { Rng } from './random'
 
 export { KSAN_SURFACE } from './world/ksan'
+export { KSAN, KSAN_RUNWAYS, KSAN_RUNWAY_LAYOUT } from './world/ksanAirport'
+export { createAirportGame, findRunway, gatesFromSurface } from './world/airport'
+export type { Airport, AirportComms, AirportGame, TrafficConfig } from './world/airport'
 export type {
   AirportSurface,
   SurfaceFeature,
@@ -22,7 +25,7 @@ export type {
   ServicingConfig,
 } from './ground/sim'
 export { buildKsanGroundScenario } from './ground/ksanScenario'
-export { buildKsanGroundGame, KSAN_RUNWAYS, KSAN_RUNWAY_LAYOUT } from './ground/ksanGame'
+export { buildKsanGroundGame } from './ground/ksanGame'
 export {
   finalFix,
   glideAltitudeFt,
