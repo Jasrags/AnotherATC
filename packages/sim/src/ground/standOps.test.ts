@@ -115,3 +115,49 @@ describe('an arrival is marshalled onto the stand', () => {
     expect(onLead.length).toBeGreaterThan(0)
   })
 })
+
+// Both of these come from the slice's review: the lead-in has to survive the sim rewriting an
+// aircraft's path underneath it, which a hold-short split, a crossing release and a congestion
+// diversion all do.
+describe('the lead-in survives a path rewrite', () => {
+  it('a diverted arrival still arrives along the paint, not across the apron', () => {
+    const { game, sim } = ksanSim()
+    const id = game.inits[0]!.id
+    const at = () => sim.snapshot().aircraft.find((a) => a.id === id)!
+    const stand = findStand(stands, at().gate)!
+
+    for (let i = 0; i < 1200; i += 1) sim.step(0.1)
+    sim.dispatch({ type: 'pushback', aircraftId: id })
+    for (let i = 0; i < 900 && at().status === 'pushback'; i += 1) sim.step(0.1)
+    // Route it away and back, so the return leg is a full graph route ending on the stand.
+    sim.dispatch({ type: 'taxiToGoal', aircraftId: id })
+    for (let i = 0; i < 4000 && !at().holdShort; i += 1) sim.step(0.1)
+    sim.dispatch({ type: 'taxiTo', aircraftId: id, dest: stand.stop, exact: true })
+
+    // However the route is rebuilt en route, the final approach to the stand is on the line.
+    for (let i = 0; i < 12000 && dist([at().x, at().y], stand.stop) > 0.004; i += 1) sim.step(0.1)
+    expect(offLine([at().x, at().y], stand.lead)).toBeLessThan(0.003)
+  })
+
+  it('creeps only near the stand, not for the whole taxi route', () => {
+    const { game, sim } = ksanSim()
+    const id = game.inits[0]!.id
+    const at = () => sim.snapshot().aircraft.find((a) => a.id === id)!
+    const stand = findStand(stands, at().gate)!
+
+    for (let i = 0; i < 1200; i += 1) sim.step(0.1)
+    sim.dispatch({ type: 'pushback', aircraftId: id })
+    for (let i = 0; i < 900 && at().status === 'pushback'; i += 1) sim.step(0.1)
+    sim.dispatch({ type: 'taxiToGoal', aircraftId: id }) // out to the runway, well clear of the gate
+
+    // Once away from the stand it must reach full taxi speed — a leg-counted cap used to hold
+    // the aircraft at marshalling pace for the entire route after the path was re-planned.
+    let fast = false
+    for (let i = 0; i < 6000 && !at().holdShort; i += 1) {
+      sim.step(0.1)
+      const a = at()
+      if (dist([a.x, a.y], stand.stop) > 0.2 && a.groundspeed > 12) fast = true
+    }
+    expect(fast).toBe(true)
+  })
+})

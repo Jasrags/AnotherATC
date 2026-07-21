@@ -346,9 +346,6 @@ interface Internal
   avoidEdges: Set<string>
   /** Blocked edges we already tried and failed to divert around (skip recompute until recleared). */
   divertTried: Set<string>
-  /** Trailing legs of the current path that run along a stand's lead-in line (0 when none).
-   *  Inside them the aircraft is being marshalled onto the stand and creeps. */
-  standLegs: number
   /** Cleared for takeoff while still holding short: taxi into position first, then roll.
    *  The roll begins on its own once the aircraft is established on the centerline. */
   rollWhenLinedUp: boolean
@@ -596,7 +593,6 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       heldSec: 0,
       avoidEdges: new Set(),
       divertTried: new Set(),
-      standLegs: 0,
       rollWhenLinedUp: false,
       lastClearance: null,
       misheard: null,
@@ -1002,8 +998,14 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     if (ac.leg >= ac.path.length - 1) return
     const dest = ac.path[ac.path.length - 1]
     if (!dest) return
+    // An aircraft routed onto a stand ends its path on the paint, off the graph. Divert to
+    // where the lead-in *starts* and re-append the line, or the detour hands back exactly the
+    // straight-across-the-apron arrival this geometry exists to prevent.
+    const stand = standFor(ac)
+    const onStand = stand !== undefined && dist(dest, stand.stop) < 1e-6
+    const target: Point = onStand && stand ? stand.entry : dest
     const startKey = graph.nearestNode([ac.x, ac.y])
-    const goalKey = graph.nearestNode(dest)
+    const goalKey = graph.nearestNode(target)
     if (!startKey || !goalKey) return
     const avoid = new Set(ac.avoidEdges)
     avoid.add(blocked)
@@ -1017,14 +1019,16 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       ac.divertTried.add(blocked)
       return
     }
-    // Preserve an exact appended goal (e.g. a stand point that isn't a graph node).
-    const goalPt = graph.nodePoint(goalKey)
-    const appendExact = !goalPt || dist(goalPt, dest) > 1e-6
     ac.avoidEdges = avoid
-    applyRoute(ac, alt, dest, appendExact)
+    if (onStand && stand) {
+      applyRoute(ac, [...alt, ...stand.lead], stand.stop, false)
+    } else {
+      // Preserve an exact appended goal (e.g. a point that isn't a graph node).
+      const goalPt = graph.nodePoint(goalKey)
+      applyRoute(ac, alt, dest, !goalPt || dist(goalPt, dest) > 1e-6)
+    }
     ac.heldSec = 0
     ac.blockedEdge = null
-    ac.standLegs = 0
   }
 
   /**
@@ -1138,7 +1142,6 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     ac.holdShort = false
     ac.heldSec = 0
     ac.blockedEdge = null
-    ac.standLegs = 0
   }
 
   /** Forget accumulated diversion state — a fresh player clearance supersedes it. */
@@ -1193,10 +1196,28 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     return true
   }
 
-  /** Marshalling pace once the aircraft is on its stand's lead-in line. */
+  /**
+   * Marshalling pace once the aircraft is close enough to its stand to be on the paint.
+   *
+   * Deliberately positional rather than "the last N legs of the path": the path is rewritten
+   * underneath an aircraft by a hold-short split, a crossing release and a congestion diversion,
+   * and a leg count captured at clearance time survives none of them — it silently ends up
+   * capping the whole taxi route instead of the lead-in.
+   */
   function standCap(ac: Internal): number {
-    if (ac.standLegs <= 0) return Infinity
-    return ac.leg >= ac.path.length - ac.standLegs ? STAND_SPEED_KT : Infinity
+    if (ac.pushingBack) return Infinity // the tug sets its own pace
+    const stand = standFor(ac)
+    if (!stand) return Infinity
+    return dist([ac.x, ac.y], stand.stop) <= leadLengthNm(stand) ? STAND_SPEED_KT : Infinity
+  }
+
+  /** Length (nm) of a stand's painted lead-in — the zone an aircraft is marshalled through. */
+  function leadLengthNm(stand: Stand): number {
+    let d = 0
+    for (let i = 1; i < stand.lead.length; i += 1) {
+      d += dist(stand.lead[i - 1] as Point, stand.lead[i] as Point)
+    }
+    return d
   }
 
   /** The stand this aircraft is assigned, when the field has one mapped for its gate. */
@@ -1218,14 +1239,16 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     if (route.length === 0) return false
     clearDiversion(ac)
     applyRoute(ac, [...route, ...stand.lead], stand.stop, false)
-    ac.standLegs = stand.lead.length
     return true
   }
 
   /** Send an aircraft to its own goal — onto the stand for an arrival with mapped geometry. */
   function routeToOwnGoal(ac: Internal): boolean {
     const stand = ac.intent === 'arrival' ? standFor(ac) : undefined
-    if (stand) return routeToStand(ac, stand)
+    // Fall back to the bare goal if the stand's entry is unreachable: `graph.route` is a pure
+    // function of the static topology, so a stand-routing failure would fail identically on
+    // every retry and leave the arrival circling the same refusal forever.
+    if (stand && routeToStand(ac, stand)) return true
     return ac.goalPoint ? routeTo(ac, ac.goalPoint, true) : false
   }
 

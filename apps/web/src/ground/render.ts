@@ -153,11 +153,14 @@ export function drawSurface(ctx: Ctx, v: View, prep: PreparedSurface, w: number,
   fillPolys(ctx, v, prep.apron, COLORS.apronFill, COLORS.apronEdge)
   fillPolys(ctx, v, prep.buildings, COLORS.buildingFill, COLORS.buildingEdge)
 
-  drawStandLines(ctx, v, prep.standLines)
-
   // taxiways: pavement then a thin centerline
   strokeFeatures(ctx, v, prep.taxiways, COLORS.taxiway, { nm: DIMS.taxiwayNm, minPx: 1.5 })
   strokeFeatures(ctx, v, prep.taxiways, COLORS.taxiwayCenter, { px: 0.8 })
+
+  // Stand paint goes on *after* the taxiway pavement: a lead-in line ends on the taxilane
+  // centerline, so drawing it first lets the pavement stroke swallow the entry end — exactly
+  // the stretch where an arriving aircraft picks the line up.
+  drawStandLines(ctx, v, prep.standLines)
 
   // runway: edge outline, pavement, dashed centerline
   strokeFeatures(ctx, v, prep.runwayPavement, COLORS.runwayEdge, {

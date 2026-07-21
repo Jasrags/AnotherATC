@@ -93,6 +93,10 @@ export function buildStands(surface: AirportSurface): Stand[] {
   const charted = new Map<string, readonly Point[]>()
   for (const f of surface.features) {
     if (f.kind !== 'parking_position' || !f.ref || f.points.length < 2) continue
+    // A line whose endpoints coincide carries no direction, so it cannot say which way the
+    // aircraft faces or which way it pushes back. Treated as absent, which falls through to a
+    // derived lead-in rather than silently parking the aircraft facing due north.
+    if (dist(f.points[0] as Point, f.points[f.points.length - 1] as Point) < MIN_LEAD_NM) continue
     if (!charted.has(f.ref)) charted.set(f.ref, f.points)
   }
 
@@ -109,6 +113,8 @@ export function buildStands(surface: AirportSurface): Stand[] {
     let source: Stand['source']
     if (line) {
       // The end nearer the gate node is the stand end; flip the line if it runs the other way.
+      // Ties are impossible in practice (a gate node equidistant from both ends of its own
+      // line) and resolve to "as mapped", which is the majority direction at KSAN.
       const head = line[0] as Point
       const tail = line[line.length - 1] as Point
       lead = dist(head, gate) < dist(tail, gate) ? [...line].reverse() : [...line]
