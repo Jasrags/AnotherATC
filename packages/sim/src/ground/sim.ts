@@ -75,6 +75,9 @@ const PUSHBACK_SPEED_KT = 5
 /** Takeoff roll: full-power acceleration (kt/s) up to the liftoff speed (kt). */
 const TAKEOFF_ACCEL = 12
 const TAKEOFF_SPEED_KT = 140
+/** Groundspeed (kt) at which a departure has "rotated" — effectively airborne, so it no longer
+ *  blocks the next departure's takeoff clearance (anticipated separation). */
+const ROTATE_KT = 120
 /** How close (nm) counts as reaching a gate. */
 const GATE_EPS = 0.02
 /** Seconds an arrival dwells at the gate before it clears the stand. */
@@ -159,7 +162,11 @@ function outranks(a: Internal, b: Internal): boolean {
 }
 
 // `status` is derived at snapshot time, so it is not stored here.
-interface Internal extends Omit<GroundAircraft, 'status' | 'holdingForTakeoff' | 'wakeHoldSec' | 'serviceSec'> {
+interface Internal
+  extends Omit<
+    GroundAircraft,
+    'status' | 'holdingForTakeoff' | 'wakeHoldSec' | 'serviceSec' | 'onRunway' | 'blocksTakeoff'
+  > {
   path: readonly Point[]
   leg: number
   targetSpeed: number
@@ -356,6 +363,17 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     if (!ac.holdShort || ac.intent !== 'departure') return false
     if (!guard) return true // no runway model → no crossing distinction
     return ac.goalPoint !== null && onRunway(ac.goalPoint, guard)
+  }
+
+  /** Whether an aircraft is physically on the runway surface right now. */
+  function onRunwayNow(ac: Internal): boolean {
+    return guard ? onRunway([ac.x, ac.y], guard) : false
+  }
+  /** Whether an aircraft occupies the runway in a way that blocks another aircraft's takeoff
+   *  clearance: any on-runway aircraft, except a departure that has rotated (near liftoff and
+   *  effectively airborne) — the next departure may be cleared behind it. */
+  function occupiesForTakeoff(ac: Internal): boolean {
+    return onRunwayNow(ac) && !(ac.departing && ac.groundspeed >= ROTATE_KT)
   }
 
   /** Seconds of wake separation still owed before this holding-short departure may roll. */
@@ -843,7 +861,9 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         if (!ac.holdShort && !ac.lineUpWait) return refused('not holding short or lined up')
         if (guard && (!ac.goalPoint || !onRunway(ac.goalPoint, guard)))
           return refused('route crosses the runway — clear it to cross, not for takeoff')
-        if (guard && fleet.some((o) => o !== ac && onRunway([o.x, o.y], guard))) return refused('runway occupied')
+        // The runway must be clear of blocking traffic — but a preceding departure that has
+        // rotated (near liftoff) no longer blocks, so the next may be cleared behind it.
+        if (guard && fleet.some((o) => o !== ac && occupiesForTakeoff(o))) return refused('runway occupied')
         // Wake-turbulence hold: a following departure can't roll until the interval behind
         // the previous departure has elapsed (see docs/wake-turbulence.md).
         if (lastDeparture) {
@@ -976,6 +996,8 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
           controlledBy: ac.controlledBy,
           intent: ac.intent,
           gate: ac.gate,
+          onRunway: onRunwayNow(ac),
+          blocksTakeoff: occupiesForTakeoff(ac),
           conflict: ac.conflict,
           giveWayTo: ac.giveWayTo ? (find(ac.giveWayTo)?.callsign ?? null) : null,
           squawk: ac.squawk,

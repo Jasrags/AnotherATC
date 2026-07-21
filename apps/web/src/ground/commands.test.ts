@@ -14,6 +14,8 @@ function strip(over: Partial<StripItem> = {}): StripItem {
     intent: 'departure',
     gate: null,
     holdingForTakeoff: false,
+    onRunway: false,
+    blocksTakeoff: false,
     via: [],
     giveWayTo: null,
     squawk: null,
@@ -85,6 +87,50 @@ describe('commandsFor (strip state machine)', () => {
     if (cto.kind === 'run') cto.run()
     expect(dispatched).toEqual([{ type: 'clearedForTakeoff', aircraftId: 'a' }])
     expect(cmds[1]!.action.kind).toBe('soon')
+  })
+
+  it('tower takeoff is gated (soon) with a reason when the runway is busy', () => {
+    const { controller } = fakeController()
+    const self = strip({ id: 'a', status: 'lineUpWait', controlledBy: 'tower', onRunway: true })
+    const blocker = strip({ id: 'b', status: 'departing', controlledBy: 'tower', onRunway: true, blocksTakeoff: true })
+    const cmds = commandsFor(controller, self, [self, blocker])
+    expect(cmds[0]!.label).toBe('Cleared for takeoff — runway busy')
+    expect(cmds[0]!.action.kind).toBe('soon')
+  })
+
+  it('a rotated departure (blocksTakeoff false) does not gate the next takeoff', () => {
+    const { controller } = fakeController()
+    const self = strip({ id: 'a', status: 'lineUpWait', controlledBy: 'tower', onRunway: true })
+    const rotated = strip({ id: 'b', status: 'departing', controlledBy: 'tower', onRunway: true, blocksTakeoff: false })
+    const cmds = commandsFor(controller, self, [self, rotated])
+    expect(cmds[0]!.label).toBe('Cleared for takeoff')
+    expect(cmds[0]!.action.kind).toBe('run')
+  })
+
+  it('tower takeoff is gated (soon) with a wake countdown when wake separation is owed', () => {
+    const { controller } = fakeController()
+    const cmds = commandsFor(controller, strip({ status: 'holdShort', controlledBy: 'tower', wakeHoldSec: 90 }), [])
+    const takeoff = cmds.find((c) => c.label.startsWith('Cleared for takeoff'))!
+    expect(takeoff.label).toBe('Cleared for takeoff — wake 90s')
+    expect(takeoff.action.kind).toBe('soon')
+  })
+
+  it('line up and wait is gated (soon) when a stationary aircraft occupies the runway', () => {
+    const { controller } = fakeController()
+    const self = strip({ id: 'a', status: 'holdShort', controlledBy: 'tower' })
+    const linedUp = strip({ id: 'b', status: 'lineUpWait', controlledBy: 'tower', onRunway: true })
+    const cmds = commandsFor(controller, self, [self, linedUp])
+    expect(cmds[0]!.label).toBe('Line up and wait — runway busy')
+    expect(cmds[0]!.action.kind).toBe('soon')
+  })
+
+  it('line up and wait is allowed behind a rolling (departing) aircraft', () => {
+    const { controller } = fakeController()
+    const self = strip({ id: 'a', status: 'holdShort', controlledBy: 'tower' })
+    const rolling = strip({ id: 'b', status: 'departing', controlledBy: 'tower', onRunway: true, blocksTakeoff: true })
+    const cmds = commandsFor(controller, self, [self, rolling])
+    expect(cmds[0]!.label).toBe('Line up and wait')
+    expect(cmds[0]!.action.kind).toBe('run')
   })
 
   it('holdShort + arrival → cross runway (runs), hold position (soon)', () => {

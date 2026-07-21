@@ -13,6 +13,8 @@ function strip(over: Partial<StripItem> = {}): StripItem {
     intent: 'departure',
     gate: null,
     holdingForTakeoff: true,
+    onRunway: false,
+    blocksTakeoff: false,
     via: [],
     giveWayTo: null,
     squawk: null,

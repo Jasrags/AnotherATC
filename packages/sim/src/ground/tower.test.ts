@@ -129,9 +129,10 @@ describe('tower — departures', () => {
     expect(A(sim, 'd').status).toBe('holdShort')
   })
 
-  it('allows line up and wait behind a departing aircraft, but not takeoff until it clears', () => {
-    // The reported scenario: #1 is rolling for takeoff, #2 should still be able to line up
-    // behind it (anticipated separation) — but can't be cleared for takeoff until #1 is gone.
+  it('lines up #2 behind a rolling #1, and clears #2 once #1 has rotated (anticipated separation)', () => {
+    // The reported scenario: #1 rolling for takeoff; #2 should line up behind it, then be
+    // cleared once #1 has rotated (near liftoff) — not forced to wait for #1 to traverse the
+    // whole runway.
     const lead = departure('lead', -0.3)
     const foll = departure('foll', -0.6)
     const sim = createGroundSim([lead, foll], { guard })
@@ -142,21 +143,26 @@ describe('tower — departures', () => {
     sim.dispatch({ type: 'lineUpAndWait', aircraftId: 'lead' })
     for (let i = 0; i < 400; i += 1) sim.step(0.1)
     sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'lead' })
-    for (let i = 0; i < 30; i += 1) sim.step(0.1) // lead is rolling, on the runway
+    for (let i = 0; i < 20; i += 1) sim.step(0.1) // lead rolling, still below rotation
     expect(A(sim, 'lead').status).toBe('departing')
+    expect(A(sim, 'lead').blocksTakeoff).toBe(true) // slow on the runway → blocks
 
     sim.dispatch({ type: 'contactTower', aircraftId: 'foll' })
-    // #2 may line up behind the rolling #1 — the departing aircraft doesn't block it.
+    // #2 may line up behind the rolling #1 — the departing aircraft doesn't block a line-up.
     expect(sim.dispatch({ type: 'lineUpAndWait', aircraftId: 'foll' })).toEqual({ ok: true })
     expect(A(sim, 'foll').status).toBe('lineUpWait')
-    // …but a takeoff clearance is still refused while #1 occupies the runway.
+    // …but a takeoff clearance is refused while #1 is still below rotation on the runway.
     const early = sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'foll' })
     expect(early.ok).toBe(false)
     if (!early.ok) expect(early.reason).toMatch(/occupied/i)
 
-    // Once #1 lifts off and clears, #2 (lined up) can be cleared for takeoff (Medium → no wake).
-    for (let i = 0; i < 2000 && sim.snapshot().departed < 1; i += 1) sim.step(0.1)
-    expect(sim.snapshot().departed).toBe(1)
+    // Once #1 rotates (still on the runway, not yet at the far end), it no longer blocks…
+    for (let i = 0; i < 300 && (A(sim, 'lead')?.groundspeed ?? 999) < 120; i += 1) sim.step(0.1)
+    const rolling = sim.snapshot().aircraft.find((a) => a.id === 'lead')!
+    expect(rolling.groundspeed).toBeGreaterThanOrEqual(120)
+    expect(rolling.onRunway).toBe(true) // still physically on the runway
+    expect(rolling.blocksTakeoff).toBe(false) // but rotated → doesn't block the next takeoff
+    // …so #2 can be cleared behind it (Medium leader → no wake gate).
     expect(sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'foll' })).toEqual({ ok: true })
     expect(A(sim, 'foll').status).toBe('departing')
   })
@@ -246,6 +252,44 @@ describe('tower — departures', () => {
     for (let i = 0; i < 3000 && sim.snapshot().time - t0 < 120; i += 1) sim.step(0.1)
     expect(sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'foll' })).toEqual({ ok: true })
     expect(A(sim, 'foll').status).toBe('departing')
+  })
+
+  it('end-to-end: two departures launch in sequence from one runway (anticipated separation)', () => {
+    // The full Tower departure loop with contention — the interaction the earlier per-command
+    // tests missed. #1 lines up and rolls; #2 lines up BEHIND it while it rolls, and is cleared
+    // as soon as #1 rotates — without waiting for #1 to reach the far end. Both get airborne.
+    const lead = departure('lead', -0.3)
+    const foll = departure('foll', -0.6)
+    const sim = createGroundSim([lead, foll], { guard })
+    taxiToHoldShort(sim)
+    expect(A(sim, 'lead').holdShort).toBe(true)
+    expect(A(sim, 'foll').holdShort).toBe(true)
+
+    // Hand both departures off to Tower.
+    expect(sim.dispatch({ type: 'contactTower', aircraftId: 'lead' }).ok).toBe(true)
+    expect(sim.dispatch({ type: 'contactTower', aircraftId: 'foll' }).ok).toBe(true)
+
+    // #1 lines up and is cleared for takeoff.
+    expect(sim.dispatch({ type: 'lineUpAndWait', aircraftId: 'lead' }).ok).toBe(true)
+    for (let i = 0; i < 400; i += 1) sim.step(0.1)
+    expect(sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'lead' }).ok).toBe(true)
+
+    // #2 lines up behind the rolling #1 (allowed); its takeoff is gated while #1 is below rotation.
+    for (let i = 0; i < 20; i += 1) sim.step(0.1)
+    expect(sim.dispatch({ type: 'lineUpAndWait', aircraftId: 'foll' }).ok).toBe(true)
+    expect(sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'foll' }).ok).toBe(false)
+
+    // Step until #1 rotates. It is STILL on the runway and NOT yet departed — proving #2 gets
+    // cleared behind it (anticipated separation), not after #1 has vacated the whole runway.
+    for (let i = 0; i < 300 && (A(sim, 'lead')?.groundspeed ?? 999) < 120; i += 1) sim.step(0.1)
+    expect(A(sim, 'lead').onRunway).toBe(true)
+    expect(sim.snapshot().departed).toBe(0)
+    expect(sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'foll' }).ok).toBe(true)
+
+    // Both aircraft complete their departures and leave the surface.
+    for (let i = 0; i < 3000 && sim.snapshot().departed < 2; i += 1) sim.step(0.1)
+    expect(sim.snapshot().departed).toBe(2)
+    expect(sim.snapshot().aircraft).toHaveLength(0)
   })
 
   it('refuses to hand off a crossing aircraft, and cross-runway still releases it', () => {

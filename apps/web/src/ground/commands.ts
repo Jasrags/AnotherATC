@@ -31,24 +31,29 @@ export function commandsFor(controller: GroundController, item: StripItem, aircr
     return [{ label: 'Rolling — with tower', action: { kind: 'soon' } }]
   }
 
-  // Tower-owned (handed off from Ground): Local Control's runway actions.
+  // Tower-owned (handed off from Ground): Local Control's runway actions. Gate the runway
+  // clearances with a visible reason (wake / runway busy) rather than a silent refusal.
   if (item.controlledBy === 'tower') {
-    const takeoff: MenuCommand = {
-      label: 'Cleared for takeoff',
-      action: { kind: 'run', run: () => send({ type: 'clearedForTakeoff', aircraftId: id }) },
-    }
+    // A stationary occupant (lined up or crossing) blocks a line-up; a rolling departure doesn't.
+    const runwayBlockedForLineup = aircraft.some((o) => o.id !== id && o.onRunway && o.status !== 'departing')
+    // A takeoff needs the runway clear of anything not yet rotated (self excluded).
+    const runwayBlockedForTakeoff = aircraft.some((o) => o.id !== id && o.blocksTakeoff)
+
+    const takeoff: MenuCommand =
+      item.wakeHoldSec > 0
+        ? { label: `Cleared for takeoff — wake ${item.wakeHoldSec}s`, action: { kind: 'soon' } }
+        : runwayBlockedForTakeoff
+          ? { label: 'Cleared for takeoff — runway busy', action: { kind: 'soon' } }
+          : { label: 'Cleared for takeoff', action: { kind: 'run', run: () => send({ type: 'clearedForTakeoff', aircraftId: id }) } }
+
     if (item.status === 'lineUpWait') {
       return [takeoff, { label: 'Hold position', action: { kind: 'soon' } }]
     }
     if (item.status === 'holdShort') {
-      return [
-        {
-          label: 'Line up and wait',
-          action: { kind: 'run', run: () => send({ type: 'lineUpAndWait', aircraftId: id }) },
-        },
-        takeoff,
-        { label: 'Hold position', action: { kind: 'soon' } },
-      ]
+      const lineup: MenuCommand = runwayBlockedForLineup
+        ? { label: 'Line up and wait — runway busy', action: { kind: 'soon' } }
+        : { label: 'Line up and wait', action: { kind: 'run', run: () => send({ type: 'lineUpAndWait', aircraftId: id }) } }
+      return [lineup, takeoff, { label: 'Hold position', action: { kind: 'soon' } }]
     }
     // Defensive net: today a Tower-owned aircraft is only ever holdShort / lineUpWait /
     // departing (departing is handled above), so this is unreachable — but if the sim grows a

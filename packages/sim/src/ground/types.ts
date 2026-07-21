@@ -85,6 +85,12 @@ export interface GroundAircraft {
   intent: GroundIntent
   /** Assigned gate: origin for departures, destination for arrivals (null if none). */
   gate: string | null
+  /** Physically on the runway surface right now (a takeoff roll, a line-up, or a crossing). */
+  onRunway: boolean
+  /** Occupies the runway in a way that blocks another aircraft's takeoff clearance. True for a
+   *  stationary occupant (lined up / crossing) and a departure still below rotation speed; false
+   *  once a departure has rotated (near liftoff) and the next may be cleared behind it. */
+  blocksTakeoff: boolean
   /** Too close to another aircraft — a separation conflict. */
   conflict: boolean
   /** Callsign of the traffic this aircraft has been told to give way to, or null. */

@@ -34,6 +34,11 @@ export interface StripItem {
   /** Holding short of its own departure runway (offer Contact tower) vs. to cross (offer
    *  Cross runway). Only meaningful when status is 'holdShort'. */
   holdingForTakeoff: boolean
+  /** Physically on the runway surface right now (line-up, takeoff roll, or crossing). */
+  onRunway: boolean
+  /** Occupies the runway in a way that blocks another aircraft's takeoff clearance (any
+   *  on-runway aircraft except a departure that has rotated). Gates the takeoff-clearance UI. */
+  blocksTakeoff: boolean
   /** Named taxiways the current route follows, in order (e.g. ["A","B"]). */
   via: string[]
   /** Callsign of the traffic this aircraft is giving way to, or null. */
@@ -214,7 +219,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
     let nextSig = `${position}|${selected ?? '-'}`
     nextSig += draft ? `~${draft.id}:${draft.via.join('.')}` : ''
     for (const a of acs)
-      nextSig += `|${a.id}:${a.status}:${a.controlledBy}:${vias.get(a.id)!.join('.')}:${a.giveWayTo ?? ''}:${a.squawk ?? ''}:${a.wakeHoldSec}:${a.serviceSec}`
+      nextSig += `|${a.id}:${a.status}:${a.controlledBy}:${a.onRunway ? 'R' : ''}${a.blocksTakeoff ? 'B' : ''}:${vias.get(a.id)!.join('.')}:${a.giveWayTo ?? ''}:${a.squawk ?? ''}:${a.wakeHoldSec}:${a.serviceSec}`
     if (nextSig === sig) return
     sig = nextSig
     snapshot = {
@@ -231,6 +236,8 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
         intent: a.intent,
         gate: a.gate,
         holdingForTakeoff: a.holdingForTakeoff,
+        onRunway: a.onRunway,
+        blocksTakeoff: a.blocksTakeoff,
         via: vias.get(a.id)!,
         giveWayTo: a.giveWayTo,
         squawk: a.squawk,
