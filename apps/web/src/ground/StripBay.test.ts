@@ -15,6 +15,7 @@ function strip(over: Partial<StripItem> = {}): StripItem {
     holdingForTakeoff: true,
     onRunway: false,
     blocksTakeoff: false,
+    onShortFinal: false,
     altitude: 0,
     finalNm: 0,
     via: [],

@@ -98,10 +98,17 @@ export interface GroundAircraft {
   gate: string | null
   /** Physically on the runway surface right now (a takeoff roll, a line-up, or a crossing). */
   onRunway: boolean
-  /** Occupies the runway in a way that blocks another aircraft's takeoff clearance. True for a
-   *  stationary occupant (lined up / crossing) and a departure still below rotation speed; false
-   *  once a departure has rotated (near liftoff) and the next may be cleared behind it. */
+  /** Occupies the *surface* of the runway in a way that blocks another aircraft's takeoff
+   *  clearance. True for a stationary occupant (lined up / crossing) and a departure still below
+   *  rotation speed; false once a departure has rotated (near liftoff) and the next may be
+   *  cleared behind it. Note this is only half of "is the runway available" — see
+   *  {@link onShortFinal} for the airborne half; the sim gates clearances on their union. */
   blocksTakeoff: boolean
+  /** On final and close enough in to own the runway: nothing may be cleared onto the surface
+   *  underneath it (no takeoff, no line-up, no crossing, no second landing). Together with
+   *  {@link blocksTakeoff} this is the sim's full runway-clear predicate, exposed so the UI can
+   *  gate and explain a clearance exactly as the sim would refuse it. */
+  onShortFinal: boolean
   /** Too close to another aircraft — a separation conflict. */
   conflict: boolean
   /** Callsign of the traffic this aircraft has been told to give way to, or null. */

@@ -16,6 +16,7 @@ function strip(over: Partial<StripItem> = {}): StripItem {
     holdingForTakeoff: false,
     onRunway: false,
     blocksTakeoff: false,
+    onShortFinal: false,
     altitude: 0,
     finalNm: 0,
     via: [],
@@ -310,7 +311,7 @@ describe('commandsFor — Tower arrivals', () => {
 
   it('blocks a departure line-up and takeoff under traffic on short final', () => {
     const { controller } = fakeController()
-    const inbound = strip({ id: 'b', callsign: 'UAL2', status: 'landing', controlledBy: 'tower', intent: 'arrival', altitude: 300, finalNm: 1 })
+    const inbound = strip({ id: 'b', callsign: 'UAL2', status: 'landing', controlledBy: 'tower', intent: 'arrival', altitude: 300, finalNm: 1, onShortFinal: true })
     const dep = strip({ status: 'holdShort', controlledBy: 'tower', holdingForTakeoff: true })
     const cmds = commandsFor(controller, dep, [inbound])
     expect(labels(cmds)).toEqual([

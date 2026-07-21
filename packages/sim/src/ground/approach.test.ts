@@ -173,6 +173,61 @@ describe('landing clearance', () => {
   })
 })
 
+describe('ground commands are refused to an aircraft in the air', () => {
+  // The sim is the authority, not the menu: a surface command dispatched to an aircraft on
+  // final used to be accepted, which could stop it dead in mid-air (never landing, never
+  // going around) or taxi an "airborne" target across the field on a graph route.
+  const groundCommands = [
+    { type: 'hold' as const, aircraftId: 'a' },
+    { type: 'resume' as const, aircraftId: 'a' },
+    { type: 'taxiTo' as const, aircraftId: 'a', dest: GATE },
+    { type: 'taxiToGoal' as const, aircraftId: 'a' },
+    { type: 'taxiVia' as const, aircraftId: 'a', taxiways: [], dest: GATE },
+    { type: 'taxiViaGoal' as const, aircraftId: 'a', taxiways: [] },
+  ]
+
+  it.each(groundCommands.map((c) => [c.type, c] as const))('refuses %s on final', (_type, cmd) => {
+    const sim = createGroundSim([arrivalOnFinal('a')], { guard, graph })
+    expect(sim.dispatch(cmd)).toEqual({ ok: false, reason: 'aircraft is airborne' })
+  })
+
+  it('an attempted hold does not freeze an arrival in mid-air', () => {
+    const sim = createGroundSim([arrivalOnFinal('a')], { guard, graph })
+    sim.dispatch({ type: 'clearedToLand', aircraftId: 'a' })
+    sim.dispatch({ type: 'hold', aircraftId: 'a' })
+    run(sim, 300)
+    const a = A(sim, 'a')!
+    expect(a.groundspeed).toBeGreaterThan(100) // still flying the approach
+    expect(a.finalNm).toBeLessThan(4)
+  })
+
+  it('accepts them again once it is on the ground under Ground control', () => {
+    const sim = createGroundSim([arrivalOnFinal('a')], { guard, graph })
+    sim.dispatch({ type: 'clearedToLand', aircraftId: 'a' })
+    for (let i = 0; i < 4000 && A(sim, 'a')?.controlledBy !== 'ground'; i += 1) sim.step(0.1)
+    expect(A(sim, 'a')!.controlledBy).toBe('ground')
+    expect(sim.dispatch({ type: 'hold', aircraftId: 'a' })).toEqual({ ok: true })
+  })
+})
+
+describe('airborne arrivals must be constructed with a gate to taxi to', () => {
+  it('refuses an airborne init with no goalPoint rather than stranding it on the runway', () => {
+    // Without a goal the rollout hands to Ground with nowhere to go: it stops on the runway,
+    // is never counted arrived, is never removed, and blocks the runway for everyone else.
+    const bad: AircraftInit = {
+      id: 'x',
+      callsign: 'x',
+      type: 'B738',
+      wake: 'M',
+      path: [FIX, THRESHOLD],
+      targetSpeed: 140,
+      airborne: true,
+      intent: 'arrival',
+    }
+    expect(() => createGroundSim([bad], { guard, graph })).toThrow(/goalPoint/)
+  })
+})
+
 describe('arrival end-to-end: final → land → exit → Ground → gate', () => {
   it('lands, is handed to Ground on rollout, taxis to its gate and counts as arrived', () => {
     const sim = createGroundSim([arrivalOnFinal('a')], { guard, graph })

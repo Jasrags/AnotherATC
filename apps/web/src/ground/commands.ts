@@ -1,11 +1,4 @@
-import { SHORT_FINAL_NM } from '@anotheratc/sim'
 import type { GroundController, StripItem } from './controller'
-
-/** Traffic on short final owns the runway — nothing may be cleared onto it underneath.
- *  Mirrors the sim's runway-clear predicate so the menu names the real reason. */
-function ownsRunwayFromFinal(o: StripItem): boolean {
-  return (o.status === 'onFinal' || o.status === 'landing') && o.finalNm <= SHORT_FINAL_NM
-}
 
 /** A leaf action inside a submenu (a concrete target for a parameterized command). */
 export interface MenuLeaf {
@@ -48,7 +41,7 @@ export function commandsFor(controller: GroundController, item: StripItem, aircr
     // what the sim gates the landing clearance on, so mirror it in the disabled label.
     if (item.intent === 'arrival') {
       if (item.status === 'onFinal') {
-        const runwayBusy = aircraft.some((o) => o.id !== id && (o.blocksTakeoff || ownsRunwayFromFinal(o)))
+        const runwayBusy = aircraft.some((o) => o.id !== id && (o.blocksTakeoff || o.onShortFinal))
         return [
           runwayBusy
             ? { key: 'land', label: 'Cleared to land — runway busy', action: { kind: 'soon' } }
@@ -67,10 +60,10 @@ export function commandsFor(controller: GroundController, item: StripItem, aircr
     // A stationary occupant (lined up or crossing) blocks a line-up; a rolling departure doesn't.
     // Traffic on short final blocks both — you can't put anything under a landing aircraft.
     const runwayBlockedForLineup = aircraft.some(
-      (o) => o.id !== id && ((o.onRunway && o.status !== 'departing') || ownsRunwayFromFinal(o)),
+      (o) => o.id !== id && ((o.onRunway && o.status !== 'departing') || o.onShortFinal),
     )
     // A takeoff needs the runway clear of anything not yet rotated (self excluded).
-    const runwayBlockedForTakeoff = aircraft.some((o) => o.id !== id && (o.blocksTakeoff || ownsRunwayFromFinal(o)))
+    const runwayBlockedForTakeoff = aircraft.some((o) => o.id !== id && (o.blocksTakeoff || o.onShortFinal))
 
     // Reason order mirrors the sim's dispatch guards (runway-occupied is checked before wake),
     // so the disabled label names the reason the sim would actually refuse with. `key` stays

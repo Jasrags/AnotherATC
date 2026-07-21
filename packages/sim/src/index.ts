@@ -11,7 +11,7 @@ export type {
   LatLon,
 } from './world/types'
 
-export { createGroundSim, SHORT_FINAL_NM } from './ground/sim'
+export { createGroundSim } from './ground/sim'
 export type {
   AircraftInit,
   ApproachConfig,

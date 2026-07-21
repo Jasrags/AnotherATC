@@ -103,8 +103,11 @@ const APPROACH_SPEED_KT = 140
 const ROLLOUT_DECEL = 6
 /** Inside this distance (nm) from the threshold, an arrival on final owns the runway:
  *  no takeoff clearance and no line-up may be issued underneath it. Exported so the UI can
- *  gate (and explain) the same clearances the sim would refuse. */
-export const SHORT_FINAL_NM = 1.5
+ *  gate the same clearances the sim would refuse — but they read the `onShortFinal` flag off
+ *  the snapshot rather than re-deriving this comparison from a rounded display distance. */
+const SHORT_FINAL_NM = 1.5
+/** How often (s) a rolled-out arrival retries routing off the runway when routing fails. */
+const EXIT_RETRY_SEC = 1
 /** How close (nm) counts as reaching a gate. */
 const GATE_EPS = 0.02
 /** Seconds an arrival dwells at the gate before it clears the stand. */
@@ -198,6 +201,7 @@ interface Internal
     | 'serviceSec'
     | 'onRunway'
     | 'blocksTakeoff'
+    | 'onShortFinal'
     | 'finalNm'
   > {
   path: readonly Point[]
@@ -228,6 +232,8 @@ interface Internal
   threshold: Point | null
   /** Length (nm) of the full final, used to derive the descent profile. */
   finalLenNm: number
+  /** Seconds until the next Tower→Ground exit-routing attempt (see {@link EXIT_RETRY_SEC}). */
+  exitRetrySec: number
   /** Parallel ground services still counting down while parked at the gate (empty when none). */
   services: { kind: string; total: number; remaining: number }[]
   /** Undirected edge (key) the reservation is currently making this aircraft hold short of, or null. */
@@ -275,6 +281,10 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     // An aircraft on final is above the surface, so the runway hold-short split must not
     // apply — its path deliberately ends *on* the runway, at the landing threshold.
     const airborne = init.airborne === true
+    // An arrival that lands with nowhere to go stops on the runway after the handoff: never
+    // counted, never removed, blocking the runway for good. Reject it at the boundary instead.
+    if (airborne && !init.goalPoint)
+      throw new Error(`airborne arrival "${init.id}" needs a goalPoint (the gate it taxis to)`)
     const { path, held } = airborne ? { path: [...init.path], held: null } : plan(init.path)
     const start = path[0] ?? ([0, 0] as Point)
     const next = path[1]
@@ -314,6 +324,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       rollingOut: false,
       threshold,
       finalLenNm: threshold ? pathLength(path) : 0,
+      exitRetrySec: 0,
       services:
         servicing && (init.intent ?? 'departure') === 'departure'
           ? servicing.services.map((s) => ({ kind: s.kind, total: s.sec, remaining: s.sec }))
@@ -807,9 +818,25 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
   const ACCEPTED: DispatchResult = { ok: true }
   const refused = (reason: string): DispatchResult => ({ ok: false, reason })
 
+  /** Surface-movement commands. Dispatched to an aircraft in the air they are not merely
+   *  meaningless but destructive — `hold` would stop it dead on final (never landing, never
+   *  going around, blocking the runway forever) and a taxi clearance would drive an aircraft
+   *  still flagged airborne along a graph route. The sim refuses them itself; the menu's
+   *  phase gating is a convenience, not the authority. */
+  const GROUND_ONLY: ReadonlySet<GroundCommand['type']> = new Set([
+    'taxiTo',
+    'taxiToGoal',
+    'taxiVia',
+    'taxiViaGoal',
+    'hold',
+    'resume',
+    'giveWay',
+  ])
+
   function dispatch(command: GroundCommand): DispatchResult {
     const ac = find(command.aircraftId)
     if (!ac) return refused(`unknown aircraft "${command.aircraftId}"`)
+    if (ac.airborne && GROUND_ONLY.has(command.type)) return refused('aircraft is airborne')
     switch (command.type) {
       case 'taxiTo':
         return routeTo(ac, command.dest, command.exact ?? false)
@@ -1029,18 +1056,24 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
 
   /**
    * Tower → Ground handoff: once the rollout has slowed to taxi speed the arrival can leave
-   * the runway, so it becomes an ordinary Ground aircraft routed to its gate. If no route can
-   * be built yet it keeps rolling out and the handoff is retried next tick.
+   * the runway, so it becomes an ordinary Ground aircraft routed to its gate. `goalPoint` is
+   * guaranteed for an airborne init (validated in {@link makeInternal}). Routing can still fail
+   * — no graph, or a gate the graph can't reach — so the attempt is retried, but at
+   * {@link EXIT_RETRY_SEC} rather than every tick: a failing route is a full Dijkstra search,
+   * and the aircraft is parked on the runway while it fails.
    */
-  function exitRunway(ac: Internal): void {
-    if (ac.goalPoint && !routeTo(ac, ac.goalPoint, true)) return
+  function exitRunway(ac: Internal, dt: number): void {
+    ac.exitRetrySec -= dt
+    if (ac.exitRetrySec > 0) return
+    ac.exitRetrySec = EXIT_RETRY_SEC
+    if (!ac.goalPoint || !routeTo(ac, ac.goalPoint, true)) return
     ac.rollingOut = false
     ac.controlledBy = 'ground'
   }
 
   /** Post-motion airborne bookkeeping: descend the final, touch down or go around at the
    *  threshold, and hand a slowed rollout over to Ground. */
-  function resolveApproach(ac: Internal): void {
+  function resolveApproach(ac: Internal, dt: number): void {
     if (ac.airborne) {
       const remaining = finalDistance(ac)
       if (ac.leg >= ac.path.length - 1 || remaining <= 1e-6) {
@@ -1051,7 +1084,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       ac.altitude = FINAL_ALT_FT * Math.min(1, remaining / (ac.finalLenNm || remaining))
       return
     }
-    if (ac.rollingOut && ac.groundspeed <= TAXI_SPEED_KT + 0.01) exitRunway(ac)
+    if (ac.rollingOut && ac.groundspeed <= TAXI_SPEED_KT + 0.01) exitRunway(ac, dt)
   }
 
   /** Detect goal completion; returns ids to remove. */
@@ -1134,7 +1167,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         }
       }
       fleet.forEach((ac, i) => advance(ac, dt, caps[i] ?? Infinity))
-      for (const ac of fleet) resolveApproach(ac)
+      for (const ac of fleet) resolveApproach(ac, dt)
       for (const id of resolveGoals(dt)) {
         const i = fleet.findIndex((a) => a.id === id)
         if (i >= 0) fleet.splice(i, 1)
@@ -1170,6 +1203,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
           gate: ac.gate,
           onRunway: onRunwayNow(ac),
           blocksTakeoff: occupiesForTakeoff(ac),
+          onShortFinal: onShortFinal(ac),
           conflict: ac.conflict,
           giveWayTo: ac.giveWayTo ? (find(ac.giveWayTo)?.callsign ?? null) : null,
           squawk: ac.squawk,

@@ -39,6 +39,10 @@ export interface StripItem {
   /** Occupies the runway in a way that blocks another aircraft's takeoff clearance (any
    *  on-runway aircraft except a departure that has rotated). Gates the takeoff-clearance UI. */
   blocksTakeoff: boolean
+  /** On final and close enough in to own the runway. Comes straight from the sim's own
+   *  predicate — never re-derived here from `finalNm`, which is rounded for display and
+   *  would disagree with the sim near the threshold distance. */
+  onShortFinal: boolean
   /** Height above the field in feet, rounded for display; 0 on the surface. */
   altitude: number
   /** Distance (nm) still to fly to the landing threshold, to 0.1 nm; 0 unless on final. */
@@ -225,7 +229,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
     // Range-to-threshold is continuous, so it enters the signature at display precision
     // (0.1 nm ≈ one re-render every ~2.5 s on final) rather than every frame.
     for (const a of acs)
-      nextSig += `|${a.id}:${a.status}:${a.controlledBy}:${a.onRunway ? 'R' : ''}${a.blocksTakeoff ? 'B' : ''}:${vias.get(a.id)!.join('.')}:${a.giveWayTo ?? ''}:${a.squawk ?? ''}:${a.wakeHoldSec}:${a.serviceSec}:${a.finalNm.toFixed(1)}`
+      nextSig += `|${a.id}:${a.status}:${a.controlledBy}:${a.onRunway ? 'R' : ''}${a.blocksTakeoff ? 'B' : ''}${a.onShortFinal ? 'F' : ''}:${vias.get(a.id)!.join('.')}:${a.giveWayTo ?? ''}:${a.squawk ?? ''}:${a.wakeHoldSec}:${a.serviceSec}:${a.finalNm.toFixed(1)}`
     if (nextSig === sig) return
     sig = nextSig
     snapshot = {
@@ -244,6 +248,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
         holdingForTakeoff: a.holdingForTakeoff,
         onRunway: a.onRunway,
         blocksTakeoff: a.blocksTakeoff,
+        onShortFinal: a.onShortFinal,
         altitude: Math.round(a.altitude / 50) * 50,
         finalNm: Math.round(a.finalNm * 10) / 10,
         via: vias.get(a.id)!,
