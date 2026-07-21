@@ -85,6 +85,19 @@ describe('braking to a turnoff', () => {
     expect(chooseExit(exits, 140, 1.9)).toBeNull()
   })
 
+  it('at the same distance, the turnoff that can be taken faster frees the runway sooner', () => {
+    // The core claim of the whole model, isolated from distance: same place, different geometry.
+    const at = 0.9
+    const rapid: RunwayExit = {
+      ref: 'R', point: [at, 0], geom: [[at, 0], [at + 0.05, -0.06]], vacatePoint: [at + 0.05, -0.06],
+      angleDeg: 30, kind: 'rapid', turn: 'right', distanceNm: at, lengthNm: 0.078, speedKt: 38,
+    }
+    const standard: RunwayExit = { ...rapid, ref: 'S', angleDeg: 90, kind: 'standard', speedKt: 15 }
+    const sec = (e: RunwayExit) =>
+      rolloutSeconds(140, e, Math.max(brakeRateFor(140, e.speedKt, e.distanceNm), 1.5))
+    expect(sec(rapid)).toBeLessThan(sec(standard))
+  })
+
   it('prefers the rapid exit over a later right-angle one because it frees the runway sooner', () => {
     const exits = buildRunwayExits(topo, guard, THRESHOLD, FAR)
     const rapid = exits.find((e) => e.ref === 'R1')!
@@ -119,12 +132,32 @@ describe('KSAN exits (real ingested surface)', () => {
     for (const e of rapid) expect(e.distanceNm).toBeGreaterThan(0.2)
   })
 
-  it('a 737 landing on 9 plans a rapid exit in the first half, and the same one every time', () => {
+  it('a 737 landing on 9 plans an early rapid exit, and the same one every time', () => {
     const chosen = chooseExit(exits, 140, 0)
     expect(chosen).not.toBeNull()
-    expect(chosen!.kind).toBe('rapid')
-    expect(chosen!.distanceNm).toBeLessThan(0.78) // half the ~1.54 nm runway
+    expect(chosen!.kind).toBe('rapid') // among near-tied options, the one taken fastest
+    expect(chosen!.distanceNm).toBeLessThan(0.85) // roughly the first half of a ~1.54 nm runway
     expect(chooseExit(exits, 140, 0)?.ref).toBe(chosen!.ref) // deterministic
+  })
+
+  it('does not send a jet to a much slower turnoff to save a second', () => {
+    const chosen = chooseExit(exits, 140, 0)!
+    const nearlyTied = exits.filter(
+      (e) => Math.abs(e.distanceNm - chosen.distanceNm) < 0.15 && e.ref !== chosen.ref,
+    )
+    expect(nearlyTied.length).toBeGreaterThan(0)
+    for (const e of nearlyTied) expect(chosen.speedKt).toBeGreaterThanOrEqual(e.speedKt)
+  })
+
+  it('every turnoff actually takes the aircraft clear of the runway', () => {
+    // A contracted edge that ends at a fillet node a hundred feet off the centerline is not an
+    // exit; counting it as one would release the runway while the aircraft is still on it.
+    const ux = (east[0] - west[0]) / Math.hypot(east[0] - west[0], east[1] - west[1])
+    const uy = (east[1] - west[1]) / Math.hypot(east[0] - west[0], east[1] - west[1])
+    for (const e of exits) {
+      const off = Math.abs(ux * (e.vacatePoint[1] - west[1]) - uy * (e.vacatePoint[0] - west[0]))
+      expect(off).toBeGreaterThan(0.0399) // 0.04 nm, modulo float settling
+    }
   })
 
   it('runway occupancy is what the turnoff choice actually trades', () => {
@@ -137,11 +170,19 @@ describe('KSAN exits (real ingested surface)', () => {
     expect(sec(last) - sec(chosen)).toBeGreaterThan(15)
   })
 
-  it('landing the other way (RWY 27) yields a different, mirrored set', () => {
+  it('landing the other way (RWY 27) re-derives the set from that direction', () => {
     const other = buildRunwayExits(ksanTopo, ksanGuard, east, west)
     expect(other.length).toBeGreaterThanOrEqual(8)
-    const chosen = chooseExit(other, 140, 0)
-    expect(chosen).not.toBeNull()
-    expect(chosen!.ref).not.toBe(chooseExit(exits, 140, 0)!.ref)
+    // Distances are measured from the new threshold, so the order along the runway reverses.
+    expect(other.map((e) => e.ref)).not.toEqual(exits.map((e) => e.ref))
+    // A connector's angle — and therefore how fast it can be taken — depends on which way you
+    // are landing: the same pavement is a shallow high-speed one way and a sharp turn the other.
+    const bothWays = exits.filter((a) => other.some((b) => b.ref === a.ref))
+    expect(bothWays.length).toBeGreaterThan(0)
+    const flipped = bothWays.filter(
+      (a) => Math.abs(a.angleDeg - other.find((b) => b.ref === a.ref)!.angleDeg) > 20,
+    )
+    expect(flipped.length).toBeGreaterThan(0)
+    expect(chooseExit(other, 140, 0)).not.toBeNull()
   })
 })

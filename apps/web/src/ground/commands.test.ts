@@ -298,8 +298,8 @@ describe('commandsFor — Tower arrivals', () => {
   it('lists only the turnoffs the sim says are still makeable', () => {
     const { controller, dispatched } = fakeController()
     const exitOptions: RunwayExit[] = [
-      { ref: 'B6', point: [0, 0], vacatePoint: [0, -0.1], angleDeg: 30, kind: 'rapid', turn: 'left', distanceNm: 0.7, speedKt: 40 },
-      { ref: 'C2', point: [1, 0], vacatePoint: [1, -0.1], angleDeg: 90, kind: 'standard', turn: 'right', distanceNm: 1.4, speedKt: 12 },
+      { ref: 'B6', point: [0, 0], geom: [[0, 0], [0, -0.1]], vacatePoint: [0, -0.1], angleDeg: 30, kind: 'rapid', turn: 'left', distanceNm: 0.7, lengthNm: 0.1, speedKt: 40 },
+      { ref: 'C2', point: [1, 0], geom: [[1, 0], [1, -0.1]], vacatePoint: [1, -0.1], angleDeg: 90, kind: 'standard', turn: 'right', distanceNm: 1.4, lengthNm: 0.1, speedKt: 12 },
     ]
     const cmds = commandsFor(controller, onFinal({ exitOptions }), [])
     const exit = cmds.find((c) => c.key === 'exit')!.action

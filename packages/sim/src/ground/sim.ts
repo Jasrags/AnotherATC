@@ -19,6 +19,10 @@ import {
   chooseExit,
   MAX_BRAKE_KT_S,
   MIN_BRAKE_KT_S,
+  cannotMake,
+  profileCap,
+  requiredBrakeRate,
+  turnSpeedLimits,
   type RunwayExit,
 } from './runwayExits'
 
@@ -254,8 +258,11 @@ interface Internal
   exit: RunwayExit | null
   /** Turnoff the controller assigned by designator; overrides the default choice. */
   assignedExitRef: string | null
-  /** Deceleration (kt/s) for the current rollout, solved so it reaches `exit` at its speed. */
+  /** Deceleration (kt/s) for the current rollout, solved so every corner ahead is met at its
+   *  own speed limit — not just the turnoff entrance. */
   brakeRate: number
+  /** Speed limit (kt) at each vertex of the current rollout path, from the turn geometry. */
+  speedLimits: number[]
   /** Fully clear of the runway — past the turnoff's hold-short point, not merely off the
    *  pavement band. This is the "vacated" a controller means, and it releases the runway. */
   vacated: boolean
@@ -356,6 +363,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       exit: null,
       assignedExitRef: null,
       brakeRate: ROLLOUT_DECEL,
+      speedLimits: [],
       vacated: false,
       groundPending: false,
       services:
@@ -1080,8 +1088,11 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         if (ac.vacated) return refused('already clear of the runway')
         const option = exitOptionsFor(ac).find((e) => e.ref === command.ref)
         if (!option) return refused(`unable ${command.ref} — cannot slow down in time`)
+        // Re-solving mid-roll can fail even though the exit looked reachable: the corners
+        // inside the connector bind harder than its entrance does.
+        if (ac.rollingOut && !planExitRoll(ac, option))
+          return refused(`unable ${command.ref} — too fast for that turn`)
         ac.assignedExitRef = option.ref
-        if (ac.rollingOut) planExitRoll(ac, option)
         return ACCEPTED
       }
       case 'contactGround': {
@@ -1093,8 +1104,10 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         if (ac.airborne) return refused('still airborne')
         if (!ac.rollingOut) return refused('not on the landing roll')
         if (ac.groundPending) return refused('already sent to ground')
+        // Arm the change only if it isn't applicable yet; a failed immediate handoff must not
+        // leave the aircraft looking "already sent" when it was actually refused.
+        if (ac.vacated) return handOffToGround(ac) ? ACCEPTED : refused('no taxi route to the gate')
         ac.groundPending = true
-        if (ac.vacated && !handOffToGround(ac)) return refused('no taxi route to the gate')
         return ACCEPTED
       }
       case 'clearedToLand': {
@@ -1125,40 +1138,66 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     ac.holding = false
     // `threshold` is deliberately kept: it is the landing threshold every exit distance and
     // rollout re-plan is measured from.
-    const assigned = ac.threshold
-      ? exitOptionsFor(ac).find((e) => e.ref === ac.assignedExitRef)
-      : undefined
-    const planned = assigned ?? (ac.threshold ? chooseExit(exitOptionsFor(ac), ac.groundspeed, 0) : null)
-    if (planned) {
-      planExitRoll(ac, planned)
-      return
-    }
-    // No charted turnoff to aim at (no routing graph, or nothing reachable): brake to taxi
-    // speed straight down the centerline, as the sim did before exits existed.
-    const far = farRunwayEnd([ac.x, ac.y])
-    ac.exit = null
-    ac.brakeRate = ROLLOUT_DECEL
-    ac.path = far ? [[ac.x, ac.y], far] : [[ac.x, ac.y]]
-    ac.leg = 0
-    ac.targetSpeed = TAXI_SPEED_KT
+    planRollout(ac)
   }
 
   /**
-   * Aim the rollout at a turnoff: drive the centerline to the exit, then off it to the point
-   * where the aircraft is clear. The braking rate is *solved* so the aircraft arrives at the
-   * turnoff at the speed that turn can be taken — which is what makes a rapid exit actually
-   * save runway occupancy instead of just being a shorter line on the map.
+   * Aim the rollout at a turnoff. The aircraft drives the connector's **real polyline**, not the
+   * chord between its endpoints — cutting the corner both looks wrong and hides the curve that
+   * limits the speed. The braking rate is then solved against every corner ahead, so the
+   * aircraft arrives at each one already slow enough for it.
+   *
+   * Returns false when the turnoff cannot be made from here without braking harder than
+   * {@link MAX_BRAKE_KT_S}: the aircraft declines it rather than taking a turn too fast.
    */
-  function planExitRoll(ac: Internal, e: RunwayExit): void {
-    const remaining = Math.max(1e-6, e.distanceNm - alongRunway(ac.threshold ?? [ac.x, ac.y], [ac.x, ac.y]))
-    const required = brakeRateFor(ac.groundspeed, e.speedKt, remaining)
+  function planExitRoll(ac: Internal, e: RunwayExit): boolean {
+    const path: Point[] = [[ac.x, ac.y], ...e.geom]
+    const limits = turnSpeedLimits(path)
+    // The corner where it leaves the runway is the turnoff's own rating: the raw polyline
+    // deflection there understates it, because the fillet is rarely surveyed (see FILLET_NM).
+    limits[1] = Math.min(limits[1] ?? Infinity, e.speedKt)
+    limits[limits.length - 1] = 0 // it comes to a stop clear of the runway
+    if (cannotMake(ac.groundspeed, [ac.x, ac.y], path, limits, 0, MAX_BRAKE_KT_S)) return false
+    const required = requiredBrakeRate(ac.groundspeed, [ac.x, ac.y], path, limits)
     ac.exit = e
+    ac.speedLimits = limits
     ac.brakeRate = Math.min(MAX_BRAKE_KT_S, Math.max(MIN_BRAKE_KT_S, required))
-    ac.path = [[ac.x, ac.y], e.point, e.vacatePoint]
+    ac.path = path
     ac.leg = 0
     ac.held = null
-    ac.targetSpeed = e.speedKt
+    // A rollout only ever slows down: the turnoff's rating is a ceiling, not a goal, so an
+    // aircraft already slower than it must not accelerate back up to take the turn.
+    ac.targetSpeed = Math.min(ac.groundspeed, e.speedKt)
     ac.holding = false
+    return true
+  }
+
+  /** Roll straight ahead to the far end: no turnoff can be made, so keep braking on the
+   *  centerline and let the controller (or the next re-plan) sort it out. */
+  function planStraightRoll(ac: Internal): void {
+    const far = farRunwayEnd([ac.x, ac.y])
+    ac.exit = null
+    ac.speedLimits = []
+    ac.brakeRate = ROLLOUT_DECEL
+    ac.path = far ? [[ac.x, ac.y], far] : [[ac.x, ac.y]]
+    ac.leg = 0
+    ac.targetSpeed = Math.max(ac.groundspeed, TAXI_SPEED_KT)
+  }
+
+  /**
+   * Choose and plan the turnoff: the assigned one if it can still be made, else the one that
+   * frees the runway soonest, else — walking outward — any turnoff at all, else straight ahead.
+   * This is the "unable, we'll take the next one" fall-through: an aircraft that is too fast for
+   * the turnoff it was planning declines it and continues instead of wrenching off at speed.
+   */
+  function planRollout(ac: Internal): void {
+    const options = exitOptionsFor(ac)
+    const assigned = options.find((e) => e.ref === ac.assignedExitRef)
+    const preferred = chooseExit(options, ac.groundspeed, alongRunway(ac.threshold ?? [ac.x, ac.y], [ac.x, ac.y]))
+    for (const candidate of [assigned, preferred, ...options]) {
+      if (candidate && planExitRoll(ac, candidate)) return
+    }
+    planStraightRoll(ac)
   }
 
   /**
@@ -1195,6 +1234,21 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     ac.groundPending = false
     ac.controlledBy = 'ground'
     return true
+  }
+
+  /**
+   * Speed cap for a rollout: fast enough to keep rolling, slow enough that every corner still
+   * ahead is met at its own limit. If even maximum braking can no longer achieve that — the
+   * aircraft is simply too fast for the turnoff it was planning — it declines and re-plans
+   * ("unable, we'll take the next one") rather than taking the turn dangerously.
+   */
+  function rolloutCap(ac: Internal): number {
+    if (ac.speedLimits.length === 0) return Infinity
+    if (cannotMake(ac.groundspeed, [ac.x, ac.y], ac.path, ac.speedLimits, ac.leg, MAX_BRAKE_KT_S)) {
+      planRollout(ac)
+      if (ac.speedLimits.length === 0) return Infinity
+    }
+    return profileCap([ac.x, ac.y], ac.path, ac.speedLimits, ac.leg, ac.brakeRate)
   }
 
   /** Post-motion airborne bookkeeping: descend the final, touch down or go around at the
@@ -1292,9 +1346,11 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       time += dt
       tickServices(dt)
       const caps = fleet.map((ac) =>
-        ac.departing || ac.airborne || ac.rollingOut
-          ? Infinity // a takeoff roll, a final, and a landing rollout aren't taxi movements
-          : Math.min(separationCap(ac), reservationCap(ac), giveWayCap(ac)),
+        ac.departing || ac.airborne
+          ? Infinity // a takeoff roll and a final aren't taxi movements
+          : ac.rollingOut
+            ? rolloutCap(ac) // …and a landing rollout follows its own turn-speed profile
+            : Math.min(separationCap(ac), reservationCap(ac), giveWayCap(ac)),
       )
       // reservationCap set each aircraft's blockedEdge; accrue continuous hold time and,
       // once it's sustained, reroute around the block if a viable parallel exists.
