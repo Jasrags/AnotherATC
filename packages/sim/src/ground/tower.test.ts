@@ -67,6 +67,27 @@ describe('tower — departures', () => {
     expect(sim.snapshot().departed).toBe(0)
   })
 
+  it('lines up onto the runway where it holds, not at a far departure-runway goal', () => {
+    // A dev-spawned departure holds short mid-runway (x≈0) but its goal is the far east
+    // threshold ([0.9,0]). Line-up must move it onto the runway in front of it (x≈0), not
+    // teleport it toward the goal end.
+    const dep: AircraftInit = {
+      id: 'd', callsign: 'd', type: 'B738', wake: 'M',
+      path: [[0, -0.5], [0, -0.1], [0, 0.1], [0, 0.5]],
+      targetSpeed: 15, intent: 'departure', goalPoint: [0.9, 0],
+    }
+    const sim = createGroundSim([dep], { guard })
+    taxiToHoldShort(sim)
+    expect(A(sim, 'd').holdShort).toBe(true)
+    expect(sim.dispatch({ type: 'contactTower', aircraftId: 'd' })).toEqual({ ok: true }) // goal on runway → a takeoff hold
+    expect(sim.dispatch({ type: 'lineUpAndWait', aircraftId: 'd' })).toEqual({ ok: true })
+    for (let i = 0; i < 400; i += 1) sim.step(0.1)
+    const d = A(sim, 'd')
+    expect(d.status).toBe('lineUpWait')
+    expect(Math.abs(d.x)).toBeLessThan(0.1) // lined up where it held (x≈0), NOT near the goal x=0.9
+    expect(Math.abs(d.y)).toBeLessThan(0.02) // on the centerline
+  })
+
   it('cleared for takeoff from line-up-and-wait rolls and departs', () => {
     const sim = createGroundSim([departure('d')], { guard })
     taxiToHoldShort(sim)

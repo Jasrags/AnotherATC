@@ -286,6 +286,27 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     if (runwayEnds.length < 2) return null
     return dist(from, runwayEnds[0]!) >= dist(from, runwayEnds[1]!) ? runwayEnds[0]! : runwayEnds[1]!
   }
+  /** The point on the runway centerline nearest an aircraft — where it lines up when told to
+   *  line up and wait (i.e. onto the runway in front of it, not at some far threshold). */
+  const nearestRunwayPoint = (from: Point): Point | null => {
+    if (!guard) return null
+    let best: Point | null = null
+    let bestD = Infinity
+    for (const s of guard.segments) {
+      const vx = s.b[0] - s.a[0]
+      const vy = s.b[1] - s.a[1]
+      const l2 = vx * vx + vy * vy
+      let t = l2 > 0 ? ((from[0] - s.a[0]) * vx + (from[1] - s.a[1]) * vy) / l2 : 0
+      t = t < 0 ? 0 : t > 1 ? 1 : t
+      const p: Point = [s.a[0] + t * vx, s.a[1] + t * vy]
+      const d = dist(from, p)
+      if (d < bestD) {
+        bestD = d
+        best = p
+      }
+    }
+    return best
+  }
 
   const fleet: Internal[] = inits.map(makeInternal)
   const find = (id: string): Internal | undefined => fleet.find((a) => a.id === id)
@@ -792,7 +813,9 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         if (guard && (!ac.goalPoint || !onRunway(ac.goalPoint, guard)))
           return refused('route crosses the runway — clear it to cross, not to line up')
         if (guard && fleet.some((o) => o !== ac && onRunway([o.x, o.y], guard))) return refused('runway occupied')
-        const lineup: Point = ac.goalPoint ?? [ac.x, ac.y]
+        // Line up onto the runway centerline in front of the aircraft (nearest point), not at
+        // its far departure-runway goal — so it lines up where it's holding, at either end.
+        const lineup: Point = nearestRunwayPoint([ac.x, ac.y]) ?? ac.goalPoint ?? [ac.x, ac.y]
         clearDiversion(ac)
         ac.path = [[ac.x, ac.y], lineup]
         ac.leg = 0

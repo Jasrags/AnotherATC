@@ -136,6 +136,9 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
   const guard = buildRunwayGuard(KSAN_SURFACE)
   const game = buildKsanGroundGame(1)
   const { destinations } = game
+  // The runway a dev-spawned departure aims to take off from (RWY 27 = KSAN's departure runway).
+  const departureRunway =
+    destinations.find((d) => d.id === 'rwy27') ?? destinations.find((d) => d.kind === 'runway')
   // Dev mode starts empty: no seeded aircraft, no auto-spawner, no servicing gate.
   const sim = dev
     ? createGroundSim([], { graph, guard })
@@ -251,6 +254,9 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
         path: [place.point],
         targetSpeed: 0,
         intent: 'departure' as const,
+        // Give it a departure-runway goal so it's a takeoff (not a crossing) when it holds
+        // short — otherwise the Tower handoff / takeoff flow can't engage in the sandbox.
+        ...(departureRunway ? { goalPoint: departureRunway.point } : {}),
       }
       sim.add(place.gate ? { ...base, gate: place.gate } : base)
       selected = id
