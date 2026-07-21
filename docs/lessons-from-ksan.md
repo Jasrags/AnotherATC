@@ -194,3 +194,78 @@ scenario test per slice; that catches sequencing bugs, not *appearance* bugs.
 
 `docs/SAN` sat on an expired cycle, and the FAA had removed it from the server. Record the cycle
 in the folder README and refresh deliberately.
+
+---
+
+## The ramp and the router
+
+Added after modelling stands and turn constraints. Same rule: each is a bug that shipped.
+
+### 21. A gate node is a label, not a parking spot
+
+**What happened.** Stands were single points taken from OSM gate nodes, so arrivals cut across the
+apron to reach them and pushback shoved the aircraft toward whatever graph node was nearest —
+"backing off the stand in directions the paint never goes."
+
+**Why.** A gate node marks the stand *at the terminal*, a median **28 m** in from where the nose
+actually stops. Aircraft parked on it were a plane's length off the paint, so every manoeuvre that
+started from the stand started wrong. Five derived Terminal 1 stands parked *inside the building*.
+
+**Check.** Model a stand as its painted lead-in line (`ground/stands.ts`). Assert no stop mark
+falls inside a terminal polygon, and that each is nearer a terminal than its own entry.
+
+### 22. Matching stands by proximity picks the neighbour's line
+
+Adjacent stands sit closer together than a gate node sits from its own line. Measured at KSAN,
+nearest-endpoint matching agreed with the correct answer on only **19 of 32** stands.
+
+**Check.** Match `parking_position` ways to stands **by designator**. And do not assume the
+designators share the gate numbering — KSAN's refs `1`–`14` look like an old Terminal 1 scheme
+and are actually east-side and commuter stands.
+
+### 23. OSM way direction is not consistent
+
+28 of KSAN's lead-in lines run taxilane→stand and 4 run the other way. Trusting the winding order
+would have parked one stand in eight facing backwards.
+
+**Check.** Resolve orientation per line against independent geometry, then assert the result
+against something that didn't feed the rule — terminal polygons, in our case.
+
+### 24. A node-keyed router cannot see turns at all
+
+**What happened.** The taxi router planned **8 near-reversals (150°–180°)** into ordinary KSAN
+gate→runway routes, for months, invisibly. Aircraft pirouetted at junctions.
+
+**Why.** Dijkstra over bare nodes: the cost of reaching a junction carries no memory of how you
+entered it, so a turn angle is not a thing the search can even express.
+
+**Check.** Search (arriving edge → node) states. Survey the turn distribution on a new field
+*before* choosing a threshold — KSAN's had a wide empty band between 60° and 150°, which is what
+made 120° safe. A field without that gap needs the threshold justified, not copied.
+
+### 25. A physical constraint leaks at every seam you forget
+
+The turn limit was added to the router and reviewed as correct. Two seams bypassed it, both found
+by a reviewer *reproducing* rather than reading:
+
+- **A stop released it.** Commitment was derived from live groundspeed, so any hold — controller,
+  give-way, reservation — freed the aircraft to be re-cleared into an on-the-spot U-turn. Holds
+  are the normal way a clearance gets revisited, so this was the mainline path.
+- **`routeVia` was never converted.** A plain clearance refused a reversal while `taxi via <the
+  taxiway it is already on>` accepted one and drove the aircraft back over itself.
+- A third: the join leg from an aircraft's *position* onto the graph had no turn accounting at
+  all, so a fallback could reverse it onto the network.
+
+**Check.** When adding a physical constraint, enumerate every path that produces a route — not
+just the obvious one — and every state in which it should still hold. Ask specifically: what
+happens when the aircraft is *stopped*?
+
+### 26. Test fixtures can encode manoeuvres no aircraft can perform
+
+Adding the turn limit failed three existing tests. All three were correct failures: a synthetic
+field's rapid exit joined the parallel at 152° to reach a gate placed behind it, and two stand
+tests taxied an aircraft to the runway and then told it to drive back to its stand.
+
+**Check.** When a new physical rule breaks a test, work out whether the *test* was describing
+something impossible before relaxing the rule. Note this cuts both ways — one of my own new tests
+passed against the old buggy code and had to be rewritten until it discriminated.
