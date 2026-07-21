@@ -108,8 +108,10 @@ function strokeFeatures(ctx: Ctx, v: View, feats: SurfaceFeature[], color: strin
 
 /** Zoom at which stand paint becomes legible rather than a tangle across the aprons. */
 const STAND_LINE_SCALE = 1500
-/** Half-width (nm) of the bar painted across the line where the nose stops. */
-const STOP_BAR_NM = 0.006
+/** Half-length (px) of the bar across the line where the nose stops. Fixed in pixels, not nm:
+ *  the target that parks on it is a fixed-size square, so a world-scaled bar reads as wildly
+ *  out of proportion to the aircraft it is marking as you zoom. */
+const STOP_BAR_PX = 4
 
 /**
  * The painted lead-in lines, with the stop bar at the nose mark.
@@ -131,16 +133,16 @@ function drawStandLines(ctx: Ctx, v: View, stands: readonly Stand[]): void {
     trace(ctx, v, s.lead)
     ctx.stroke()
 
-    // The stop bar, square across the line the nose comes in on.
+    // The stop bar, square across the line the nose comes in on. Drawn in screen space so it
+    // stays a tick beside the target symbol at every zoom.
     const rad = (s.headingDeg * Math.PI) / 180
-    const nx = Math.cos(rad) * STOP_BAR_NM
-    const ny = -Math.sin(rad) * STOP_BAR_NM
+    const [sx, sy] = toScreen(v, s.stop[0], s.stop[1])
+    const px = Math.cos(rad) * STOP_BAR_PX
+    const py = Math.sin(rad) * STOP_BAR_PX
     ctx.setLineDash([])
     ctx.beginPath()
-    trace(ctx, v, [
-      [s.stop[0] - nx, s.stop[1] - ny],
-      [s.stop[0] + nx, s.stop[1] + ny],
-    ])
+    ctx.moveTo(sx - px, sy - py)
+    ctx.lineTo(sx + px, sy + py)
     ctx.stroke()
   }
   ctx.setLineDash([])

@@ -238,24 +238,29 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
 
   // Gate stands aren't routing nodes (they sit off the taxiway network), so include them as
   // snap targets — otherwise a click on a gate jumps to the nearest taxiway node instead.
-  const gatePoints: { ref: string; point: Point }[] = airport.surface.features
-    .filter((f) => f.kind === 'gate' && f.ref && f.points[0])
-    .map((f) => ({ ref: f.ref as string, point: f.points[0] as Point }))
+  // The target is the stand's *nose stop*, not the gate label node: an aircraft placed on the
+  // label sits a plane's length off the paint, and its pushback then starts by sliding sideways
+  // onto the lead-in instead of backing down it.
+  const gatePoints: { ref: string; point: Point; headingDeg: number }[] = game.stands.map((s) => ({
+    ref: s.ref,
+    point: s.stop,
+    headingDeg: s.headingDeg,
+  }))
   const dist2 = (a: Point, b: Point): number => (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2
 
   /** Nearest placeable spot to a world point: a routing node or a gate stand, whichever is
    *  closer. `gate` is set when the spot is a gate. Falls back to the point itself. */
-  const nearestPlace = (p: Point): { point: Point; gate: string | null } => {
+  const nearestPlace = (p: Point): { point: Point; gate: string | null; headingDeg?: number } => {
     const k = graph.nearestNode(p)
     const nodePt = k ? graph.nodePoint(k) : undefined
-    let best: { point: Point; gate: string | null; d: number } | null = nodePt
+    let best: { point: Point; gate: string | null; headingDeg?: number; d: number } | null = nodePt
       ? { point: nodePt, gate: null, d: dist2(nodePt, p) }
       : null
     for (const g of gatePoints) {
       const d = dist2(g.point, p)
-      if (!best || d < best.d) best = { point: g.point, gate: g.ref, d }
+      if (!best || d < best.d) best = { point: g.point, gate: g.ref, headingDeg: g.headingDeg, d }
     }
-    return best ? { point: best.point, gate: best.gate } : { point: p, gate: null }
+    return best ? { point: best.point, gate: best.gate, ...(best.headingDeg !== undefined ? { headingDeg: best.headingDeg } : {}) } : { point: p, gate: null }
   }
   /** Nearest placeable spot's point (for the placement/probe preview), or null. */
   const snapPoint = (p: Point): Point | null => nearestPlace(p).point
@@ -398,6 +403,8 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
         wake: 'M' as const,
         path: [place.point],
         targetSpeed: 0,
+        // Parked on a stand it faces the way the lead-in points, like any other gate departure.
+        ...(place.headingDeg !== undefined ? { heading: place.headingDeg } : {}),
         intent: 'departure' as const,
         // Give it a departure-runway goal so it's a takeoff (not a crossing) when it holds
         // short — otherwise the Tower handoff / takeoff flow can't engage in the sandbox.

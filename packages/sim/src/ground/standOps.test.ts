@@ -161,3 +161,53 @@ describe('the lead-in survives a path rewrite', () => {
     expect(fast).toBe(true)
   })
 })
+
+describe('pushing back from anywhere on the lead-in', () => {
+  // The aircraft is not guaranteed to be sitting on the nose-stop mark: an arrival stops within
+  // GATE_EPS of its goal, and the dev sandbox can place one anywhere. Reversing the whole line
+  // from its far end would first drive the aircraft *forward* toward the stop to pick the line
+  // up at the top — a lurch onto the stand before backing off it. The push rejoins where the
+  // aircraft actually is.
+  it('never moves toward the stand before backing away from it', () => {
+    const { game, sim } = ksanSim()
+    // Long *and* curved: on a straight two-point line, reversing from the far end and rejoining
+    // where the aircraft stands are the same path, so only a curve tells them apart.
+    const stand = [...game.stands]
+      .filter((s) => s.source === 'charted' && s.lead.length > 4)
+      .sort((a, b) => dist(b.entry, b.stop) - dist(a.entry, a.stop))[0]!
+    // A vertex about halfway along, so the aircraft starts exactly on the paint: past the
+    // taxilane, well short of the mark.
+    const partway = stand.lead[Math.floor(stand.lead.length / 2)] as Point
+
+    const id = sim.add({
+      id: 'part',
+      callsign: 'PART',
+      type: 'B738',
+      wake: 'M',
+      path: [partway],
+      targetSpeed: 0,
+      intent: 'departure',
+      gate: stand.ref,
+      heading: stand.headingDeg,
+    })
+    const at = () => sim.snapshot().aircraft.find((a) => a.id === id)!
+    for (let i = 0; i < 1200; i += 1) sim.step(0.1) // ground servicing
+
+    expect(sim.dispatch({ type: 'pushback', aircraftId: id })).toEqual({ ok: true })
+    let closest = dist([at().x, at().y], stand.stop)
+    let worst = 0
+    for (let i = 0; i < 900; i += 1) {
+      sim.step(0.1)
+      const a = at()
+      // Distance to the stand only ever grows: it is being pushed away. The tolerance is a
+      // metre, for the small swing as the aircraft aligns; the behaviour this rules out moves
+      // it tens of metres up the line first.
+      expect(dist([a.x, a.y], stand.stop)).toBeGreaterThanOrEqual(closest - 0.0005)
+      closest = Math.max(closest, dist([a.x, a.y], stand.stop))
+      worst = Math.max(worst, offLine([a.x, a.y], stand.lead))
+      if (a.status !== 'pushback') break
+    }
+    expect(worst).toBeLessThan(0.002) // and it stays on the paint the whole way
+    expect(dist([at().x, at().y], stand.entry)).toBeLessThan(0.01)
+  })
+})

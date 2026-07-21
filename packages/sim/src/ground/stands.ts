@@ -41,13 +41,18 @@ function bearing(a: Point, b: Point): number {
 }
 
 /** Nearest point to `p` on the segment `a`–`b`. */
-function nearestOnSegment(p: Point, a: Point, b: Point): Point {
+export function nearestOnSegment(p: Point, a: Point, b: Point): Point {
   const dx = b[0] - a[0]
   const dy = b[1] - a[1]
   const len2 = dx * dx + dy * dy
   if (len2 === 0) return a
   const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / len2))
   return [a[0] + t * dx, a[1] + t * dy]
+}
+
+/** Distance from `p` to the segment `a`–`b`. */
+export function distToSegment(p: Point, a: Point, b: Point): number {
+  return dist(p, nearestOnSegment(p, a, b))
 }
 
 /** Pavement an aircraft can taxi on — what a derived lead-in leads in *from*. */

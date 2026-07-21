@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { buildStands } from '@anotheratc/sim'
 import { createGroundController } from './controller'
 import type { Airport, AirportSurface } from '@anotheratc/sim'
 import { visibleComms } from './CommsLog'
@@ -171,11 +172,18 @@ describe('ground controller — dev sandbox', () => {
 
   it('spawns onto a gate stand when clicking near one (gates are not routing nodes)', () => {
     const c = createGroundController({ dev: true })
-    c.spawnAt([-0.711, 0.041]) // gate 41's stand point
+    c.spawnAt([-0.711, 0.041]) // gate 41's label node
     const ac = c.sim.snapshot().aircraft[0]!
     expect(ac.gate).toBe('41')
-    // placed at the stand (~0 away), not snapped to the nearest taxiway node (~0.06 nm off)
-    expect(Math.hypot(ac.x - -0.711, ac.y - 0.041)).toBeLessThan(2e-3)
+
+    // It parks on the stand's nose-stop mark and faces the way the lead-in points — NOT on the
+    // gate label node, which sits a plane's length further into the terminal. Placing it there
+    // left the aircraft off the paint, so its pushback began by sliding sideways onto the line.
+    const stand = buildStands(c.airport.surface).find((s) => s.ref === '41')!
+    expect(Math.hypot(ac.x - stand.stop[0], ac.y - stand.stop[1])).toBeLessThan(2e-3)
+    expect(ac.heading).toBeCloseTo(stand.headingDeg, 0)
+    // …and that mark is a real distance from the label node, which is the point of the fix.
+    expect(Math.hypot(ac.x - -0.711, ac.y - 0.041)).toBeGreaterThan(2e-3)
   })
 
   it('removeSelected and clearAll empty the surface', () => {

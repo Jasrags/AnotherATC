@@ -12,7 +12,7 @@ import type {
   WakeCategory,
 } from './types'
 import { edgeKey, type TaxiGraph } from './taxiGraph'
-import { findStand, type Stand } from './stands'
+import { distToSegment, findStand, type Stand } from './stands'
 import {
   COMMS_LOG_LIMIT,
   misheardSquawk,
@@ -1211,6 +1211,31 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     return dist([ac.x, ac.y], stand.stop) <= leadLengthNm(stand) ? STAND_SPEED_KT : Infinity
   }
 
+  /**
+   * The push-back path from wherever the aircraft actually is, back down the lead-in.
+   *
+   * It cannot assume the aircraft is on the nose-stop mark: an arrival stops as soon as it is
+   * within `GATE_EPS` of the goal, so it can be parked most of a plane's length short of it.
+   * Starting the reversal at the far end of the line would then drag the aircraft sideways onto
+   * the paint. Instead the push rejoins the line at the point nearest the aircraft and reverses
+   * from there, which is what a tug does.
+   */
+  function reverseLeadFrom(stand: Stand, from: Point): Point[] {
+    let bestSeg = stand.lead.length - 1
+    let bestD = Infinity
+    for (let i = 1; i < stand.lead.length; i += 1) {
+      const d = distToSegment(from, stand.lead[i - 1] as Point, stand.lead[i] as Point)
+      if (d <= bestD) {
+        bestD = d
+        bestSeg = i
+      }
+    }
+    // Everything from the rejoin segment back to the taxilane end, in reverse.
+    const back: Point[] = [from]
+    for (let i = bestSeg - 1; i >= 0; i -= 1) back.push(stand.lead[i] as Point)
+    return back
+  }
+
   /** Length (nm) of a stand's painted lead-in — the zone an aircraft is marshalled through. */
   function leadLengthNm(stand: Stand): number {
     let d = 0
@@ -1414,7 +1439,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         // aircraft backing off the stand in directions the paint never goes.
         const stand = standFor(ac)
         const back: Point[] = stand
-          ? [[ac.x, ac.y], ...[...stand.lead].reverse().slice(1)]
+          ? reverseLeadFrom(stand, [ac.x, ac.y])
           : (() => {
               const alleyKey = graph.nearestNode([ac.x, ac.y])
               const alley = alleyKey ? graph.nodePoint(alleyKey) : undefined
