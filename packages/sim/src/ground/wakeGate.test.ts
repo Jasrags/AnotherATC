@@ -46,21 +46,23 @@ describe('wake-turbulence departure gate', () => {
     expect(sim.snapshot().aircraft.find((a) => a.id === 'lead')!.holdShort).toBe(true)
     expect(sim.snapshot().aircraft.find((a) => a.id === 'foll')!.holdShort).toBe(true)
 
-    expect(sim.dispatch({ type: 'contactTower', aircraftId: 'lead' })).toEqual({ ok: true })
+    sim.dispatch({ type: 'contactTower', aircraftId: 'lead' }) // Ground → Tower handoff
+    expect(sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'lead' })).toEqual({ ok: true })
     const t0 = sim.snapshot().time // wake clock starts at the leader's roll
     runUntilDeparted(sim, 1) // leader lifts off and clears the runway
     expect(sim.snapshot().departed).toBe(1)
 
     // Runway is clear, but the Heavy's wake still holds the Medium (needs 120s).
     expect(sim.snapshot().time - t0).toBeLessThan(120)
-    const early = sim.dispatch({ type: 'contactTower', aircraftId: 'foll' })
+    sim.dispatch({ type: 'contactTower', aircraftId: 'foll' }) // hand off — always allowed
+    const early = sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'foll' })
     expect(early.ok).toBe(false)
     if (!early.ok) expect(early.reason).toMatch(/wake.*heavy/i)
     expect(sim.snapshot().aircraft.find((a) => a.id === 'foll')!.status).not.toBe('departing')
 
-    // Once 120s have passed since the leader's roll, the release is accepted.
+    // Once 120s have passed since the leader's roll, the takeoff clearance is accepted.
     for (let i = 0; i < 3000 && sim.snapshot().time - t0 < 120; i += 1) sim.step(0.1)
-    expect(sim.dispatch({ type: 'contactTower', aircraftId: 'foll' })).toEqual({ ok: true })
+    expect(sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'foll' })).toEqual({ ok: true })
     expect(sim.snapshot().aircraft.find((a) => a.id === 'foll')!.status).toBe('departing')
   })
 
@@ -70,11 +72,13 @@ describe('wake-turbulence departure gate', () => {
     const sim = createGroundSim([lead, foll], { guard })
     for (let i = 0; i < 1500; i += 1) sim.step(0.1)
 
-    expect(sim.dispatch({ type: 'contactTower', aircraftId: 'lead' })).toEqual({ ok: true })
+    sim.dispatch({ type: 'contactTower', aircraftId: 'lead' })
+    expect(sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'lead' })).toEqual({ ok: true })
     runUntilDeparted(sim, 1)
     // No wake wait behind a Medium — the follower may roll as soon as the runway is clear.
     expect(sim.snapshot().aircraft.find((a) => a.id === 'foll')!.wakeHoldSec).toBe(0)
-    expect(sim.dispatch({ type: 'contactTower', aircraftId: 'foll' })).toEqual({ ok: true })
+    sim.dispatch({ type: 'contactTower', aircraftId: 'foll' })
+    expect(sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'foll' })).toEqual({ ok: true })
     expect(sim.snapshot().aircraft.find((a) => a.id === 'foll')!.status).toBe('departing')
   })
 
@@ -86,6 +90,7 @@ describe('wake-turbulence departure gate', () => {
     expect(sim.snapshot().aircraft.find((a) => a.id === 'foll')!.wakeHoldSec).toBe(0) // nothing departed yet
 
     sim.dispatch({ type: 'contactTower', aircraftId: 'lead' })
+    sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'lead' })
     const t0 = sim.snapshot().time
     runUntilDeparted(sim, 1)
 

@@ -78,7 +78,10 @@ describe('traffic flow', () => {
     for (let i = 0; i < 6000; i += 1) {
       sim.step(0.1)
       const ac = sim.snapshot().aircraft[0]
-      if (ac?.holdShort) sim.dispatch({ type: 'contactTower', aircraftId: 'd' })
+      if (ac?.holdShort) {
+        sim.dispatch({ type: 'contactTower', aircraftId: 'd' }) // Ground → Tower handoff
+        sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'd' }) // then release the takeoff
+      }
       if (sim.snapshot().departed > 0) break
     }
     const snap = sim.snapshot()

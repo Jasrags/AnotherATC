@@ -9,6 +9,7 @@ const STATUS_LABEL: Record<GroundStatus, string> = {
   taxi: 'TAXI',
   holding: 'HOLD',
   holdShort: 'HOLD SHORT',
+  lineUpWait: 'LUAW',
   departing: 'TAKEOFF',
 }
 

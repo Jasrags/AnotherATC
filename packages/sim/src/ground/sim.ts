@@ -174,8 +174,10 @@ interface Internal extends Omit<GroundAircraft, 'status' | 'holdingForTakeoff' |
   giveWayTo: string | null
   /** Transponder code assigned when IFR clearance is delivered (departures), or null. */
   squawk: string | null
-  /** Rolling for takeoff down the runway toward the far end (after contacting tower). */
+  /** Rolling for takeoff down the runway toward the far end (after a takeoff clearance). */
   departing: boolean
+  /** Lined up on the runway centerline awaiting takeoff clearance (Tower's "line up and wait"). */
+  lineUpWait: boolean
   /** Parallel ground services still counting down while parked at the gate (empty when none). */
   services: { kind: string; total: number; remaining: number }[]
   /** Undirected edge (key) the reservation is currently making this aircraft hold short of, or null. */
@@ -235,6 +237,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       groundspeed: 0,
       holding: path.length < 2,
       holdShort: path.length < 2 && held !== null,
+      controlledBy: 'ground',
       intent: init.intent ?? 'departure',
       gate: init.gate ?? null,
       conflict: false,
@@ -248,6 +251,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       giveWayTo: null,
       squawk: null,
       departing: false,
+      lineUpWait: false,
       services:
         servicing && (init.intent ?? 'departure') === 'departure'
           ? servicing.services.map((s) => ({ kind: s.kind, total: s.sec, remaining: s.sec }))
@@ -289,6 +293,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
   function statusOf(ac: Internal): GroundStatus {
     if (ac.departing) return 'departing'
     if (ac.pushingBack) return 'pushback'
+    if (ac.lineUpWait) return 'lineUpWait'
     if (ac.holdShort) return 'holdShort'
     if (ac.dwell >= 0) return 'parked'
     // `holding` is the authoritative "stopped" flag (set each tick in advance()). Trust
@@ -331,7 +336,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
 
   /** Seconds of wake separation still owed before this holding-short departure may roll. */
   function wakeHoldFor(ac: Internal): number {
-    if (ac.intent !== 'departure' || !ac.holdShort || !lastDeparture) return 0
+    if (ac.intent !== 'departure' || !(ac.holdShort || ac.lineUpWait) || !lastDeparture) return 0
     const required = wakeSeparationSec(lastDeparture.wake, ac.wake) * WAKE_TIME_SCALE
     return Math.max(0, Math.ceil(required - (time - lastDeparture.atTime)))
   }
@@ -762,15 +767,48 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         ac.squawk = nextSquawk()
         return ACCEPTED
       case 'contactTower': {
-        // Ground → Tower handoff: a departure holding short of its runway lines up and
-        // rolls for takeoff down the runway toward the far end, then lifts off (despawns
-        // as a completed departure). Requires a clear runway.
+        // Ground → Tower handoff: transfer a departure holding short of its own runway to
+        // Local Control (Tower). A frequency change only — it stays holding short, and Tower
+        // then issues line-up-and-wait / takeoff clearance. No runway or wake gate here; those
+        // gate the takeoff clearance itself (see docs/atc-tower.md).
         if (ac.intent !== 'departure') return refused('only departures contact tower for takeoff')
+        if (ac.controlledBy === 'tower') return refused('already on tower frequency')
         if (!ac.holdShort) return refused('not holding short of the runway')
-        // Only launch a takeoff when the runway ahead is this departure's assigned runway.
-        // If the aircraft is merely holding short to *cross* (its route continues past the
-        // runway, so it has no goal on it), contact-tower must not hijack that into a takeoff
-        // — the controller should clear it across instead.
+        // A departure merely holding short to *cross* the runway (its route continues past it,
+        // so it has no goal on it) is not a takeoff — the controller clears it across instead.
+        if (guard && (!ac.goalPoint || !onRunway(ac.goalPoint, guard)))
+          return refused('route crosses the runway — clear it to cross, not for takeoff')
+        ac.controlledBy = 'tower'
+        return ACCEPTED
+      }
+      case 'lineUpAndWait': {
+        // Tower: taxi a handed-off departure onto the runway centerline and hold, awaiting
+        // takeoff clearance. Requires a clear runway; lining up then occupies it.
+        if (ac.controlledBy !== 'tower') return refused('not on tower frequency — hand off to tower first')
+        if (ac.intent !== 'departure') return refused('only departures line up and wait')
+        if (!ac.holdShort) return refused('not holding short of the runway')
+        if (guard && (!ac.goalPoint || !onRunway(ac.goalPoint, guard)))
+          return refused('route crosses the runway — clear it to cross, not to line up')
+        if (guard && fleet.some((o) => o !== ac && onRunway([o.x, o.y], guard))) return refused('runway occupied')
+        const lineup: Point = ac.goalPoint ?? [ac.x, ac.y]
+        clearDiversion(ac)
+        ac.path = [[ac.x, ac.y], lineup]
+        ac.leg = 0
+        ac.held = null
+        ac.holdShort = false
+        ac.lineUpWait = true
+        ac.targetSpeed = TAXI_SPEED_KT
+        ac.holding = false
+        return ACCEPTED
+      }
+      case 'clearedForTakeoff': {
+        // Tower: release a departure for the takeoff roll — directly from holding short (the
+        // fast path) or from line-up-and-wait. It accelerates to the far runway end and lifts
+        // off (despawns as a completed departure). Requires a clear runway and satisfied wake
+        // interval; those gates live here now, not at the handoff.
+        if (ac.controlledBy !== 'tower') return refused('not on tower frequency — hand off to tower first')
+        if (ac.intent !== 'departure') return refused('only departures are cleared for takeoff')
+        if (!ac.holdShort && !ac.lineUpWait) return refused('not holding short or lined up')
         if (guard && (!ac.goalPoint || !onRunway(ac.goalPoint, guard)))
           return refused('route crosses the runway — clear it to cross, not for takeoff')
         if (guard && fleet.some((o) => o !== ac && onRunway([o.x, o.y], guard))) return refused('runway occupied')
@@ -786,9 +824,11 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         }
         const far = farRunwayEnd([ac.x, ac.y])
         if (!far) return refused('no runway end found')
+        clearDiversion(ac)
         ac.path = [[ac.x, ac.y], far]
         ac.leg = 0
         ac.held = null
+        ac.lineUpWait = false
         ac.departing = true
         ac.targetSpeed = TAKEOFF_SPEED_KT
         ac.holding = false
@@ -901,6 +941,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
           holdShort: ac.holdShort,
           holdingForTakeoff: holdingForTakeoff(ac),
           status: statusOf(ac),
+          controlledBy: ac.controlledBy,
           intent: ac.intent,
           gate: ac.gate,
           conflict: ac.conflict,

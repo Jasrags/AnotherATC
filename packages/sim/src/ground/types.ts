@@ -5,10 +5,21 @@ import type { AircraftInit } from './sim'
 export type WakeCategory = 'L' | 'M' | 'H' | 'J'
 
 /** Ground phase — drives the flight-strip state machine and available actions. */
-export type GroundStatus = 'parked' | 'pushback' | 'taxi' | 'holding' | 'holdShort' | 'departing'
+export type GroundStatus =
+  | 'parked'
+  | 'pushback'
+  | 'taxi'
+  | 'holding'
+  | 'holdShort'
+  | 'lineUpWait'
+  | 'departing'
 
 /** Why the aircraft is on the surface: leaving (to the runway) or arriving (to a gate). */
 export type GroundIntent = 'departure' | 'arrival'
+
+/** Which controller position currently owns the aircraft. Handoffs flip this; each position's
+ *  strips and commands are filtered to the aircraft it controls (see docs/atc-tower.md). */
+export type ControllerPosition = 'ground' | 'tower'
 
 /** A controller instruction to the surface simulation. */
 export type GroundCommand =
@@ -22,6 +33,8 @@ export type GroundCommand =
   | { type: 'crossRunway'; aircraftId: string }
   | { type: 'giveWay'; aircraftId: string; toId: string }
   | { type: 'contactTower'; aircraftId: string }
+  | { type: 'lineUpAndWait'; aircraftId: string }
+  | { type: 'clearedForTakeoff'; aircraftId: string }
   | { type: 'clearance'; aircraftId: string }
 
 /** Progress of one parallel ground service (fuel, cargo, cabin, …) on a parked departure. */
@@ -66,6 +79,8 @@ export interface GroundAircraft {
   holdingForTakeoff: boolean
   /** Coarse ground phase for the flight strip. */
   status: GroundStatus
+  /** Which controller owns the aircraft: Ground until a Tower handoff, then Tower. */
+  controlledBy: ControllerPosition
   /** Departure (heading to the runway) or arrival (heading to a gate). */
   intent: GroundIntent
   /** Assigned gate: origin for departures, destination for arrivals (null if none). */
