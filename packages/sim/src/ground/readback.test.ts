@@ -1,10 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { createGroundSim } from './sim'
+import { APPROACH_SPEED_KT, createGroundSim } from './sim'
 import type { AircraftInit, GroundSimOptions } from './sim'
 import { KSAN } from '../world/ksanAirport'
 import { createAirportGame } from '../world/airport'
 import { buildTaxiGraph } from './taxiGraph'
 import { buildRunwayGuard } from './runwayGuard'
+import type { ActiveRunway } from './runway'
 
 const parked = (id: string): AircraftInit => ({
   id,
@@ -89,9 +90,11 @@ describe('read-back verification', () => {
     const sim = createGroundSim([parked('a')], always)
     sim.dispatch({ type: 'clearance', aircraftId: 'a' })
     sim.dispatch({ type: 'hold', aircraftId: 'a' }) // a new clearance, correctly read back or not
-    // Correcting now repeats the *latest* instruction, not the stale one.
+    // Correcting now repeats the *latest* instruction, not the stale one — and the earlier
+    // mishearing is beyond correcting, because that is no longer what was said.
     sim.dispatch({ type: 'sayAgain', aircraftId: 'a' })
     expect(sim.snapshot().comms.at(-2)!.text).toContain('hold position')
+    expect(sim.snapshot().readbackCaught).toBe(0)
   })
 
   it('is deterministic: the same seed mishears the same clearances', () => {
@@ -154,5 +157,70 @@ describe('read-back through a whole KSAN departure', () => {
     const ac = fly(sim, id, true)
     expect(ac.squawk).toBe(issued(sim))
     expect(sim.snapshot().readbackCaught).toBe(1)
+  })
+})
+
+// The transcript must never assert something the simulation has already retracted. A clearance
+// the sim voids on its own — without any command — stops being repeatable at that moment.
+describe('clearances the sim voids on its own are no longer repeatable', () => {
+  const runway: ActiveRunway = {
+    ident: '27',
+    threshold: [0.5, 0],
+    departureStart: [0.6, 0],
+    farEnd: [-0.6, 0],
+    toraFt: 7000,
+    ldaFt: 6500,
+    glidePathDeg: 3,
+    pattern: 'left',
+  }
+  const arrivalSim = () => {
+    const sim = createGroundSim(
+      [
+        {
+          id: 'r',
+          callsign: 'r',
+          type: 'B738',
+          wake: 'M',
+          path: [[4.5, 0], [0.5, 0]],
+          targetSpeed: APPROACH_SPEED_KT,
+          airborne: true,
+          intent: 'arrival',
+          goalPoint: [0.5, 0],
+        },
+      ],
+      { runway },
+    )
+    return sim
+  }
+
+  it('a landing clearance stops being repeatable the moment it is used', () => {
+    const sim = arrivalSim()
+    expect(sim.dispatch({ type: 'clearedToLand', aircraftId: 'r' })).toEqual({ ok: true })
+    // Fly it to the threshold and around again — the sim does this with no command at all.
+    for (let i = 0; i < 4000; i += 1) sim.step(0.1)
+    expect(sim.snapshot().aircraft[0]!.status).toBe('rollout') // it landed on the clearance
+    // The clearance is spent the moment it is used; there is nothing left to repeat.
+    expect(sim.dispatch({ type: 'sayAgain', aircraftId: 'r' }).ok).toBe(false)
+  })
+
+  it('a runway change goes the arrival around, and the voided clearance is not repeatable', () => {
+    const sim = arrivalSim()
+    sim.dispatch({ type: 'clearedToLand', aircraftId: 'r' })
+    // While it is in force, it repeats.
+    expect(sim.dispatch({ type: 'sayAgain', aircraftId: 'r' })).toEqual({ ok: true })
+    expect(sim.snapshot().comms.at(-2)!.text).toContain('cleared to land')
+
+    // Turning the airport around sends everything on final around — no command to the aircraft.
+    const other: ActiveRunway = {
+      ...runway,
+      ident: '09',
+      threshold: [-0.5, 0],
+      departureStart: [-0.6, 0],
+      farEnd: [0.6, 0],
+    }
+    expect(sim.setRunway(other)).toEqual({ ok: true })
+    expect(sim.snapshot().comms.at(-1)!.text).toContain('going around')
+    expect(sim.snapshot().aircraft[0]!.status).toBe('onFinal') // clearance voided by the sim
+    expect(sim.dispatch({ type: 'sayAgain', aircraftId: 'r' }).ok).toBe(false)
   })
 })

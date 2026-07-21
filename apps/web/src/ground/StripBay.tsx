@@ -234,7 +234,7 @@ export function StripBay({ controller }: { controller: GroundController }) {
         comms={snap.comms}
         position={position}
         selectedId={snap.selectedId}
-        onSelect={(id) => controller.select(id)}
+        onSelect={controller.select}
       />
     </aside>
   )

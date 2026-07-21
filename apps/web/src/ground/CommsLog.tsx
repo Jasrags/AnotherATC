@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { memo, useEffect, useRef } from 'react'
 import type { ControllerPosition, Transmission } from '@anotheratc/sim'
 
 /** How many calls the panel renders. The sim keeps more; this is what fits a scrollback. */
@@ -29,7 +29,7 @@ export function visibleComms(
  * sim when a clearance actually took effect, so it can never claim something the simulation
  * didn't do. Clicking a line selects that aircraft.
  */
-export function CommsLog({
+function CommsLogPanel({
   comms,
   position,
   selectedId,
@@ -52,8 +52,14 @@ export function CommsLog({
 
   return (
     <section className="comms" aria-label={`${position === 'tower' ? 'Tower' : 'Ground'} communications`}>
-      <h2 className="comms-title">COMMS</h2>
-      <ol className="comms-list" ref={listRef}>
+      {/* The section is already named, so the visible header is decoration — an <h2> here
+          would be the only heading in the app and would start its outline at level 2. */}
+      <p className="comms-title" aria-hidden="true">
+        COMMS
+      </p>
+      {/* A live region: a transmission is an operationally meaningful event, and the transcript
+          is the only place it appears. Polite, so it never cuts across what is being read. */}
+      <ol className="comms-list" ref={listRef} aria-live="polite">
         {shown.length === 0 && <li className="comms-empty">frequency quiet</li>}
         {shown.map((c) => (
           <li key={c.seq} className={`comms-line comms-${c.from}`}>
@@ -72,3 +78,8 @@ export function CommsLog({
     </section>
   )
 }
+
+/** Memoized: the strip-bay signature also changes on per-second countdowns that have nothing
+ *  to do with the transcript, and this list is up to `PANEL_LIMIT` buttons. `onSelect` must be
+ *  a stable reference for this to bite — pass a controller method, not an inline closure. */
+export const CommsLog = memo(CommsLogPanel)

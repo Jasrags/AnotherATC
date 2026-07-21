@@ -374,11 +374,23 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
   /** Handed out by `snapshot()`. Rebuilt only when something is said, so the per-frame
    *  snapshot doesn't copy the whole transcript for a log that usually hasn't changed. */
   let commsView: readonly Transmission[] = []
+  let commsDirty = false
   function transmit(from: TransmissionFrom, position: ControllerPosition, ac: Internal, text: string): void {
     commsSeq += 1
     comms.push({ seq: commsSeq, time, from, position, aircraftId: ac.id, callsign: ac.callsign, text })
     if (comms.length > COMMS_LOG_LIMIT) comms.splice(0, comms.length - COMMS_LOG_LIMIT)
-    commsView = [...comms]
+    commsDirty = true
+  }
+
+  /** The transcript as an immutable view, rebuilt only when something has been said since the
+   *  last read — one exchange is two or three `transmit` calls, and a snapshot is taken far
+   *  more often than a clearance is issued. */
+  function commsSnapshot(): readonly Transmission[] {
+    if (commsDirty) {
+      commsView = [...comms]
+      commsDirty = false
+    }
+    return commsView
   }
 
   /** Runway designator as spoken: no leading zero ("09" → "9"). */
@@ -394,7 +406,6 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       destination:
         ac.intent === 'departure' ? (rwy ? `runway ${rwy}` : null) : ac.gate ? `gate ${ac.gate}` : null,
       giveWayTo: ac.giveWayTo ? (find(ac.giveWayTo)?.callsign ?? null) : null,
-      exitRef: ac.exit?.ref ?? ac.assignedExitRef,
       towerFreq: frequencies?.tower ?? null,
       groundFreq: frequencies?.ground ?? null,
       vacated: ac.rollingOut ? ac.vacated : true,
@@ -416,12 +427,25 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
   function maybeMishear(cmd: GroundCommand, ac: Internal): boolean {
     if (!readbackRng || !readback || cmd.type !== 'clearance' || !ac.squawk) return false
     if (readbackRng.next() >= readback.errorRate) return false
-    const wrong = misheardSquawk(ac.squawk, readbackRng.next())
-    if (wrong === ac.squawk) return false
+    const wrong = misheardSquawk(ac.squawk, readbackRng.next(), readbackRng.next())
     ac.misheard = { squawk: ac.squawk }
     ac.squawk = wrong
     readbackErrors += 1
     return true
+  }
+
+  /**
+   * The sim has changed this aircraft's clearance state on its own — a go-around voids a
+   * landing clearance, a handoff ends the last position's business with it — so there is no
+   * longer a standing clearance to repeat. Without this, "say again" would re-transmit an
+   * instruction the simulation has already retracted, and the transcript would assert
+   * something the state contradicts. `only` limits the void to a specific command, for
+   * clearances that expire on their own terms rather than being superseded.
+   */
+  function voidClearance(ac: Internal, only?: GroundCommand['type']): void {
+    if (only && ac.lastClearance?.type !== only) return
+    ac.lastClearance = null
+    ac.misheard = null
   }
 
   /** Undo a misheard clearance: the aircraft acts on what the controller actually said. */
@@ -440,7 +464,10 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     // pilot heard it. When nothing is misheard the two are the same context.
     const ex = phraseFor(cmd, phraseContext(ac))
     if (!ex) return
+    // A new clearance supersedes the last one — including a mishearing of it, which is now
+    // beyond correcting: "say again" repeats what was said *most recently*, not a stale code.
     ac.lastClearance = cmd
+    ac.misheard = null
     const readbackText = maybeMishear(cmd, ac) ? (phraseFor(cmd, phraseContext(ac))?.readback ?? ex.readback) : ex.readback
     transmit('controller', position, ac, ex.instruction)
     transmit('pilot', position, ac, readbackText)
@@ -980,6 +1007,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     const o = find(ac.giveWayTo)
     if (!o || o === ac) {
       ac.giveWayTo = null
+      voidClearance(ac, 'giveWay')
       return Infinity
     }
     const dx = o.x - ac.x
@@ -989,6 +1017,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     const d = Math.hypot(dx, dy)
     if (forward < -GIVEWAY_CLEARED_NM || d > GIVEWAY_FORGET_NM) {
       ac.giveWayTo = null // traffic has passed behind us, or is well clear — done giving way
+      voidClearance(ac, 'giveWay') // …and the instruction naming that traffic is spent
       return Infinity
     }
     return d <= GIVEWAY_WATCH_NM ? 0 : Infinity // hold only once it's actually near
@@ -1444,6 +1473,9 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
    * runway toward the far end. It stays Tower's until it can leave the runway.
    */
   function touchdown(ac: Internal): void {
+    // The landing clearance is spent the moment it is used; from here the aircraft is on a
+    // rollout, and "say again" must not re-transmit a clearance to land.
+    voidClearance(ac, 'clearedToLand')
     ac.airborne = false
     ac.altitude = 0
     ac.rollingOut = true
@@ -1533,6 +1565,8 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     const next = ac.path[1]
     if (next) ac.heading = normalizeDeg(bearing(fix[0], fix[1], next[0], next[1]))
     // A go-around is the pilot's call, not the controller's — it is announced, not cleared.
+    // It also voids the landing clearance, so that clearance is no longer repeatable.
+    voidClearance(ac)
     transmit('pilot', 'tower', ac, `${ac.callsign}, going around.`)
   }
 
@@ -1549,6 +1583,8 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     ac.rollingOut = false
     ac.groundPending = false
     ac.controlledBy = 'ground'
+    // Tower's business with this aircraft is finished; Ground has issued it nothing yet.
+    voidClearance(ac)
     return true
   }
 
@@ -1699,7 +1735,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         time,
         departed,
         arrived,
-        comms: commsView,
+        comms: commsSnapshot(),
         readbackErrors,
         readbackCaught,
         aircraft: fleet.map((ac) => ({

@@ -86,7 +86,6 @@ export interface PhraseContext {
   destination: string | null
   /** Callsign of the traffic being given way to. */
   giveWayTo: string | null
-  exitRef: string | null
   towerFreq: string | null
   groundFreq: string | null
   /** Arrival is already clear of the runway (drops the "when vacated" qualifier). */
@@ -106,11 +105,12 @@ export function negative(instruction: string): string {
 }
 
 /** A beacon code with one octal digit misheard — the classic read-back error. Deterministic:
- *  `roll` (0–1) picks which digit and by how much, so a seeded sim mishears reproducibly. */
-export function misheardSquawk(code: string, roll: number): string {
+ *  two independent rolls (0–1) pick which digit and by how much, so which digit is wrong does
+ *  not determine how wrong it is. Always changes exactly one digit. */
+export function misheardSquawk(code: string, digitRoll: number, deltaRoll: number): string {
   const digits = [...code]
-  const index = Math.min(digits.length - 1, Math.floor(roll * digits.length))
-  const delta = 1 + Math.floor(roll * 7) % 7
+  const index = Math.min(digits.length - 1, Math.floor(digitRoll * digits.length))
+  const delta = 1 + Math.min(6, Math.floor(deltaRoll * 7))
   const digit = Number.parseInt(digits[index] as string, 8)
   digits[index] = ((digit + delta) % 8).toString(8)
   return digits.join('')

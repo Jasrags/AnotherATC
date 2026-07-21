@@ -8,7 +8,6 @@ const ctx = (over: Partial<PhraseContext> = {}): PhraseContext => ({
   taxiways: [],
   destination: null,
   giveWayTo: null,
-  exitRef: null,
   towerFreq: null,
   groundFreq: null,
   vacated: false,
@@ -97,7 +96,7 @@ describe('phraseFor', () => {
   })
 
   it('phrases an exit assignment phonetically', () => {
-    const ex = phraseFor({ type: 'assignExit', aircraftId: 'a', ref: 'B4' }, ctx({ exitRef: 'B4' }))
+    const ex = phraseFor({ type: 'assignExit', aircraftId: 'a', ref: 'B4' }, ctx())
     expect(ex?.instruction).toBe('SKW412, turn off at Bravo 4.')
     expect(ex?.readback).toBe('Bravo 4, SKW412.')
   })
