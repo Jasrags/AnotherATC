@@ -83,8 +83,9 @@ export interface StripItem {
   giveWayTo: string | null
   /** Stand this aircraft is waiting on because someone is still parked there, or null. */
   waitingForStand: string | null
-  /** For an inbound arrival not yet parked: whether its destination stand is already occupied by
-   *  someone else — a gate conflict in the making, shown before the aircraft ever gets there. */
+  /** For an inbound arrival not yet parked: its destination stand is already occupied by someone
+   *  else — a gate conflict in the making, shown before the aircraft ever gets there. Straight
+   *  from the sim's own `gateBlocked`, so the strip and the field-wide alert can't disagree. */
   destStandOccupied: boolean
   /** The code the aircraft is squawking — not necessarily the one issued, if the pilot
    *  misheard the clearance. */
@@ -336,7 +337,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
     // Range-to-threshold is continuous, so it enters the signature at display precision
     // (0.1 nm ≈ one re-render every ~2.5 s on final) rather than every frame.
     for (const a of acs)
-      nextSig += `|${a.id}:${a.status}:${a.controlledBy}:${a.onRunway ? 'R' : ''}${a.blocksTakeoff ? 'B' : ''}${a.onShortFinal ? 'F' : ''}${a.vacated ? 'V' : ''}${a.handoffPending ? 'H' : ''}:${a.exitRef ?? ''}:${(exitOpts.get(a.id) ?? []).map((e) => e.ref).join('+')}:${vias.get(a.id)!.join('.')}:${a.giveWayTo ?? ''}:${a.waitingForStand ?? ''}:${a.intent === 'arrival' && a.gate && a.status !== 'parked' && sim.standOccupied(a.gate) ? 'O' : ''}:${a.squawk ?? ''}:${a.hasInstruction ? 'I' : ''}:${a.wakeHoldSec}:${a.serviceSec}:${a.finalNm.toFixed(1)}`
+      nextSig += `|${a.id}:${a.status}:${a.controlledBy}:${a.onRunway ? 'R' : ''}${a.blocksTakeoff ? 'B' : ''}${a.onShortFinal ? 'F' : ''}${a.vacated ? 'V' : ''}${a.handoffPending ? 'H' : ''}:${a.exitRef ?? ''}:${(exitOpts.get(a.id) ?? []).map((e) => e.ref).join('+')}:${vias.get(a.id)!.join('.')}:${a.giveWayTo ?? ''}:${a.waitingForStand ?? ''}:${a.gateBlocked ? 'O' : ''}:${a.squawk ?? ''}:${a.hasInstruction ? 'I' : ''}:${a.wakeHoldSec}:${a.serviceSec}:${a.finalNm.toFixed(1)}`
     if (nextSig === sig) return
     sig = nextSig
     snapshot = {
@@ -368,10 +369,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
         via: vias.get(a.id)!,
         giveWayTo: a.giveWayTo,
         waitingForStand: a.waitingForStand,
-        destStandOccupied:
-          a.intent === 'arrival' && a.gate !== null && a.status !== 'parked'
-            ? sim.standOccupied(a.gate)
-            : false,
+        destStandOccupied: a.gateBlocked,
         squawk: a.squawk,
         hasInstruction: a.hasInstruction,
         wakeHoldSec: a.wakeHoldSec,

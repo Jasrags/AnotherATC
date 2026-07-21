@@ -147,6 +147,12 @@ export interface GroundAircraft {
   /** Designator of the stand this aircraft is holding for because someone is still on it, or
    *  null. It has a good clearance — it just cannot have the gate yet. */
   waitingForStand: string | null
+  /** An inbound arrival whose destination stand is already occupied by someone else: a gate
+   *  conflict that has not happened yet. True from the moment it appears on final, so it can be
+   *  acted on — move the aircraft on the stand, or reassign — long before the arrival gets
+   *  there and ends up holding on the alley. {@link waitingForStand} is the same conflict once
+   *  it has actually bitten. */
+  gateBlocked: boolean
   /** Assigned transponder (beacon) code once IFR clearance is delivered, or null. Note this is
    *  the code the *aircraft is squawking* — if the pilot misheard the clearance, it is not the
    *  code the controller issued. Comparing it against the transcript is the game. */

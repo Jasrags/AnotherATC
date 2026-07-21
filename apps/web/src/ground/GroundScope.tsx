@@ -50,6 +50,7 @@ export function GroundScope({ controller }: { controller: GroundController }) {
   const statusRef = useRef<HTMLDivElement>(null)
   const hintRef = useRef<HTMLDivElement>(null)
   const alertRef = useRef<HTMLDivElement>(null)
+  const gateAlertRef = useRef<HTMLDivElement>(null)
   const devRef = useRef<HTMLDivElement>(null)
 
   // Admin routing-graph overlay. The render loop reads a ref (no effect re-run); the state
@@ -426,6 +427,15 @@ export function GroundScope({ controller }: { controller: GroundController }) {
           const inConflict = snap.aircraft.filter((a) => a.conflict).length
           setText(alertRef.current, inConflict > 0 ? `⚠ CONFLICT` : '')
         }
+        // Gate conflicts, field-wide: inbound arrivals heading for stands somebody is still
+        // parked on. Deliberately a separate, quieter line — a separation conflict is happening
+        // now, this has not happened yet, and colouring them the same would say otherwise.
+        // Gates are named, not counted: the gate is what you act on, and there are only a few.
+        if (gateAlertRef.current) {
+          const gates = [...new Set(snap.aircraft.filter((a) => a.gateBlocked).map((a) => a.gate))]
+          gates.sort()
+          setText(gateAlertRef.current, gates.length > 0 ? `⧗ GATE ${gates.join(' · ')} OCCUPIED` : '')
+        }
         if (devRef.current && controller.dev) {
           let t = ''
           if (devToolRef.current === 'spawn') {
@@ -577,6 +587,9 @@ export function GroundScope({ controller }: { controller: GroundController }) {
       {controller.dev && <div ref={devRef} className="hud hud-dev mono" aria-live="polite" />}
       <div ref={statusRef} className="hud hud-tr mono" />
       <div ref={alertRef} className="hud hud-alert mono" role="alert" />
+      {/* Advisory, not an alarm: polite rather than role="alert", so it never cuts across the
+          separation conflict above it. */}
+      <div ref={gateAlertRef} className="hud hud-gate-alert mono" aria-live="polite" />
     </div>
   )
 }

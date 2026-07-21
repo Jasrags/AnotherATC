@@ -306,6 +306,7 @@ interface Internal
     | 'hasInstruction'
     // Derived at snapshot time from the stand's occupancy.
     | 'waitingForStand'
+    | 'gateBlocked'
   > {
   path: readonly Point[]
   leg: number
@@ -2141,6 +2142,11 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
           conflict: ac.conflict,
           giveWayTo: ac.giveWayTo ? (find(ac.giveWayTo)?.callsign ?? null) : null,
           waitingForStand: ac.gate !== null && standHoldCap(ac) === 0 ? ac.gate : null,
+          gateBlocked:
+            ac.intent === 'arrival' &&
+            ac.gate !== null &&
+            statusOf(ac) !== 'parked' &&
+            standOccupant(ac.gate, ac) !== undefined,
           squawk: ac.squawk,
           hasInstruction: ac.lastClearance !== null,
           wakeHoldSec: wakeHoldFor(ac),

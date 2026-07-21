@@ -114,6 +114,17 @@ body {
   color: #ff5a4d;
 }
 
+/* A gate conflict has not happened yet — amber and a step quieter than the separation alert
+   it sits under, which is happening now. */
+.hud-gate-alert {
+  top: 64px;
+  right: 18px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  color: #f0c06a;
+}
+
 /* Admin/dev HUD control bar — the interactive controls, so it opts back into pointer
    events; the buttons get real focus rings for keyboard users. */
 .hud-controls {

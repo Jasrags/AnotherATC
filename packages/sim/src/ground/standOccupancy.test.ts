@@ -135,3 +135,67 @@ describe('a stand is a resource, not a label', () => {
     expect(at().waitingForStand).toBeNull()
   })
 })
+
+// `gateBlocked` is the field-wide signal: a conflict that has not happened yet. It is what both
+// the strip warning and the scope's gate alert read, so it is asserted here rather than in the
+// two places that display it.
+describe('gateBlocked — a gate conflict before it happens', () => {
+  it('flags an arrival still on final whose stand is occupied', () => {
+    const { sim } = field()
+    const occupiedRef = sim.snapshot().aircraft.find((a) => a.gate !== null)!.gate!
+    const stand = stands.find((s) => s.ref === occupiedRef)!
+    const ap = sim.approach()!
+    sim.add({
+      id: 'arr', callsign: 'ARR', type: 'B738', wake: 'M',
+      path: [ap.fix, ap.threshold], targetSpeed: 140, airborne: true,
+      intent: 'arrival', gate: occupiedRef, goalPoint: stand.stop,
+    })
+    const arr = () => sim.snapshot().aircraft.find((a) => a.id === 'arr')!
+    // Still airborne, nowhere near the gate — and already flagged.
+    expect(arr().altitude).toBeGreaterThan(0)
+    expect(arr().gateBlocked).toBe(true)
+    expect(arr().waitingForStand).toBeNull() // it hasn't bitten yet; that is the difference
+  })
+
+  it('does not flag an arrival bound for a free stand', () => {
+    const { sim } = field()
+    const taken = new Set(sim.snapshot().aircraft.map((a) => a.gate))
+    const free = stands.find((s) => s.source === 'charted' && !taken.has(s.ref))!
+    const ap = sim.approach()!
+    sim.add({
+      id: 'arr', callsign: 'ARR', type: 'B738', wake: 'M',
+      path: [ap.fix, ap.threshold], targetSpeed: 140, airborne: true,
+      intent: 'arrival', gate: free.ref, goalPoint: free.stop,
+    })
+    expect(sim.snapshot().aircraft.find((a) => a.id === 'arr')!.gateBlocked).toBe(false)
+  })
+
+  it('clears the moment the stand frees, with no command', () => {
+    const { sim } = field()
+    const blocker = sim.snapshot().aircraft.find((a) => a.gate !== null)!
+    const stand = stands.find((s) => s.ref === blocker.gate)!
+    const ap = sim.approach()!
+    sim.add({
+      id: 'arr', callsign: 'ARR', type: 'B738', wake: 'M',
+      path: [ap.fix, ap.threshold], targetSpeed: 140, airborne: true,
+      intent: 'arrival', gate: blocker.gate!, goalPoint: stand.stop,
+    })
+    const arr = () => sim.snapshot().aircraft.find((a) => a.id === 'arr')!
+    expect(arr().gateBlocked).toBe(true)
+
+    for (let i = 0; i < 1200; i += 1) sim.step(0.1) // the blocker's ground servicing
+    sim.dispatch({ type: 'pushback', aircraftId: blocker.id })
+    for (let i = 0; i < 900 && sim.snapshot().aircraft.find((a) => a.id === blocker.id); i += 1) {
+      sim.step(0.1)
+      if (!arr().gateBlocked) break
+    }
+    expect(arr().gateBlocked).toBe(false)
+  })
+
+  it('never flags a departure — its gate is where it came from, not where it is going', () => {
+    const { sim } = field()
+    const parked = sim.snapshot().aircraft.filter((a) => a.intent === 'departure' && a.gate !== null)
+    expect(parked.length).toBeGreaterThan(0)
+    expect(parked.every((a) => a.gateBlocked)).toBe(false)
+  })
+})
