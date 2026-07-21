@@ -390,18 +390,22 @@ interface StandLabel {
   point: Point
 }
 
-/** One numbered stand per gate: prefer the OSM gate node (terminal gates), fall
- *  back to a parking line's midpoint for numbered cargo/remote stands. Untagged
- *  parking positions are skipped (they'd just be unlabeled squares). */
-function collectStands(surface: AirportSurface): StandLabel[] {
+/**
+ * One numbered marker per stand, anchored where the aircraft actually parks.
+ *
+ * That is the lead-in's nose-stop mark, not the OSM gate node: the gate node is a label point
+ * at the terminal, a plane's length in from the stop, so anchoring there left every number
+ * offset from the aircraft it belongs to. Numbered cargo/remote stands with a parking line but
+ * no gate node fall back to that line's midpoint; untagged parking positions are skipped (they
+ * would just be unlabeled squares).
+ */
+function collectStands(surface: AirportSurface, built: readonly Stand[]): StandLabel[] {
   const stands: StandLabel[] = []
   const seen = new Set<string>()
-  for (const f of surface.features) {
-    if (f.kind !== 'gate' || !f.ref) continue
-    const p = f.points[0]
-    if (!p || seen.has(f.ref)) continue
-    seen.add(f.ref)
-    stands.push({ ref: f.ref, point: p })
+  for (const st of built) {
+    if (seen.has(st.ref)) continue
+    seen.add(st.ref)
+    stands.push({ ref: st.ref, point: st.stop })
   }
   for (const f of surface.features) {
     if (f.kind !== 'parking_position' || !f.ref || seen.has(f.ref)) continue
@@ -455,6 +459,9 @@ export function prepareSurface(
   areaLabelOffsetsNm: Record<string, Point> = {},
 ): PreparedSurface {
   const runways = surface.features.filter((f) => f.kind === 'runway')
+  // Built once and shared: the stand markers are anchored on the same geometry the paint is
+  // drawn from, so a label can never drift from the line it belongs to.
+  const standLines = buildStands(surface)
 
   const holdShort: Point[] = []
   for (const f of byKind(surface, 'holding_position')) {
@@ -549,8 +556,8 @@ export function prepareSurface(
     runwayCenterlines: runways,
     holdShort,
     areaLabels,
-    stands: collectStands(surface),
-    standLines: buildStands(surface),
+    stands: collectStands(surface, standLines),
+    standLines,
     taxiLabels,
     runwayNumbers,
   }

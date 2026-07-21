@@ -356,6 +356,16 @@ describe('prepareSurface — stand lines', () => {
     expect(bySource).toEqual({ '1': 'derived', '2': 'charted' })
   })
 
+  it('anchors the numbered marker on the nose-stop mark, not the gate node', () => {
+    const prep = prepareSurface(surface)
+    const marker = prep.stands.find((s) => s.ref === '2')!
+    const line = prep.standLines.find((s) => s.ref === '2')!
+    expect(marker.point).toEqual(line.stop)
+    // Gate 2's label node is at [0.5, 0.1]; its painted line stops at [0.5, 0.12], so the
+    // marker moved off the label node onto the mark the aircraft actually parks on.
+    expect(marker.point).not.toEqual([0.5, 0.1])
+  })
+
   it('orders every line taxi-side first so it can be driven in and reversed out', () => {
     for (const s of prepareSurface(surface).standLines) {
       expect(s.entry).toEqual(s.lead[0])
