@@ -144,6 +144,9 @@ export interface GroundAircraft {
   conflict: boolean
   /** Callsign of the traffic this aircraft has been told to give way to, or null. */
   giveWayTo: string | null
+  /** Designator of the stand this aircraft is holding for because someone is still on it, or
+   *  null. It has a good clearance — it just cannot have the gate yet. */
+  waitingForStand: string | null
   /** Assigned transponder (beacon) code once IFR clearance is delivered, or null. Note this is
    *  the code the *aircraft is squawking* — if the pilot misheard the clearance, it is not the
    *  code the controller issued. Comparing it against the transcript is the game. */
@@ -209,6 +212,8 @@ export interface GroundSim {
   remove(aircraftId: string): boolean
   /** Remove every aircraft from the surface. */
   clear(): void
+  /** Whether an aircraft is physically parked on this stand right now. */
+  standOccupied(ref: string): boolean
   /** The ways this aircraft could be pushed back off its stand (empty if it can't be pushed).
    *  Every stand has two, so this is a real choice: the direction it ends up facing is the
    *  direction it must taxi off in, since it cannot turn around on the alley. */

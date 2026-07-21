@@ -135,6 +135,16 @@ const TAXI_ACCEL = 4
 const TAXI_SPEED_KT = 15
 /** Pushback creep speed (kt) — a tug easing the aircraft off the stand. */
 const PUSHBACK_SPEED_KT = 5
+/**
+ * How far short of the lead-in an aircraft waiting for an occupied stand stops (nm ≈ 185 m).
+ *
+ * Not a cosmetic margin. Holding right at the paint deadlocks the pair: the aircraft on the
+ * stand pushes back down that same lead-in and stops nose-to-nose with the one waiting for it,
+ * so it can never vacate and the waiting aircraft can never be let in. The hold has to leave the
+ * whole lead-in plus room for the push and the turn onto the alley.
+ */
+const STAND_HOLD_NM = 0.1
+
 /** How fast the tug swings the nose round during a push (deg/s), so the aircraft ends the
  *  push already facing the way it will taxi rather than snapping round at the last moment. */
 const PUSH_TURN_RATE_DEG_S = 6
@@ -294,6 +304,8 @@ interface Internal
     | 'handoffPending'
     // Derived at snapshot time from `lastClearance`, not stored twice.
     | 'hasInstruction'
+    // Derived at snapshot time from the stand's occupancy.
+    | 'waitingForStand'
   > {
   path: readonly Point[]
   leg: number
@@ -1239,6 +1251,45 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
   }
 
   /**
+   * The aircraft physically on a stand right now, if any: parked on the mark, whether that is a
+   * departure yet to push back or an arrival still dwelling. This is what makes a stand a
+   * resource rather than a label — occupancy used to be an emergent property of "no two fleet
+   * members share a gate string", which held for the spawner and for nothing else.
+   */
+  function standOccupant(ref: string, except?: Internal): Internal | undefined {
+    const stand = findStand(stands, ref)
+    if (!stand) return undefined
+    return fleet.find(
+      (o) =>
+        o !== except &&
+        o.gate === ref &&
+        !o.airborne &&
+        o.groundspeed <= 0.5 &&
+        dist([o.x, o.y], stand.stop) < GATE_EPS,
+    )
+  }
+
+  /**
+   * Hold short of a stand that is still occupied.
+   *
+   * Not a refusal: the clearance is good, the aircraft simply cannot have the stand yet. It
+   * taxis in, creeps up to the lead-in and waits on the alley until the stand frees, then goes
+   * in on its own — which is what makes a late departure at one gate everybody's problem, since
+   * the aircraft waiting for it is sitting on the alley in everyone's way.
+   */
+  function standHoldCap(ac: Internal): number {
+    if (ac.gate === null || ac.pushingBack) return Infinity
+    const stand = findStand(stands, ac.gate)
+    if (!stand) return Infinity
+    if (dist([ac.x, ac.y], stand.stop) < GATE_EPS) return Infinity // already on it
+    if (!standOccupant(ac.gate, ac)) return Infinity
+    const toEntry = dist([ac.x, ac.y], stand.entry)
+    if (toEntry > leadLengthNm(stand) + STAND_HOLD_NM) return Infinity // still well out
+    // Creep the last stretch, then stop short of the paint.
+    return toEntry <= STAND_HOLD_NM ? 0 : STAND_SPEED_KT
+  }
+
+  /**
    * Marshalling pace once the aircraft is close enough to its stand to be on the paint.
    *
    * Deliberately positional rather than "the last N legs of the path": the path is rewritten
@@ -2024,7 +2075,13 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
           ? Infinity // a takeoff roll and a final aren't taxi movements
           : ac.rollingOut
             ? rolloutCap(ac) // …and a landing rollout follows its own turn-speed profile
-            : Math.min(separationCap(ac), reservationCap(ac), giveWayCap(ac), standCap(ac)),
+            : Math.min(
+                separationCap(ac),
+                reservationCap(ac),
+                giveWayCap(ac),
+                standCap(ac),
+                standHoldCap(ac),
+              ),
       )
       // reservationCap set each aircraft's blockedEdge; accrue continuous hold time and,
       // once it's sustained, reroute around the block if a viable parallel exists.
@@ -2083,6 +2140,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
           handoffPending: ac.rollingOut && ac.groundPending,
           conflict: ac.conflict,
           giveWayTo: ac.giveWayTo ? (find(ac.giveWayTo)?.callsign ?? null) : null,
+          waitingForStand: ac.gate !== null && standHoldCap(ac) === 0 ? ac.gate : null,
           squawk: ac.squawk,
           hasInstruction: ac.lastClearance !== null,
           wakeHoldSec: wakeHoldFor(ac),
@@ -2164,6 +2222,9 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     },
     clear(): void {
       fleet.length = 0
+    },
+    standOccupied(ref: string): boolean {
+      return standOccupant(ref) !== undefined
     },
     pushbackOptions(aircraftId: string): PushbackOption[] {
       const ac = find(aircraftId)

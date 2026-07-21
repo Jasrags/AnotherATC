@@ -71,9 +71,13 @@ describe('an arrival is marshalled onto the stand', () => {
   /** An arrival on the alley, a little short of `stand`, already pointing at it — which is how
    *  one actually approaches a gate. (Taxiing out to the runway and then reversing the aircraft
    *  back to its stand is not a manoeuvre it can make, and the router now refuses it.) */
-  function inboundTo(sim: ReturnType<typeof createGroundSim>, ref: string) {
+  function inboundTo(sim: ReturnType<typeof createGroundSim>, ref?: string) {
     const graph = buildTaxiGraph(KSAN.surface)
-    const stand = stands.find((s) => s.ref === ref)!
+    // A stand nobody is parked on — an occupied one would (correctly) hold this aircraft off.
+    const taken = new Set(sim.snapshot().aircraft.map((a) => a.gate))
+    const stand = ref
+      ? stands.find((s) => s.ref === ref)!
+      : stands.find((s) => s.source === 'charted' && !taken.has(s.ref))!
     const entryKey = graph.nearestNode(stand.entry)!
     const from = graph.nodePoint(graph.neighbours(entryKey)[0]!)!
     const id = sim.add({
@@ -84,7 +88,7 @@ describe('an arrival is marshalled onto the stand', () => {
       path: [from, graph.nodePoint(entryKey)!],
       targetSpeed: 15,
       intent: 'arrival',
-      gate: ref,
+      gate: stand.ref,
       goalPoint: stand.stop,
     })
     return { id, stand, at: () => sim.snapshot().aircraft.find((a) => a.id === id)! }
@@ -92,7 +96,7 @@ describe('an arrival is marshalled onto the stand', () => {
 
   it('reaches the gate along the lead-in line rather than across the apron', () => {
     const { sim } = ksanSim()
-    const { id, stand, at } = inboundTo(sim, '41')
+    const { id, stand, at } = inboundTo(sim)
 
     expect(sim.dispatch({ type: 'taxiToGoal', aircraftId: id })).toEqual({ ok: true })
     for (let i = 0; i < 8000 && dist([at().x, at().y], stand.stop) > 0.004; i += 1) sim.step(0.1)
@@ -102,7 +106,7 @@ describe('an arrival is marshalled onto the stand', () => {
 
   it('creeps down the lead-in instead of arriving at taxi speed', () => {
     const { sim } = ksanSim()
-    const { id, stand, at } = inboundTo(sim, '41')
+    const { id, stand, at } = inboundTo(sim)
     sim.dispatch({ type: 'taxiToGoal', aircraftId: id })
 
     // The cap engages at the lead-in's own length from the mark, and the aircraft needs a few
@@ -127,13 +131,14 @@ describe('the lead-in survives a path rewrite', () => {
   it('a re-cleared arrival still arrives along the paint, not across the apron', () => {
     const { sim } = ksanSim()
     const graph = buildTaxiGraph(KSAN.surface)
-    const stand = stands.find((s) => s.ref === '41')!
+    const taken = new Set(sim.snapshot().aircraft.map((a) => a.gate))
+    const stand = stands.find((s) => s.source === 'charted' && !taken.has(s.ref))!
     const entryKey = graph.nearestNode(stand.entry)!
     const from = graph.nodePoint(graph.neighbours(entryKey)[0]!)!
     const id = sim.add({
       id: 'arr', callsign: 'ARR', type: 'B738', wake: 'M',
       path: [from, graph.nodePoint(entryKey)!], targetSpeed: 15,
-      intent: 'arrival', gate: '41', goalPoint: stand.stop,
+      intent: 'arrival', gate: stand.ref, goalPoint: stand.stop,
     })
     const at = () => sim.snapshot().aircraft.find((a) => a.id === id)!
 

@@ -206,6 +206,16 @@ Design note: `docs/atc-tower.md` (one sim, two projections; Ground and Tower own
   `readback: { errorRate, seed }`; **the running game passes no config, so nothing is ever
   misheard** — see *Gaming the game* below for why and what turning it on entails.
 - 🚧 **Squawk / transponder codes** — beacon code assigned at clearance delivery (deterministic 4-digit octal), shown on the strip. Note the strip shows the code the aircraft is *squawking*, which is not the issued code when the pilot misheard it — comparing the two is the read-back game. _Next: link the code to a radar target once airborne (feeds TRACON radar contact)._
+- ✅ **Stand occupancy** — a stand is a resource, not a label. `standOccupied(ref)` reports who is
+  physically on the mark; an aircraft cleared to an occupied stand is *not refused* — the
+  clearance is good, the gate just isn't — so it taxis in, creeps up and **holds on the alley**
+  until the stand frees, then goes in on its own with no new clearance. The strip says
+  `GATE nn OCCUPIED`. The hold sits a full lead-in plus margin back (`STAND_HOLD_NM`), because
+  holding at the paint deadlocks the pair: the aircraft on the stand pushes back down that same
+  line and stops nose-to-nose with the one waiting for it. _Known residual: if the departing
+  aircraft's route out runs **through** the waiting one, they still contend — real ramps solve
+  that by holding the arrival further back or pushing the other way, and neither is modelled.
+  Watch for it in play before building more._
 - ⬜ **Turnaround & gate conflict** — an arrival feeds directly into the same aircraft's next departure cycle; short-turn timer; **gate conflict** when an arrival's gate is still occupied by a late departure. High-tension Ground/Ramp mechanic called out in the design docs.
 - ✅ **Sim ↔ UI bridge** — `GroundController` store + `useSyncExternalStore` for strips (canvas stays on rAF; strips re-render only on phase/selection change)
 - ⬜ **Time controls** — pause / 1× / 2× / 4× (fixed timestep already supports it)

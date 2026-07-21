@@ -81,6 +81,8 @@ export interface StripItem {
   via: string[]
   /** Callsign of the traffic this aircraft is giving way to, or null. */
   giveWayTo: string | null
+  /** Stand this aircraft is waiting on because someone is still parked there, or null. */
+  waitingForStand: string | null
   /** The code the aircraft is squawking — not necessarily the one issued, if the pilot
    *  misheard the clearance. */
   squawk: string | null
@@ -328,7 +330,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
     // Range-to-threshold is continuous, so it enters the signature at display precision
     // (0.1 nm ≈ one re-render every ~2.5 s on final) rather than every frame.
     for (const a of acs)
-      nextSig += `|${a.id}:${a.status}:${a.controlledBy}:${a.onRunway ? 'R' : ''}${a.blocksTakeoff ? 'B' : ''}${a.onShortFinal ? 'F' : ''}${a.vacated ? 'V' : ''}${a.handoffPending ? 'H' : ''}:${a.exitRef ?? ''}:${(exitOpts.get(a.id) ?? []).map((e) => e.ref).join('+')}:${vias.get(a.id)!.join('.')}:${a.giveWayTo ?? ''}:${a.squawk ?? ''}:${a.hasInstruction ? 'I' : ''}:${a.wakeHoldSec}:${a.serviceSec}:${a.finalNm.toFixed(1)}`
+      nextSig += `|${a.id}:${a.status}:${a.controlledBy}:${a.onRunway ? 'R' : ''}${a.blocksTakeoff ? 'B' : ''}${a.onShortFinal ? 'F' : ''}${a.vacated ? 'V' : ''}${a.handoffPending ? 'H' : ''}:${a.exitRef ?? ''}:${(exitOpts.get(a.id) ?? []).map((e) => e.ref).join('+')}:${vias.get(a.id)!.join('.')}:${a.giveWayTo ?? ''}:${a.waitingForStand ?? ''}:${a.squawk ?? ''}:${a.hasInstruction ? 'I' : ''}:${a.wakeHoldSec}:${a.serviceSec}:${a.finalNm.toFixed(1)}`
     if (nextSig === sig) return
     sig = nextSig
     snapshot = {
@@ -359,6 +361,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
         finalNm: Math.round(a.finalNm * 10) / 10,
         via: vias.get(a.id)!,
         giveWayTo: a.giveWayTo,
+        waitingForStand: a.waitingForStand,
         squawk: a.squawk,
         hasInstruction: a.hasInstruction,
         wakeHoldSec: a.wakeHoldSec,
