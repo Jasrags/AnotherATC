@@ -71,6 +71,14 @@ The core ground-control loop. Ordered roughly by priority.
   hand-digitise T1's lead-ins from the airport diagram (see `docs/airport-data-pipeline.md`)._
 - ✅ **Flight strip bay (ground)** — status-driven strips beside the scope, phase-gated actions, selection synced with the scope. _Next: squawk/route fields, drag-reorder/sequence._
 - ✅ **Routing-graph contraction + admin overlay** — the OSM surface gave the router ~1157 vertices when the network has only ~159 real decision points (junctions, endpoints, name changes). `graph.topology()` contracts pass-through vertices into geometry-preserving edges (edges keep the full polyline + true length, so driving still follows the curve) and flags long dead-straight runs for chart review. Admin overlay (GRAPH button / `g` key) draws the graph over the surface — junctions emphasized, flagged straight edges in pink — to spot geometry issues fast. _Next (**#2**): eyeball the ~4 flagged 2-point chords (taxiway C 936ft past the North Ramp is the "drove through the terminal" one) against the airport diagram and patch missing centerline vertices in `tools/ingest`. Later: optionally migrate routing itself onto the contracted graph (needs edge-snapping so gate stubs don't regress)._
+- ⬜ **Make the non-terminal stands usable** — KSAN's surface carries 72 `parking_position` lines
+  but only 32 become stands, because `buildStands` builds one per *gate node* and the rest have no
+  node to pair with: **W2–W4** (West/Island ramp), **N1–N10** (North Ramp), **1–5** (east side) and
+  **11–14** (commuter). That is ~22 real parking spots the field cannot use — cargo, GA and
+  commuter traffic have nowhere to go, and the terminal gates carry all the load. Needs a stand
+  built from a parking line alone, which means resolving orientation *without* a gate node to
+  measure against (the taxi-network end is the entry; see the pipeline doc), plus deciding which
+  of them the spawner may use and for what kind of traffic.
 - ⬜ **HS1 hotspot** — render the KSAN hot spot; incursion-risk awareness
 - ⬜ **Ground conflict / incursion alerts** — two aircraft converging, or one entering an occupied runway
 - 🚧 **Handoff to/from Tower** — **Contact tower** now performs a real Ground→Tower control transfer (`controlledBy` flips; the strip moves to the TWR bay). Tower then issues **line up and wait** and an explicit **cleared for takeoff** (full-power accel to 140 kt, exempt from taxi caps/conflict; lifts off the far end, counted `departed`). Runway single-occupancy + wake separation gate the takeoff clearance. Cross runway is only for transiting traffic. **Tower→Ground on arrival** also works now: a landed aircraft flips back to Ground once it has rolled out to taxi speed and can leave the runway (Slice 2). See **Tower (Local Control)** epic + `docs/atc-tower.md`. _Next: refuse a handoff when Tower is overloaded._
@@ -113,6 +121,13 @@ individual command features below plug into; it generalizes across controller mo
 - ✅ **Contact other frequency** — `Contact tower` wired for a departure holding short (Ground→Tower handoff, completes the departure); stays `soon` in other states until more frequencies/modes exist.
 
 ### Supporting systems shown in the reference
+- ⬜ **Comms: show and filter the channel** (communications-log follow-up) — the panel shows only
+  the position you are currently working, which hides the fact that you are running combined
+  positions: there is no way to see that a call went out on Tower while you were on Ground, and
+  no way to read one frequency's conversation while working the other. Wants (a) each line
+  labelled with the channel it was transmitted on, and (b) a filter — all / Ground / Tower —
+  independent of which bay is selected. The data is already there: every `Transmission` carries
+  its `position`, and `visibleComms` already filters by it.
 - ✅ **Communications log** — the sim writes a radio transcript (`ground/comms.ts`): every accepted
   command emits the controller's instruction and the pilot's read-back in 7110.65/AIM phraseology,
   timestamped in sim time and tagged with the frequency it happened on; refused commands say nothing.
@@ -308,6 +323,11 @@ is switched on.
 - ✅ Runway turnoffs drawn along their real geometry for the selected arrival, assigned one emphasized
 - ⬜ Gate docking guidance on arrival (AGNIS/PAPA-style stop/center cue) — the aircraft now parks
   on the painted stop mark, but there is no docking-guidance display
+- ⬜ **Show where a selected arrival is going.** Selecting an arrival gives no indication of the
+  stand it is bound for, so there is no way to see a gate conflict coming or to judge whether the
+  taxi route it will need is sensible. Wants the assigned stand called out on the strip and
+  highlighted on the scope (its lead-in emphasised, the way an assigned runway turnoff already
+  is), from the moment the arrival appears on final.
 - ⬜ Aircraft symbology by category/phase; selected-target emphasis
 - ⬜ Data-block declutter (leader-line direction, overlap avoidance)
 - ⬜ Theme polish; light/dark intentional (currently dark-only, correct for a scope)
@@ -343,6 +363,14 @@ is switched on.
 ## Testing / infra
 
 - ✅ **Dev/admin sandbox** (`?dev`) — empty surface, spawner off, plus a control bar. **SPAWN**: click the surface to drop a test aircraft (snaps to the nearest routing node, auto `DEVnn`); drive it with the normal commands; **GRAPH** (the routing-graph overlay, and its `g` key) is dev-only — outside the sandbox the bar is just the two gameplay controls, RWY and FIT. **ARRIVAL** puts a test arrival on the final approach of the *active* runway (airborne — it can't be placed by clicking the surface) and switches to the Tower bay; successive spawns stagger 1.2 nm down the final. **X** removes the selected, **CLEAR** wipes all. **PROBE**: click two points to draw the shortest graph path between them with a live length + taxiway-sequence readout (no route → dashed red). Works alongside the **GRAPH** overlay. Sim gained `add`/`remove`/`clear`. _Next: param picker (type/wake/intent), exact (off-network) placement, step/pause, save/replay._
+- ⬜ **Sandbox cleanup ergonomics** — two things that bite while play-testing:
+  - **CLEAR should clear the transcript too.** It wipes the fleet but the comms log keeps every
+    call from the aircraft that no longer exist, so the panel is unreadable after a few rounds.
+    Wants a sim-level reset rather than another `clear()` caller.
+  - **Removing an aircraft is too fiddly.** SPAWN drops one per click and it is easy to
+    over-click, but undoing that means select-then-**X** — two actions, and the selection can
+    land on the wrong target in a cluster. Wants a direct remove (click-to-delete mode, or
+    right-click/alt-click a target), so cleaning up is as cheap as creating.
 - ⬜ Playwright E2E for the interaction flows (needs dependency vetting per policy)
 - ⬜ Socket.dev GitHub app on the repo (CI already runs audit + osv-scanner)
 - ⬜ Coverage reporting + targets
