@@ -17,9 +17,9 @@ const surface: AirportSurface = {
   bounds: { minX: 0, minY: -0.3, maxX: 2, maxY: 0 },
   features: [
     { kind: 'runway', points: [[0, 0], [2, 0]] },
-    { kind: 'taxiway', ref: 'A', points: [[0.2, -0.2], [1, -0.2], [1.3, -0.2], [1.8, -0.2]] },
-    { kind: 'taxiway', ref: 'E1', points: [[0.2, -0.2], [0.2, -0.02]] }, // 90° connector, west
-    { kind: 'taxiway', ref: 'E5', points: [[0.9, 0], [1.15, -0.12], [1.3, -0.2]] }, // rapid exit
+    { kind: 'taxiway', ref: 'A', points: [[0.2, -0.2], [1, -0.2], [1.5, -0.2], [1.8, -0.2]] },
+    { kind: 'taxiway', ref: 'E1', points: [[0.2, -0.2], [0.2, -0.02]] }, // 90°, first half
+    { kind: 'taxiway', ref: 'E5', points: [[1.1, 0], [1.35, -0.12], [1.5, -0.2]] }, // rapid exit
     { kind: 'taxiway', ref: 'E9', points: [[1.8, -0.2], [1.8, -0.02]] }, // 90° connector, east
   ],
 }
@@ -298,7 +298,7 @@ describe('runway exits: the turnoff is chosen, not stumbled into', () => {
     const refs = sim.exitOptions('a').map((e) => e.ref)
     expect(refs).toContain('E5') // the mid-field rapid exit
     expect(refs).toContain('E9') // the far right-angle connector
-    expect(refs).not.toContain('E1') // 0.2 nm from the threshold — no way to slow down that fast
+    expect(refs).not.toContain('E1') // in the first half of the runway — not a landing exit
   })
 
   it('plans the rapid exit by default, because it frees the runway soonest', () => {
@@ -313,8 +313,8 @@ describe('runway exits: the turnoff is chosen, not stumbled into', () => {
       sim.step(0.1)
       const a = A(sim, 'a')
       if (!a) break
-      // 0.9 is where E5 meets the runway; sample the speed as it arrives there.
-      if (speedAtExit < 0 && a.x >= 0.9) speedAtExit = a.groundspeed
+      // 1.1 is where E5 meets the runway; sample the speed as it arrives there.
+      if (speedAtExit < 0 && a.x >= 1.1) speedAtExit = a.groundspeed
       if (a.vacated) break
     }
     expect(speedAtExit).toBeGreaterThan(25) // took the high-speed at speed, not at a crawl

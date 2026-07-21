@@ -147,6 +147,12 @@ const VACATE_CLEARANCE_NM = 0.04
 /** Ignore turnoffs within this distance (nm) of either threshold — they are runway entrances,
  *  not landing exits, and nothing can slow down enough to use one that early anyway. */
 const END_MARGIN_NM = 0.03
+/** Fraction of the runway an arrival is assumed to use before any turnoff is realistic. A
+ *  connector in the first half is there to *enter* the runway or to serve the opposite landing
+ *  direction; a landing aircraft is still far too fast to use it. Modelling that as a flat rule
+ *  is a deliberate simplification (CLAUDE.md: docs win over realism) — it also keeps the
+ *  geometry classifier from ever offering an exit a few thousand feet from the threshold. */
+const MIN_EXIT_FRACTION = 0.5
 
 const dot = (ax: number, ay: number, bx: number, by: number): number => ax * bx + ay * by
 const cross = (ax: number, ay: number, bx: number, by: number): number => ax * by - ay * bx
@@ -241,7 +247,8 @@ export function buildRunwayExits(
     const dy = turnPoint[1] - from[1]
 
     const distanceNm = dot(from[0] - threshold[0], from[1] - threshold[1], ux, uy)
-    if (distanceNm < END_MARGIN_NM || distanceNm > runLen - END_MARGIN_NM) continue
+    if (distanceNm < Math.max(END_MARGIN_NM, runLen * MIN_EXIT_FRACTION)) continue
+    if (distanceNm > runLen - END_MARGIN_NM) continue
 
     // End the turnoff where the aircraft is genuinely clear of *this* runway's centerline —
     // which keeps the check correct on a field with more than one runway, even though `guard`

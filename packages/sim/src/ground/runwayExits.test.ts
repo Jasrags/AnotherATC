@@ -3,7 +3,6 @@ import {
   brakeRateFor,
   buildRunwayExits,
   chooseExit,
-  MAX_BRAKE_KT_S,
   rolloutSeconds,
   type RunwayExit,
 } from './runwayExits'
@@ -12,9 +11,10 @@ import { buildRunwayGuard } from './runwayGuard'
 import { KSAN_SURFACE } from '../world/ksan'
 import type { AirportSurface, Point } from '../world/types'
 
-// Runway along y=0 (x 0→2). One acute turnoff ("R1") peeling forward-right at ~30°, one
-// right-angle turnoff ("S1"), and one acute turnoff pointing *backwards* ("B1") — which is a
-// rapid exit for the opposite landing direction and must not be offered to this one.
+// Runway along y=0 (x 0→2), so the midpoint is x=1. Landing west→east, the usable half is
+// x>1: an acute turnoff ("R1") peeling forward-right at ~30° and a right-angle one ("S1").
+// "B1" sits in the *other* half and points backwards — it is the opposite direction's rapid
+// exit and must never be offered to this one.
 const surface: AirportSurface = {
   icao: 'TEST',
   name: 'Test',
@@ -24,10 +24,10 @@ const surface: AirportSurface = {
   bounds: { minX: 0, minY: -0.4, maxX: 2, maxY: 0 },
   features: [
     { kind: 'runway', points: [[0, 0], [2, 0]] },
-    { kind: 'taxiway', ref: 'R1', points: [[0.6, 0], [0.95, -0.2], [1.2, -0.3]] },
-    { kind: 'taxiway', ref: 'S1', points: [[1.2, 0], [1.2, -0.3]] },
-    { kind: 'taxiway', ref: 'B1', points: [[1.6, 0], [1.25, -0.2]] },
-    { kind: 'taxiway', points: [[1.2, -0.3], [0.4, -0.3]] },
+    { kind: 'taxiway', ref: 'R1', points: [[1.1, 0], [1.45, -0.2], [1.7, -0.3]] },
+    { kind: 'taxiway', ref: 'S1', points: [[1.6, 0], [1.6, -0.3]] },
+    { kind: 'taxiway', ref: 'B1', points: [[0.6, 0], [0.3, -0.15], [0.2, -0.3]] },
+    { kind: 'taxiway', points: [[1.7, -0.3], [1.6, -0.3], [0.2, -0.3]] },
   ],
 }
 const guard = buildRunwayGuard(surface)
@@ -56,8 +56,8 @@ describe('buildRunwayExits', () => {
   })
 
   it('measures distance from the landing threshold and orders exits along the runway', () => {
-    expect(byRef('R1')!.distanceNm).toBeCloseTo(0.6, 2)
-    expect(byRef('S1')!.distanceNm).toBeCloseTo(1.2, 2)
+    expect(byRef('R1')!.distanceNm).toBeCloseTo(1.1, 2)
+    expect(byRef('S1')!.distanceNm).toBeCloseTo(1.6, 2)
     expect(exits.map((e) => e.ref)).toEqual(['R1', 'S1'])
   })
 
@@ -76,13 +76,18 @@ describe('braking to a turnoff', () => {
 
   it('an exit too close to slow down for is not offered', () => {
     const exits = buildRunwayExits(topo, guard, THRESHOLD, FAR)
-    // From the threshold at 140 kt, R1 at 0.6 nm needs (140²−40²)/(7200×0.6) = 4.17 kt/s.
-    expect(brakeRateFor(140, 40, 0.6)).toBeLessThan(MAX_BRAKE_KT_S)
     expect(chooseExit(exits, 140, 0)?.ref).toBe('R1')
     // Touching down long — now R1 is unreachable and S1 is the only option left.
-    expect(chooseExit(exits, 140, 0.35)?.ref).toBe('S1')
+    expect(chooseExit(exits, 140, 0.7)?.ref).toBe('S1')
     // Nothing left at all once past every turnoff.
     expect(chooseExit(exits, 140, 1.9)).toBeNull()
+  })
+
+  it('a turnoff in the first half of the runway is not a landing exit', () => {
+    // B1 is at x=0.6 on a 2 nm runway. Landing west→east nothing can use it; landing the other
+    // way it is 1.4 nm down and perfectly usable.
+    expect(buildRunwayExits(topo, guard, THRESHOLD, FAR).some((e) => e.ref === 'B1')).toBe(false)
+    expect(buildRunwayExits(topo, guard, FAR, THRESHOLD).some((e) => e.ref === 'B1')).toBe(true)
   })
 
   it('at the same distance, the turnoff that can be taken faster frees the runway sooner', () => {
@@ -170,19 +175,12 @@ describe('KSAN exits (real ingested surface)', () => {
     expect(sec(last) - sec(chosen)).toBeGreaterThan(15)
   })
 
-  it('landing the other way (RWY 27) re-derives the set from that direction', () => {
+  it('landing the other way (RWY 27) uses the far half from that threshold instead', () => {
     const other = buildRunwayExits(ksanTopo, ksanGuard, east, west)
-    expect(other.length).toBeGreaterThanOrEqual(8)
-    // Distances are measured from the new threshold, so the order along the runway reverses.
-    expect(other.map((e) => e.ref)).not.toEqual(exits.map((e) => e.ref))
-    // A connector's angle — and therefore how fast it can be taken — depends on which way you
-    // are landing: the same pavement is a shallow high-speed one way and a sharp turn the other.
-    const bothWays = exits.filter((a) => other.some((b) => b.ref === a.ref))
-    expect(bothWays.length).toBeGreaterThan(0)
-    const flipped = bothWays.filter(
-      (a) => Math.abs(a.angleDeg - other.find((b) => b.ref === a.ref)!.angleDeg) > 20,
-    )
-    expect(flipped.length).toBeGreaterThan(0)
+    expect(other.length).toBeGreaterThanOrEqual(3)
+    // Each direction only uses the turnoffs beyond its own midpoint, so the two sets are
+    // disjoint: a connector serving arrivals on 9 is on the wrong half of the field for 27.
+    expect(other.filter((o) => exits.some((e) => e.ref === o.ref))).toEqual([])
     expect(chooseExit(other, 140, 0)).not.toBeNull()
   })
 })

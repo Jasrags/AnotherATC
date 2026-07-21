@@ -50,6 +50,9 @@ interface StrokeOpts {
   px?: number
   minPx?: number
   dash?: number[]
+  /** Line cap. Taxiways round off where they meet; a runway ends square — a rounded cap draws
+   *  a half-disc of pavement past the threshold that is not there on any airport diagram. */
+  cap?: CanvasLineCap
 }
 
 function trace(ctx: Ctx, v: View, points: SurfaceFeature['points']): void {
@@ -88,7 +91,7 @@ function fillPolys(ctx: Ctx, v: View, feats: SurfaceFeature[], fill: string, edg
 /** Stroke every feature with a single uniform width for the pass (ignores per-feature width). */
 function strokeFeatures(ctx: Ctx, v: View, feats: SurfaceFeature[], color: string, opts: StrokeOpts): void {
   ctx.strokeStyle = color
-  ctx.lineCap = 'round'
+  ctx.lineCap = opts.cap ?? 'round'
   ctx.lineJoin = 'round'
   ctx.setLineDash(opts.dash ?? [])
   ctx.lineWidth = opts.px ?? Math.max((opts.nm ?? 0) * v.scale, opts.minPx ?? 1)
@@ -114,10 +117,15 @@ export function drawSurface(ctx: Ctx, v: View, prep: PreparedSurface, w: number,
   strokeFeatures(ctx, v, prep.taxiways, COLORS.taxiwayCenter, { px: 0.8 })
 
   // runway: edge outline, pavement, dashed centerline
-  strokeFeatures(ctx, v, prep.runwayPavement, COLORS.runwayEdge, { nm: DIMS.runwayNm + 0.003, minPx: 4 })
-  strokeFeatures(ctx, v, prep.runwayPavement, COLORS.runway, { nm: DIMS.runwayNm, minPx: 3 })
+  strokeFeatures(ctx, v, prep.runwayPavement, COLORS.runwayEdge, {
+    nm: DIMS.runwayNm + 0.003,
+    minPx: 4,
+    cap: 'butt',
+  })
+  strokeFeatures(ctx, v, prep.runwayPavement, COLORS.runway, { nm: DIMS.runwayNm, minPx: 3, cap: 'butt' })
   strokeFeatures(ctx, v, prep.runwayCenterlines, COLORS.runwayCenter, { px: 1.2, dash: [11, 9] })
   ctx.setLineDash([])
+  drawThresholds(ctx, v, prep.runwayPavement)
 
   // hold-short markers (nodes)
   ctx.fillStyle = COLORS.holdShort
@@ -127,6 +135,41 @@ export function drawSurface(ctx: Ctx, v: View, prep: PreparedSurface, w: number,
     ctx.rect(sx - 1.6, sy - 1.6, 3.2, 3.2)
     ctx.fill()
   }
+}
+
+/** Threshold markings: the solid bar across each runway end. With square-capped pavement this
+ *  is what makes an end read as a threshold rather than as pavement that simply stops. */
+function drawThresholds(ctx: Ctx, v: View, runways: SurfaceFeature[]): void {
+  ctx.save()
+  ctx.setLineDash([])
+  ctx.lineCap = 'butt'
+  ctx.strokeStyle = COLORS.runwayThreshold
+  const half = (DIMS.runwayNm / 2) * v.scale
+  for (const f of runways) {
+    for (const end of [
+      { at: f.points[0], toward: f.points[1] },
+      { at: f.points[f.points.length - 1], toward: f.points[f.points.length - 2] },
+    ]) {
+      const { at, toward } = end
+      if (!at || !toward) continue
+      const [ax, ay] = toScreen(v, at[0], at[1])
+      const [bx, by] = toScreen(v, toward[0], toward[1])
+      const dx = bx - ax
+      const dy = by - ay
+      const len = Math.hypot(dx, dy)
+      if (len < 1e-6 || half < 2) continue
+      // A bar across the full runway width, set just inside the end.
+      const inset = Math.min(len, DIMS.thresholdInsetPx)
+      const cx = ax + (dx / len) * inset
+      const cy = ay + (dy / len) * inset
+      ctx.lineWidth = Math.max(2, DIMS.thresholdBarPx)
+      ctx.beginPath()
+      ctx.moveTo(cx - (dy / len) * half, cy + (dx / len) * half)
+      ctx.lineTo(cx + (dy / len) * half, cy - (dx / len) * half)
+      ctx.stroke()
+    }
+  }
+  ctx.restore()
 }
 
 export function distToSeg(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
@@ -594,25 +637,39 @@ export function drawRunwayExits(
   ctx.font = `${DIMS.blockFont - 1}px ui-monospace, "SF Mono", Menlo, monospace`
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
+  ctx.lineJoin = 'round'
+  ctx.lineCap = 'round'
   for (const e of exits) {
     const on = e.ref === assignedRef
-    const [ax, ay] = toScreen(v, e.point[0], e.point[1])
-    const [bx, by] = toScreen(v, e.vacatePoint[0], e.vacatePoint[1])
-    ctx.strokeStyle = on ? COLORS.exitAssigned : COLORS.exitAvailable
-    ctx.lineWidth = on ? 2.4 : 1.2
-    ctx.setLineDash(on ? [] : [4, 4])
+    // The assigned turnoff is part of the aircraft's cleared path, so it is drawn exactly like
+    // the rest of the route: same dash, same colour. Alternatives sit behind it, dimmer.
+    ctx.strokeStyle = on ? COLORS.route : COLORS.exitAvailable
+    ctx.lineWidth = on ? 2 : 1.2
+    ctx.setLineDash(on ? [7, 6] : [3, 5])
     ctx.beginPath()
-    ctx.moveTo(ax, ay)
-    ctx.lineTo(bx, by)
+    let started = false
+    for (const p of e.geom) {
+      const [sx, sy] = toScreen(v, p[0], p[1])
+      if (started) ctx.lineTo(sx, sy)
+      else {
+        ctx.moveTo(sx, sy)
+        started = true
+      }
+    }
     ctx.stroke()
     ctx.setLineDash([])
-    // Label just past the vacate point, offset along the turnoff so it clears the pavement.
-    const dx = bx - ax
-    const dy = by - ay
+
+    const end = e.geom[e.geom.length - 1]
+    const before = e.geom[e.geom.length - 2]
+    if (!end || !before) continue
+    const [bx, by] = toScreen(v, end[0], end[1])
+    const [px, py] = toScreen(v, before[0], before[1])
+    const dx = bx - px
+    const dy = by - py
     const len = Math.hypot(dx, dy)
     if (len < 1e-6) continue // degenerate turnoff — nothing to label
-    ctx.fillStyle = on ? COLORS.exitAssigned : COLORS.exitAvailable
-    ctx.fillText(e.ref, bx + (dx / len) * 12, by + (dy / len) * 12)
+    ctx.fillStyle = on ? COLORS.routeDest : COLORS.exitAvailable
+    ctx.fillText(e.ref, bx + (dx / len) * 14, by + (dy / len) * 14)
   }
   ctx.restore()
 }

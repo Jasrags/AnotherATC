@@ -11,6 +11,7 @@ export const COLORS = {
   runway: '#101d29',
   runwayEdge: '#43566a',
   runwayCenter: '#7a90a5',
+  runwayThreshold: '#93a9bd', // threshold bar across each square-ended runway end
   holdShort: '#d79a2b',
   stand: '#1f3e4f', // gate/parking guidance lines (subtle — not a dominant feature)
   gateNode: '#4a7285', // gate-node stand markers (e.g. Terminal 1, which has no stand lines)
@@ -63,6 +64,9 @@ export const DIMS = {
   taxiwayNm: 0.012,
   runwayNm: 0.033,
   standNm: 0.004,
+  /** Threshold bar: how far in from the runway end it sits, and how thick it is (px). */
+  thresholdInsetPx: 5,
+  thresholdBarPx: 3,
   /** Half-length (nm) of the 1-nm range ticks drawn across the final approach course. */
   approachTickNm: 0.05,
   /** How far (px) an off-screen traffic marker sits in from the canvas edge. */
