@@ -93,6 +93,7 @@ configuration becomes a *set* of active runways with dependencies between them.
 
 Shared foundation ≈ 1 week; intersecting adds ~3–5 days; parallel adds ~5–8 days. Do an
 intersecting two-runway field first: it forces the whole foundation and adds exactly one new rule.
+KBUR and KOAK are carried as candidates in `backlog.md` with their measured geometry.
 
 ## 6. Rough effort
 

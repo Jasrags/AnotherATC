@@ -199,8 +199,35 @@ Design note: `docs/atc-tower.md` (one sim, two projections; Ground and Tower own
   north–south field from scratch and plays a full arrival and departure on it. Adding a
   **single-runway** field is now a data exercise — see `docs/adding-an-airport.md` (~1.5–2.5
   days, dominated by OSM taxiway-naming quality and whether the field has tagged gate nodes).
-  _Blocked for multi-runway fields: occupancy is field-wide and `ActiveRunway` is one direction —
-  see §4 of that doc._
+  _Blocked for multi-runway fields: occupancy is field-wide, `ActiveRunway` is one direction, and
+  wake separation tracks a single global `lastDeparture` — see §5 of that doc._
+
+### ⬜ Second airport (multi-runway) — candidates
+
+Both measured from the FAA survey (NASR), not assumed. They are **not the same problem**, and the
+shared prerequisite is the same for either: runways become first-class objects with their own
+guard, occupancy goes per-runway, wake separation goes per-runway, and the configuration becomes a
+*set* of active runways rather than one `ActiveRunway`. **≈ 1 week** before either field is
+touchable.
+
+- ⬜ **KBUR — the intersecting case** *(recommended first)*. Two runways: **08/26** 5,802 ft
+  (091°/271°, ILS on 08) and **15/33** 6,886 ft (167°/347°), **crossing at 66% along 08/26 and 79%
+  along 15/33**. Needs a time-and-position conflict model at the crossing, hold-short-of-the-
+  intersecting-runway, and timed departures between arrivals; LAHSO optional. Because the crossing
+  is past both midpoints, intersection departures before it fall out of the mechanic we already
+  have. Compact field, one new rule on top of the foundation. _+3–5 days._
+- ⬜ **KOAK — the parallel/dependent case**. Four runways, **zero intersections**: **10L/28R**
+  (5,457 ft) and **10R/28L** (6,213 ft) are parallel and only **1,001 ft apart** — well under the
+  ~2,500 ft dependent-approach threshold, so they are *not* independent and arrivals must be
+  staggered; plus **12/30** (10,520 ft, ILS both ends) on the separate South Field 5,688 ft away,
+  and **15/33** (3,376 ft). Needs two runways active simultaneously, separation-keyed dependency
+  rules, wake between parallels, and a scope/Ground flow that copes with two physically separate
+  fields. _+5–8 days, and much easier once KBUR has proven the foundation._
+
+Both are larger fields than KSAN, so the OSM taxiway-naming risk scales. **Before committing to
+either, pull the Overpass extract and count untagged ways touching the movement area** — that
+number decides whether it is 1.5 weeks or 2.5. Process: `docs/adding-an-airport.md`; sourcing:
+`docs/airport-data-pipeline.md`; do not skip `docs/lessons-from-ksan.md`.
 
 ---
 
