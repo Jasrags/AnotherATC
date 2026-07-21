@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildStands } from './stands'
+import { buildStands, distToTaxi } from './stands'
 import { KSAN_SURFACE } from '../world/ksan'
 import type { AirportSurface, Point } from '../world/types'
 
@@ -11,13 +11,39 @@ describe('buildStands — KSAN', () => {
   const byRef = new Map(stands.map((s) => [s.ref, s]))
 
   it('gives every gate a stand, charted where the field has a painted line', () => {
+    const terminal = stands.filter((s) => s.kind === 'terminal')
     // 51 gate nodes: Terminal 2 (20–51) and Terminal 1 (101–119).
-    expect(stands).toHaveLength(51)
-    const charted = stands.filter((s) => s.source === 'charted')
+    expect(terminal).toHaveLength(51)
+    const charted = terminal.filter((s) => s.source === 'charted')
     // Every T2 stand has an OSM parking_position way; T1's are not mapped.
     expect(charted.map((s) => s.ref).every((r) => Number(r) < 100)).toBe(true)
     expect(charted).toHaveLength(32)
-    expect(stands.filter((s) => s.source === 'derived')).toHaveLength(19)
+    expect(terminal.filter((s) => s.source === 'derived')).toHaveLength(19)
+  })
+
+  it('also builds the stands that exist only as paint — the ramps with no gate nodes', () => {
+    const remote = stands.filter((s) => s.kind === 'remote')
+    // North Ramp N1–N10, West/Island W2–W4, commuter 11–14, east side 1–5, plus 50A.
+    expect(remote).toHaveLength(23)
+    const refs = remote.map((s) => s.ref)
+    for (const r of ['N1', 'N10', 'W2', 'W4', '11', '14', '1', '5', '50A']) {
+      expect(refs).toContain(r)
+    }
+    // OSM casing is inconsistent — the North Ramp's sixth stand is tagged "n6" — and a stand
+    // the controller cannot name consistently is a stand they cannot use.
+    expect(refs).toContain('N6')
+    expect(refs).not.toContain('n6')
+    // They have no gate node; that is the whole reason they need a different orientation rule.
+    expect(remote.every((s) => s.gate === null)).toBe(true)
+    // And none collides with a terminal gate.
+    const terminal = new Set(stands.filter((s) => s.kind === 'terminal').map((s) => s.ref))
+    expect(remote.some((s) => terminal.has(s.ref))).toBe(false)
+  })
+
+  it('orients a remote stand on the taxi network: you enter from the pavement end', () => {
+    for (const s of stands.filter((x) => x.kind === 'remote')) {
+      expect(distToTaxi(KSAN_SURFACE, s.entry)).toBeLessThanOrEqual(distToTaxi(KSAN_SURFACE, s.stop))
+    }
   })
 
   it('orders every lead-in line taxilane-first, nose-stop-last', () => {
@@ -26,7 +52,8 @@ describe('buildStands — KSAN', () => {
       expect(s.entry).toEqual(s.lead[0])
       expect(s.stop).toEqual(s.lead[s.lead.length - 1])
       // The stop end is the one at the terminal: closer to the gate node than the entry is.
-      expect(dist(s.stop, s.gate)).toBeLessThan(dist(s.entry, s.gate))
+      // A remote stand has no gate node — that is exactly why it is oriented differently.
+      if (s.gate) expect(dist(s.stop, s.gate)).toBeLessThan(dist(s.entry, s.gate))
     }
   })
 
@@ -82,7 +109,11 @@ describe('buildStands — KSAN', () => {
     const terminals = KSAN_SURFACE.features.filter((f) => f.kind === 'terminal')
     const toTerminal = (p: Point): number =>
       Math.min(...terminals.flatMap((t) => t.points.map((q) => dist(p, q as Point))))
-    const backwards = stands.filter((s) => toTerminal(s.stop) > toTerminal(s.entry))
+    // Terminal gates only: a remote stand is on a cargo or GA ramp and is not at a terminal
+    // at all, which is why it is oriented against the taxi network instead.
+    const backwards = stands
+      .filter((s) => s.kind === 'terminal')
+      .filter((s) => toTerminal(s.stop) > toTerminal(s.entry))
     expect(backwards.map((s) => s.ref)).toEqual([])
   })
 

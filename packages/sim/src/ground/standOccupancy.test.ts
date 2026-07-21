@@ -8,6 +8,20 @@ import { KSAN } from '../world/ksanAirport'
 import type { Point } from '../world/types'
 
 const dist = (a: Point, b: Point): number => Math.hypot(a[0] - b[0], a[1] - b[1])
+/** Shortest distance from `p` to a polyline — how far off the painted line the aircraft is. */
+function offLine(p: Point, line: readonly Point[]): number {
+  let best = Infinity
+  for (let i = 1; i < line.length; i += 1) {
+    const a = line[i - 1] as Point
+    const b = line[i] as Point
+    const dx = b[0] - a[0]
+    const dy = b[1] - a[1]
+    const len2 = dx * dx + dy * dy
+    const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / len2))
+    best = Math.min(best, dist(p, [a[0] + t * dx, a[1] + t * dy]))
+  }
+  return best
+}
 const graph = buildTaxiGraph(KSAN.surface)
 const stands = buildStands(KSAN.surface)
 
@@ -301,5 +315,71 @@ describe('assignStand — sending an arrival somewhere else', () => {
     const end = route[route.length - 1]!
     const target = stands.find((s) => s.ref === other.ref)!
     expect(dist(end, target.stop)).toBeLessThan(1e-6)
+  })
+})
+
+// The non-terminal stands are most of KSAN's parking and were previously invisible to the sim:
+// 72 painted lines, 32 stands. "Usable" means the same things a gate is — reachable, occupiable,
+// and offered when an arrival needs somewhere else to go.
+describe('remote stands are real parking', () => {
+  it('an aircraft can be sent to one, and occupies it like any other stand', () => {
+    const { sim } = field()
+    const remote = stands.find((s) => s.kind === 'remote')!
+    const entryKey = graph.nearestNode(remote.entry)!
+    const from = graph.nodePoint(graph.neighbours(entryKey)[0]!)!
+    sim.add({
+      id: 'ga',
+      callsign: 'N123AB',
+      type: 'C208',
+      wake: 'L',
+      path: [from, graph.nodePoint(entryKey)!],
+      targetSpeed: 15,
+      intent: 'arrival',
+      gate: remote.ref,
+      goalPoint: remote.stop,
+    })
+    const at = () => sim.snapshot().aircraft.find((a) => a.id === 'ga')!
+
+    expect(sim.standOccupied(remote.ref)).toBe(false)
+    expect(sim.dispatch({ type: 'taxiToGoal', aircraftId: 'ga' })).toEqual({ ok: true })
+    // Run until it has actually *stopped* on the mark: a stand is occupied by an aircraft
+    // parked on it, not by one still creeping down the last few metres of the lead-in.
+    for (let i = 0; i < 12000; i += 1) {
+      sim.step(0.1)
+      if (dist([at().x, at().y], remote.stop) < 0.01 && at().groundspeed === 0) break
+    }
+
+    expect(dist([at().x, at().y], remote.stop)).toBeLessThan(0.02)
+    expect(offLine([at().x, at().y], remote.lead)).toBeLessThan(0.003) // came in on the paint
+    expect(sim.standOccupied(remote.ref)).toBe(true)
+  })
+
+  it('is offered as somewhere else to put a blocked arrival', () => {
+    const { sim } = field()
+    const occupiedRef = sim.snapshot().aircraft.find((a) => a.gate !== null)!.gate!
+    const stand = stands.find((s) => s.ref === occupiedRef)!
+    const ap = sim.approach()!
+    sim.add({
+      id: 'arr', callsign: 'ARR', type: 'B738', wake: 'M',
+      path: [ap.fix, ap.threshold], targetSpeed: 140, airborne: true,
+      intent: 'arrival', gate: occupiedRef, goalPoint: stand.stop,
+    })
+    // Reassignment now has the whole field to choose from, not just the terminal.
+    const refs = sim.standOptions('arr').map((o) => o.ref)
+    const remoteRefs = new Set(stands.filter((s) => s.kind === 'remote').map((s) => s.ref))
+    expect(refs.some((r) => remoteRefs.has(r))).toBe(true)
+
+    const target = refs.find((r) => remoteRefs.has(r))!
+    expect(sim.dispatch({ type: 'assignStand', aircraftId: 'arr', ref: target })).toEqual({ ok: true })
+    expect(sim.snapshot().aircraft.find((a) => a.id === 'arr')!.gateBlocked).toBe(false)
+  })
+
+  it('is not seeded with scheduled airline traffic', () => {
+    // The spawner works terminal gates; which traffic belongs on a freight apron is a scenario
+    // question, not a geometry one.
+    const { game } = field()
+    const remoteRefs = new Set(stands.filter((s) => s.kind === 'remote').map((s) => s.ref))
+    expect(game.spawn.gates.some((g) => remoteRefs.has(g.ref))).toBe(false)
+    expect(game.inits.some((i) => i.gate !== undefined && remoteRefs.has(i.gate))).toBe(false)
   })
 })

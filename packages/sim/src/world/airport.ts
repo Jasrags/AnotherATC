@@ -73,7 +73,13 @@ export function findRunway(airport: Airport, ident: string): ActiveRunway | unde
  *  heading it parks on, taken from the painted lead-in line where the field has one — not the
  *  gate label node, which sits at the terminal a plane's length further in. */
 export function gatesFromSurface(surface: AirportSurface): GateSlot[] {
-  return buildStands(surface).map((s) => ({ ref: s.ref, point: s.stop, headingDeg: s.headingDeg }))
+  // Terminal gates only. Remote stands — cargo, GA, commuter — are real parking and the sim
+  // knows them, so traffic can be *sent* there; but seeding scheduled airline traffic onto a
+  // freight apron would be wrong, and choosing which traffic belongs where is a scenario
+  // question rather than a geometry one.
+  return buildStands(surface)
+    .filter((s) => s.kind === 'terminal')
+    .map((s) => ({ ref: s.ref, point: s.stop, headingDeg: s.headingDeg }))
 }
 
 export interface AirportGame {

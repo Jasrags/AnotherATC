@@ -13,12 +13,23 @@ import type { AirportSurface, Point } from '../world/types'
  * end is the stand is resolved per line against the gate node rather than assumed. Where a field
  * has no painted line mapped (KSAN's own Terminal 1), one is derived straight off the nearest
  * taxi pavement, so every gate is usable and the difference is stated rather than hidden.
+ *
+ * Not every stand has a gate node. KSAN maps 23 parking lines with no node at all — the North
+ * Ramp, the West/Island ramp, the commuter and east-side stands — which is most of the field's
+ * non-airline parking. Those are built from the line alone, orienting on the taxi network
+ * instead: the end nearer the pavement is where you come in from, so the other end is the stand.
  */
 export interface Stand {
-  /** Stand designator, from the gate node ("39", "101"). */
+  /** Stand designator ("39", "101", "N6"). */
   ref: string
-  /** The gate node itself — where the stand is labelled, which is not where the nose stops. */
-  gate: Point
+  /** A terminal gate (built from a tagged gate node) or a remote stand known only by its
+   *  painted line — cargo, GA and commuter parking. The spawner works terminal gates; a remote
+   *  stand is somewhere traffic can be *sent*, which is what makes it usable at all. */
+  kind: 'terminal' | 'remote'
+  /** The gate node — where the stand is labelled, which is not where the nose stops. Null for a
+   *  remote stand: those have a painted line and no node, which is why they need a different
+   *  rule for which end is which. */
+  gate: Point | null
   /** The lead-in line, ordered taxilane → nose stop, keeping the painted curve. */
   lead: readonly Point[]
   /** Where the lead-in meets the taxilane: `lead[0]`. Entered forwards, left backwards. */
@@ -63,6 +74,21 @@ const TAXI_KINDS = new Set(['taxiway', 'taxilane'])
  *  with no direction to face and nothing to push back along. Below this the entry is taken
  *  further back along the pavement instead, so the lane's own last stretch becomes the lead-in. */
 const MIN_LEAD_NM = 0.005
+
+/** Distance from a point to the nearest taxi pavement. Unlike {@link nearestTaxiPoint} this has
+ *  no minimum: it answers "how close is this to the network", which is what decides which end of
+ *  an unlabelled stand line you drive in from. Using the minimum-distance version here would
+ *  mean a line whose entry sits *on* the pavement measured as further away than its own stand. */
+export function distToTaxi(surface: AirportSurface, p: Point): number {
+  let best = Infinity
+  for (const f of surface.features) {
+    if (!TAXI_KINDS.has(f.kind)) continue
+    for (let i = 1; i < f.points.length; i += 1) {
+      best = Math.min(best, distToSegment(p, f.points[i - 1] as Point, f.points[i] as Point))
+    }
+  }
+  return best
+}
 
 /** Nearest point on any taxi pavement at least `MIN_LEAD_NM` away, or null when the field has
  *  no pavement in reach. Segment endpoints are candidates as well as perpendicular projections,
@@ -119,7 +145,13 @@ export function buildStands(surface: AirportSurface): Stand[] {
   }
 
   // Resolve the charted stands first: they are what the derived ones are calibrated against.
-  const draft: { ref: string; gate: Point; lead: Point[]; source: Stand['source'] }[] = []
+  const draft: {
+    ref: string
+    gate: Point | null
+    kind: Stand['kind']
+    lead: Point[]
+    source: Stand['source']
+  }[] = []
   const seen = new Set<string>()
   for (const f of surface.features) {
     if (f.kind !== 'gate' || !f.ref || seen.has(f.ref)) continue
@@ -135,24 +167,40 @@ export function buildStands(surface: AirportSurface): Stand[] {
       const head = line[0] as Point
       const tail = line[line.length - 1] as Point
       const lead = dist(head, gate) < dist(tail, gate) ? [...line].reverse() : [...line]
-      draft.push({ ref: f.ref, gate, lead, source: 'charted' })
+      draft.push({ ref: f.ref, gate, kind: 'terminal', lead, source: 'charted' })
       continue
     }
     const entry = nearestTaxiPoint(surface, gate)
     if (!entry) continue
-    draft.push({ ref: f.ref, gate, lead: [entry, gate], source: 'derived' })
+    draft.push({ ref: f.ref, gate, kind: 'terminal', lead: [entry, gate], source: 'derived' })
+  }
+
+  // Then the stands that exist only as paint. With no gate node to measure against, the taxi
+  // network decides: the end nearer the pavement is the one you enter from.
+  for (const f of surface.features) {
+    if (f.kind !== 'parking_position' || !f.ref || f.points.length < 2) continue
+    // OSM ref casing is inconsistent — KSAN's North Ramp is N1…N10 with a lone lowercase "n6".
+    const ref = f.ref.toUpperCase()
+    if (seen.has(ref)) continue
+    const head = f.points[0] as Point
+    const tail = f.points[f.points.length - 1] as Point
+    if (dist(head, tail) < MIN_LEAD_NM) continue
+    seen.add(ref)
+    const lead =
+      distToTaxi(surface, head) <= distToTaxi(surface, tail) ? [...f.points] : [...f.points].reverse()
+    draft.push({ ref, gate: null, kind: 'remote', lead, source: 'charted' })
   }
 
   const setback = setbackFrom(
     draft
-      .filter((d) => d.source === 'charted')
+      .filter((d): d is typeof d & { gate: Point } => d.source === 'charted' && d.gate !== null)
       .map((d) => ({ gate: d.gate, stop: d.lead[d.lead.length - 1] as Point })),
   )
 
   const stands: Stand[] = []
   for (const d of draft) {
     let lead = d.lead
-    if (d.source === 'derived') {
+    if (d.source === 'derived' && d.gate) {
       // Stop the nose short of the label node by the field's own measured setback, instead of
       // running the line all the way in — which parks the aircraft on the terminal itself.
       const entry = lead[0] as Point
@@ -168,6 +216,7 @@ export function buildStands(surface: AirportSurface): Stand[] {
     const prev = lead[lead.length - 2] as Point
     stands.push({
       ref: d.ref,
+      kind: d.kind,
       gate: d.gate,
       lead,
       entry: lead[0] as Point,

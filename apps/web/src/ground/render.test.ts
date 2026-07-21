@@ -480,6 +480,7 @@ describe('drawStandHighlight', () => {
   const view = fitView({ minX: -1, minY: -1, maxX: 1, maxY: 1 }, 400, 400)
   const stand = {
     ref: '41',
+    kind: 'terminal' as const,
     gate: [0.4, 0.1] as [number, number],
     lead: [[0.2, 0], [0.3, 0.05], [0.4, 0.1]] as [number, number][],
     entry: [0.2, 0] as [number, number],
