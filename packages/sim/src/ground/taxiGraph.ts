@@ -58,11 +58,13 @@ export interface TaxiGraph {
   keyAt(p: Point): Key | null
   /** The taxiway designator of the edge between two adjacent nodes, or undefined. */
   refBetween(a: Key, b: Key): string | undefined
-  /** Shortest path of node coordinates from start to goal, inclusive; [] if unreachable. */
-  route(fromKey: Key, toKey: Key): Point[]
+  /** Shortest path of node coordinates from start to goal, inclusive; [] if unreachable.
+   *  `fromHeadingDeg` commits the aircraft to a direction it is already facing, so the route
+   *  cannot begin with a turn it could not physically make (see {@link MAX_TURN_DEG}). */
+  route(fromKey: Key, toKey: Key, fromHeadingDeg?: number): Point[]
   /** Shortest path that avoids the given undirected edges (each an {@link edgeKey}),
    *  inclusive of endpoints; [] if blocking severs every route. */
-  routeAvoiding(fromKey: Key, toKey: Key, blocked: ReadonlySet<string>): Point[]
+  routeAvoiding(fromKey: Key, toKey: Key, blocked: ReadonlySet<string>, fromHeadingDeg?: number): Point[]
   /** Shortest path from start to goal that traverses the given taxiways in order,
    *  inclusive of endpoints; [] if no such path exists (caller may fall back to {@link route}). */
   routeVia(fromKey: Key, toKey: Key, taxiways: readonly string[]): Point[]
@@ -70,6 +72,20 @@ export interface TaxiGraph {
    *  nodes (junctions, endpoints, taxiway-name changes). See {@link TaxiTopology}. */
   topology(): TaxiTopology
 }
+
+/**
+ * Sharpest turn (deg of deviation from straight ahead) an aircraft can make at a junction.
+ *
+ * Measured against the field before being chosen: across all 51 KSAN gate→runway routes the
+ * turn distribution is 4,492 turns under 30°, one between 30° and 60°, and 8 between 150° and
+ * 180°. The 150°+ group are near-reversals the router used to plan through Terminal 1 — turns
+ * no aircraft can make. The gap between 60° and 150° is wide enough that the exact threshold
+ * is not load-bearing; it only has to sit inside it.
+ */
+export const MAX_TURN_DEG = 120
+/** Cost (nm) added for a turn, scaled by how sharp it is, so a route prefers the gentler of
+ *  two otherwise-equal options rather than treating a hairpin as free. */
+const TURN_COST_NM = 0.02
 
 /** A taxi edge that crosses a runway costs this many times its length, so shortest paths
  *  approach a runway threshold along the taxiway instead of cutting across mid-field.
@@ -153,52 +169,115 @@ export function buildTaxiGraph(surface: AirportSurface): TaxiGraph {
   }
   const nearestNode = (p: Point): Key | null => nearestNodeWhere(p, () => true)
 
-  /** Dijkstra (a few hundred nodes; linear-scan frontier is plenty). `blocked`, when
-   *  given, skips any edge whose undirected {@link edgeKey} it contains. */
-  const dijkstra = (fromKey: Key, toKey: Key, blocked?: ReadonlySet<string>): Point[] => {
+  const bearingOf = (a: Point, b: Point): number =>
+    ((Math.atan2(b[0] - a[0], b[1] - a[1]) * 180) / Math.PI + 360) % 360
+  /** Deviation from straight ahead: 0 = carry straight on, 180 = double back. */
+  const deviation = (inbound: number, outbound: number): number =>
+    Math.abs((((outbound - inbound + 540) % 360) - 180))
+
+  /**
+   * Dijkstra over (arriving edge → node) states rather than bare nodes.
+   *
+   * A node-keyed search cannot see turns at all: the cost of reaching a junction says nothing
+   * about which way you came into it, so the router will happily plan a route that arrives at a
+   * junction and leaves back down the taxiway it came from. Carrying the arriving node in the
+   * state makes the turn angle knowable, which is what lets an impossible one be refused and a
+   * sharp one be charged for.
+   *
+   * `fromHeadingDeg` seeds the search with a direction the aircraft is already committed to —
+   * after a pushback, or mid-taxi — so the *first* turn is constrained like every other one.
+   */
+  const dijkstra = (
+    fromKey: Key,
+    toKey: Key,
+    blocked?: ReadonlySet<string>,
+    fromHeadingDeg?: number,
+  ): Point[] => {
     const start = nodes.get(fromKey)
     if (!start || !nodes.has(toKey)) return []
     if (fromKey === toKey) return [start]
 
-    const dist = new Map<Key, number>([[fromKey, 0]])
-    const prev = new Map<Key, Key>()
-    const visited = new Set<Key>()
-    const frontier = new Set<Key>([fromKey])
-
-    while (frontier.size > 0) {
-      let u: Key | null = null
-      let ud = Infinity
-      for (const k of frontier) {
-        const d = dist.get(k) ?? Infinity
-        if (d < ud) {
-          ud = d
-          u = k
+    /** A state is "arrived at `at` from `via`"; `via` is null only for the start. */
+    const stateKey = (via: Key | null, at: Key): string => `${via ?? ''}>${at}`
+    const dist = new Map<string, number>()
+    const prev = new Map<string, { via: Key | null; at: Key }>()
+    const heap: { d: number; via: Key | null; at: Key }[] = []
+    const push = (d: number, via: Key | null, at: Key): void => {
+      heap.push({ d, via, at })
+      let i = heap.length - 1
+      while (i > 0) {
+        const p = (i - 1) >> 1
+        if (heap[p]!.d <= heap[i]!.d) break
+        ;[heap[p], heap[i]] = [heap[i]!, heap[p]!]
+        i = p
+      }
+    }
+    const pop = (): { d: number; via: Key | null; at: Key } | undefined => {
+      const top = heap[0]
+      const last = heap.pop()
+      if (heap.length > 0 && last) {
+        heap[0] = last
+        let i = 0
+        for (;;) {
+          const l = i * 2 + 1
+          const r = l + 1
+          let m = i
+          if (l < heap.length && heap[l]!.d < heap[m]!.d) m = l
+          if (r < heap.length && heap[r]!.d < heap[m]!.d) m = r
+          if (m === i) break
+          ;[heap[m], heap[i]] = [heap[i]!, heap[m]!]
+          i = m
         }
       }
-      if (u === null) break
-      frontier.delete(u)
-      visited.add(u)
-      if (u === toKey) break
-      for (const e of adj.get(u) ?? []) {
-        if (visited.has(e.to)) continue
-        if (blocked && blocked.has(edgeKey(u, e.to))) continue
-        const nd = ud + e.w
-        if (nd < (dist.get(e.to) ?? Infinity)) {
-          dist.set(e.to, nd)
-          prev.set(e.to, u)
-          frontier.add(e.to)
+      return top
+    }
+
+    dist.set(stateKey(null, fromKey), 0)
+    push(0, null, fromKey)
+    let goal: { via: Key | null; at: Key } | null = null
+
+    while (heap.length > 0) {
+      const cur = pop()
+      if (!cur) break
+      const sk = stateKey(cur.via, cur.at)
+      if (cur.d > (dist.get(sk) ?? Infinity)) continue
+      if (cur.at === toKey) {
+        goal = { via: cur.via, at: cur.at }
+        break
+      }
+      const here = nodes.get(cur.at)
+      if (!here) continue
+      // Direction we arrived on: the previous leg, or the committed heading at the start.
+      const inbound =
+        cur.via !== null ? bearingOf(nodes.get(cur.via) as Point, here) : fromHeadingDeg
+      for (const e of adj.get(cur.at) ?? []) {
+        if (e.to === cur.via) continue // never immediately retrace the leg just flown
+        if (blocked && blocked.has(edgeKey(cur.at, e.to))) continue
+        const next = nodes.get(e.to)
+        if (!next) continue
+        let turn = 0
+        if (inbound !== undefined) {
+          turn = deviation(inbound, bearingOf(here, next))
+          if (turn > MAX_TURN_DEG) continue // pavement no aircraft could turn onto
+        }
+        const nd = cur.d + e.w + (turn / 180) * TURN_COST_NM
+        const nk = stateKey(cur.at, e.to)
+        if (nd < (dist.get(nk) ?? Infinity)) {
+          dist.set(nk, nd)
+          prev.set(nk, { via: cur.via, at: cur.at })
+          push(nd, cur.at, e.to)
         }
       }
     }
 
-    if (!prev.has(toKey)) return []
+    if (!goal) return []
     const out: Point[] = []
-    let cur: Key | undefined = toKey
+    let cur: { via: Key | null; at: Key } | undefined = goal
     while (cur) {
-      const p = nodes.get(cur)
+      const p = nodes.get(cur.at)
       if (p) out.push(p)
-      if (cur === fromKey) break
-      cur = prev.get(cur)
+      if (cur.at === fromKey && cur.via === null) break
+      cur = prev.get(stateKey(cur.via, cur.at))
     }
     return out.reverse()
   }
@@ -264,9 +343,14 @@ export function buildTaxiGraph(surface: AirportSurface): TaxiGraph {
     return { nodes: topoNodes, edges }
   }
 
-  const route = (fromKey: Key, toKey: Key): Point[] => dijkstra(fromKey, toKey)
-  const routeAvoiding = (fromKey: Key, toKey: Key, blocked: ReadonlySet<string>): Point[] =>
-    dijkstra(fromKey, toKey, blocked)
+  const route = (fromKey: Key, toKey: Key, fromHeadingDeg?: number): Point[] =>
+    dijkstra(fromKey, toKey, undefined, fromHeadingDeg)
+  const routeAvoiding = (
+    fromKey: Key,
+    toKey: Key,
+    blocked: ReadonlySet<string>,
+    fromHeadingDeg?: number,
+  ): Point[] => dijkstra(fromKey, toKey, blocked, fromHeadingDeg)
 
   /**
    * Shortest path that traverses `taxiways` in order. Searches a product graph of

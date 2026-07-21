@@ -26,7 +26,11 @@ const surface: AirportSurface = {
 const guard = buildRunwayGuard(surface)
 const graph = buildTaxiGraph(surface)
 
-const GATE: Point = [0.2, -0.2]
+// East end of the parallel, i.e. *ahead* of a landing rollout. It used to sit at the west end,
+// which meant reaching it from the rapid exit required turning back through 152° onto taxiway A
+// — a hairpin no aircraft can make, and one the router now refuses. A real field serves a
+// landing direction with stands it can reach going forward.
+const GATE: Point = [1.8, -0.2]
 const THRESHOLD: Point = [0, 0] // RWY 9, landing to the east
 const FIX: Point = [-4, 0] // 4 nm final, on the extended centerline
 
