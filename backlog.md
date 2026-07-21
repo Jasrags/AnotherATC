@@ -230,7 +230,14 @@ Design note: `docs/atc-tower.md` (one sim, two projections; Ground and Tower own
   aircraft's route out runs **through** the waiting one, they still contend — real ramps solve
   that by holding the arrival further back or pushing the other way, and neither is modelled.
   Watch for it in play before building more._
-- ⬜ **Turnaround & gate conflict** — an arrival feeds directly into the same aircraft's next departure cycle; short-turn timer; **gate conflict** when an arrival's gate is still occupied by a late departure. High-tension Ground/Ramp mechanic called out in the design docs.
+- ✅ **Turnaround & gate conflict** — an arrival is counted on arrival and then *stays*: same
+  airframe, same stand, now a departure running a fresh ground-service cycle. That is what makes
+  a gate finite — before it, a stand freed itself the moment it was reached, so occupancy, the
+  conflict alert and reassignment were all warning about something that resolved itself. The new
+  flight carries nothing over (no squawk, no clearance, no read-back history, no give-way), so it
+  starts at Deliver clearance like any other departure. Opt-in `turnaround`; on in the game.
+  _Next: a short-turn timer with a scheduled off-blocks time, so a slow turnaround costs
+  something; and a new flight number rather than reusing the arrival's callsign._
 - ✅ **Sim ↔ UI bridge** — `GroundController` store + `useSyncExternalStore` for strips (canvas stays on rAF; strips re-render only on phase/selection change)
 - ✅ **Time controls** — pause / 1× / 2× / 4× in the control bar, Space to pause. Paused stops the
   sim only: pan, zoom, selection and clearances keep working, so it doubles as a planning tool.
