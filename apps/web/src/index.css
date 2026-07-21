@@ -337,9 +337,30 @@ body {
   color: #e7c6f4;
   background: #2a1832;
 }
+.badge-lineUpWait {
+  color: #041018;
+  background: #5bc8f5;
+}
 .badge-departing {
   color: #041018;
   background: #7fd4ff;
+}
+
+/* Takeoff-queue sequence number, shown before the callsign on a Tower departure. */
+.strip-seq {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  margin-right: 6px;
+  padding: 0 4px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #041018;
+  background: #7fd4ff;
+  border-radius: 8px;
+  vertical-align: middle;
 }
 
 .strip-row2 {

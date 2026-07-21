@@ -74,6 +74,8 @@ export interface GroundControllerOptions {
 export interface StripSnapshot {
   aircraft: StripItem[]
   selectedId: string | null
+  /** The active controller position (which strip bay is shown). */
+  position: ControllerPosition
   /** The route being built for the selected aircraft, if route mode is active. */
   draft: RouteDraft | null
 }
@@ -94,6 +96,10 @@ export interface GroundController {
   readonly dev: boolean
   selectedId(): string | null
   select(id: string | null): void
+  /** The active controller position (Ground or Tower). */
+  position(): ControllerPosition
+  /** Switch the active controller position (which strip bay is shown). */
+  setPosition(p: ControllerPosition): void
   dispatch(cmd: GroundCommand): void
   /** A transient controller-facing message (a refused command or an error), or null.
    *  Expires a few seconds after it is set. */
@@ -145,6 +151,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
     : createGroundSim(game.inits, { graph, guard, spawn: game.spawn, servicing: game.servicing })
 
   let selected: string | null = null
+  let position: ControllerPosition = 'ground'
   let draft: RouteDraft | null = null
   let devSeq = 0
   let probeState: ProbeResult | null = null
@@ -191,7 +198,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
     return out
   }
   const listeners = new Set<() => void>()
-  let snapshot: StripSnapshot = { aircraft: [], selectedId: null, draft: null }
+  let snapshot: StripSnapshot = { aircraft: [], selectedId: null, position: 'ground', draft: null }
   let sig = ''
 
   /** How long a refusal/error message stays on the HUD (ms). */
@@ -204,7 +211,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
   const publish = (): void => {
     const acs = sim.snapshot().aircraft
     const vias = new Map(acs.map((a) => [a.id, sim.taxiwaysOf(a.id)]))
-    let nextSig = selected ?? '-'
+    let nextSig = `${position}|${selected ?? '-'}`
     nextSig += draft ? `~${draft.id}:${draft.via.join('.')}` : ''
     for (const a of acs)
       nextSig += `|${a.id}:${a.status}:${a.controlledBy}:${vias.get(a.id)!.join('.')}:${a.giveWayTo ?? ''}:${a.squawk ?? ''}:${a.wakeHoldSec}:${a.serviceSec}`
@@ -212,6 +219,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
     sig = nextSig
     snapshot = {
       selectedId: selected,
+      position,
       draft: draft ? { id: draft.id, via: [...draft.via] } : null,
       aircraft: acs.map((a) => ({
         id: a.id,
@@ -300,10 +308,22 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
       if (draft && draft.id !== id) draft = null // route mode is bound to its aircraft
       publish()
     },
+    position: () => position,
+    setPosition: (p) => {
+      position = p
+      publish()
+    },
     dispatch: (cmd) => {
       try {
         const result = sim.dispatch(cmd)
         if (!result.ok) flashNotice(result.reason)
+        else if (cmd.type === 'contactTower') {
+          // Follow the aircraft onto the Tower position so its takeoff clearance is right
+          // there, and announce the hand-off (the transfer is otherwise silent).
+          const cs = sim.snapshot().aircraft.find((a) => a.id === cmd.aircraftId)?.callsign
+          position = 'tower'
+          flashNotice(`${cs ?? cmd.aircraftId} → Tower`)
+        }
       } catch (err) {
         // A command should never throw; if it does, don't let the click silently vanish.
         console.error('ground command failed', cmd, err)

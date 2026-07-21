@@ -104,6 +104,47 @@ describe('ground controller bridge', () => {
     c.dispatch({ type: 'clearance', aircraftId: 'init0' }) // departure, uncleared → accepted
     expect(c.notice()).toBeNull()
   })
+
+  it('setPosition switches the active position and notifies subscribers', () => {
+    const c = createGroundController()
+    expect(c.position()).toBe('ground')
+    let calls = 0
+    c.subscribe(() => {
+      calls += 1
+    })
+    c.setPosition('tower')
+    expect(c.position()).toBe('tower')
+    expect(c.getSnapshot().position).toBe('tower')
+    expect(calls).toBe(1)
+  })
+
+  it('a refused contact-tower does not switch to the Tower position', () => {
+    const c = createGroundController()
+    c.dispatch({ type: 'contactTower', aircraftId: 'init0' }) // parked at gate → refused
+    expect(c.notice()).toMatch(/holding short/i)
+    expect(c.position()).toBe('ground')
+  })
+
+  it('a successful contact-tower hands off: switches to Tower and announces it', () => {
+    const c = createGroundController()
+    const step = (n: number) => {
+      for (let i = 0; i < n; i += 1) c.sim.step(0.1)
+    }
+    const ac = () => c.sim.snapshot().aircraft.find((a) => a.id === 'init0')
+    c.sim.dispatch({ type: 'clearance', aircraftId: 'init0' })
+    step(500) // let ground servicing (fuel ~45s) finish so pushback unlocks
+    expect(c.sim.dispatch({ type: 'pushback', aircraftId: 'init0' }).ok).toBe(true)
+    step(600) // ease off the stand to the alley
+    c.sim.dispatch({ type: 'taxiToGoal', aircraftId: 'init0' }) // taxi to the departure runway
+    for (let i = 0; i < 9000 && !ac()?.holdShort; i += 1) c.sim.step(0.1)
+    expect(ac()?.holdShort).toBe(true)
+    expect(ac()?.holdingForTakeoff).toBe(true) // a takeoff hold, not a crossing
+
+    expect(c.position()).toBe('ground')
+    c.dispatch({ type: 'contactTower', aircraftId: 'init0' }) // hand off via the controller
+    expect(c.position()).toBe('tower') // auto-followed the aircraft to Tower
+    expect(c.notice()).toMatch(/tower/i)
+  })
 })
 
 // KSAN spans roughly x ∈ [-0.85, 0.75] nm; these are safely inside the field.

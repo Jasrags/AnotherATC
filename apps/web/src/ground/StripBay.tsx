@@ -1,7 +1,21 @@
-import { useRef, useState, useSyncExternalStore } from 'react'
+import { useRef, useSyncExternalStore } from 'react'
 import type { ControllerPosition, GroundIntent, GroundStatus, Point } from '@anotheratc/sim'
 import type { GroundController, RouteDraft, StripItem } from './controller'
 import { StripCommandMenu } from './StripCommandMenu'
+
+/** Takeoff-queue sequence numbers: rank the departures awaiting takeoff (Tower-owned, holding
+ *  short or lined up) in fleet order, so each strip can show its place in line. Deterministic. */
+export function takeoffSequence(aircraft: StripItem[]): Map<string, number> {
+  const seq = new Map<string, number>()
+  let n = 0
+  for (const a of aircraft) {
+    if (a.controlledBy === 'tower' && a.intent === 'departure' && (a.status === 'holdShort' || a.status === 'lineUpWait')) {
+      n += 1
+      seq.set(a.id, n)
+    }
+  }
+  return seq
+}
 
 const STATUS_LABEL: Record<GroundStatus, string> = {
   parked: 'PARKED',
@@ -82,7 +96,7 @@ const POSITIONS: { key: ControllerPosition; label: string; title: string }[] = [
 
 export function StripBay({ controller }: { controller: GroundController }) {
   const snap = useSyncExternalStore(controller.subscribe, controller.getSnapshot)
-  const [position, setPosition] = useState<ControllerPosition>('ground')
+  const position = snap.position
   const tablistRef = useRef<HTMLDivElement>(null)
 
   // WAI-ARIA tabs pattern: Left/Right move selection + focus between the two positions.
@@ -91,7 +105,7 @@ export function StripBay({ controller }: { controller: GroundController }) {
     e.preventDefault()
     const dir = e.key === 'ArrowRight' ? 1 : -1
     const next = (index + dir + POSITIONS.length) % POSITIONS.length
-    setPosition(POSITIONS[next]!.key)
+    controller.setPosition(POSITIONS[next]!.key)
     tablistRef.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus()
   }
 
@@ -100,6 +114,7 @@ export function StripBay({ controller }: { controller: GroundController }) {
   const counts: Record<ControllerPosition, number> = { ground: 0, tower: 0 }
   for (const a of snap.aircraft) counts[a.controlledBy] += 1
   const visible = snap.aircraft.filter((a) => a.controlledBy === position)
+  const seq = takeoffSequence(snap.aircraft)
 
   return (
     <aside className="strip-bay">
@@ -115,7 +130,7 @@ export function StripBay({ controller }: { controller: GroundController }) {
             tabIndex={position === p.key ? 0 : -1}
             className={`strip-tab${position === p.key ? ' strip-tab-active' : ''}`}
             title={p.title}
-            onClick={() => setPosition(p.key)}
+            onClick={() => controller.setPosition(p.key)}
             onKeyDown={(e) => onTabKey(e, i)}
           >
             {p.label}
@@ -141,6 +156,7 @@ export function StripBay({ controller }: { controller: GroundController }) {
               >
                 <div className="strip-row1">
                   <span className="strip-cs">
+                    {seq.has(a.id) && <span className="strip-seq">{seq.get(a.id)}</span>}
                     {a.callsign}
                     {wake}
                   </span>
