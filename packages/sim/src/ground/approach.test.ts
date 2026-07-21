@@ -280,7 +280,8 @@ describe('arrival end-to-end: final → land → exit → Ground → gate', () =
 
     // Once it has exited, the runway is available again.
     expect(sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'd' })).toEqual({ ok: true })
-    run(sim, 600)
+    // Longer than the roll alone: cleared from hold-short it taxis into position first.
+    for (let i = 0; i < 2000 && sim.snapshot().departed < 1; i += 1) sim.step(0.1)
     expect(sim.snapshot().departed).toBe(1)
   })
 })

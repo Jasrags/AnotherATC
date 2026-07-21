@@ -168,6 +168,13 @@ const LINEUP_ALIGN_NM = 0.03
  *  connector nodes a hundred feet off the centerline — fine for occupancy, useless for
  *  choosing where to line up. */
 const CENTERLINE_EPS_NM = 0.004
+/** How far from the line-up point a *charted* runway entry may be and still be the way onto the
+ *  runway. Beyond this the graph simply has no entry node at this spot, and routing to the
+ *  nearest one it does have would drive the aircraft away from the runway to reach it — on a
+ *  field whose only centerline node is a mid-field turnoff, that means taxiing back down the
+ *  parallel and entering half a mile behind where it was holding. Past this bound the straight
+ *  move onto the stripe in front of the aircraft is both correct and what a pilot would do. */
+const LINEUP_ENTRY_MAX_NM = 0.15
 /** How close (nm) counts as reaching a gate. */
 const GATE_EPS = 0.02
 /** Seconds an arrival dwells at the gate before it clears the stand. */
@@ -326,6 +333,9 @@ interface Internal
   avoidEdges: Set<string>
   /** Blocked edges we already tried and failed to divert around (skip recompute until recleared). */
   divertTried: Set<string>
+  /** Cleared for takeoff while still holding short: taxi into position first, then roll.
+   *  The roll begins on its own once the aircraft is established on the centerline. */
+  rollWhenLinedUp: boolean
   /** The last clearance transmitted to this aircraft — what "say again" repeats. */
   lastClearance: GroundCommand | null
   /** What the controller actually said, when the pilot read it back wrong. Null when the last
@@ -569,6 +579,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       heldSec: 0,
       avoidEdges: new Set(),
       divertTried: new Set(),
+      rollWhenLinedUp: false,
       lastClearance: null,
       misheard: null,
     }
@@ -665,7 +676,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
   function statusOf(ac: Internal): GroundStatus {
     if (ac.airborne) return ac.clearedToLand ? 'landing' : 'onFinal'
     if (ac.rollingOut) return 'rollout'
-    if (ac.departing) return 'departing'
+    if (ac.departing || ac.rollWhenLinedUp) return 'departing'
     if (ac.pushingBack) return 'pushback'
     if (ac.lineUpWait) return 'lineUpWait'
     if (ac.holdShort) return 'holdShort'
@@ -759,6 +770,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       // so the path runs through the connector's geometry, which is where its curvature is
       // recorded, and finishes on the stripe rather than at the pavement edge.
       const entryKey = graph.nearestNodeWhere(lineup, (n) => {
+        if (dist(n, lineup) > LINEUP_ENTRY_MAX_NM) return false
         const c = nearestRunwayPoint(n)
         return c !== null && dist(n, c) < CENTERLINE_EPS_NM
       })
@@ -1101,6 +1113,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     ac.pushingBack = false // …and aborts an in-progress pushback,
     ac.lineUpWait = false // …a line-up on the runway,
     ac.departing = false // …and a takeoff roll — a taxi clearance means it's taxiing now.
+    ac.rollWhenLinedUp = false // …including one that hadn't started yet.
     ac.targetSpeed = TAXI_SPEED_KT
     ac.holding = false
     ac.holdShort = false
@@ -1178,6 +1191,53 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
 
   const ACCEPTED: DispatchResult = { ok: true }
   const refused = (reason: string): DispatchResult => ({ ok: false, reason })
+
+  /**
+   * Taxi onto the runway centerline in front of the aircraft (the nearest point, not its far
+   * departure-runway goal — so it lines up where it is holding, at either end).
+   */
+  function enterRunway(ac: Internal): void {
+    const lineup: Point = nearestRunwayPoint([ac.x, ac.y]) ?? ac.goalPoint ?? [ac.x, ac.y]
+    clearDiversion(ac)
+    ac.path = lineUpPath(ac, lineup)
+    ac.leg = 0
+    ac.held = null
+    ac.holdShort = false
+    ac.lineUpWait = true
+    ac.targetSpeed = TAXI_SPEED_KT
+    ac.holding = false
+  }
+
+  /**
+   * Begin the takeoff roll. Only ever called with the aircraft already on the centerline —
+   * either because it was lined up and waiting, or because it has just taxied into position.
+   * Rolling from wherever the aircraft happened to be standing is what made a departure cleared
+   * from hold-short accelerate at takeoff power diagonally off the taxiway and onto the runway.
+   */
+  function beginTakeoffRoll(ac: Internal): boolean {
+    const far = runway ? takeoffEnd(runway) : farRunwayEnd([ac.x, ac.y])
+    if (!far) return false
+    clearDiversion(ac)
+    ac.path = [[ac.x, ac.y], far]
+    ac.leg = 0
+    ac.held = null
+    ac.lineUpWait = false
+    ac.rollWhenLinedUp = false
+    ac.departing = true
+    ac.targetSpeed = TAKEOFF_SPEED_KT
+    ac.holding = false
+    ac.holdShort = false
+    // The wake-separation clock starts when the roll does, not when the clearance was issued.
+    lastDeparture = { wake: ac.wake, atTime: time }
+    return true
+  }
+
+  /** A departure cleared from hold-short rolls the moment it is established on the centerline. */
+  function resolveLineUp(ac: Internal): void {
+    if (!ac.rollWhenLinedUp || !ac.lineUpWait) return
+    if (ac.leg < ac.path.length - 1) return
+    beginTakeoffRoll(ac)
+  }
 
   /** The named taxiways an aircraft's current route follows, in order. */
   function taxiwaysFor(ac: Internal): string[] {
@@ -1366,17 +1426,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
           )
         )
           return refused('runway occupied')
-        // Line up onto the runway centerline in front of the aircraft (nearest point), not at
-        // its far departure-runway goal — so it lines up where it's holding, at either end.
-        const lineup: Point = nearestRunwayPoint([ac.x, ac.y]) ?? ac.goalPoint ?? [ac.x, ac.y]
-        clearDiversion(ac)
-        ac.path = lineUpPath(ac, lineup)
-        ac.leg = 0
-        ac.held = null
-        ac.holdShort = false
-        ac.lineUpWait = true
-        ac.targetSpeed = TAXI_SPEED_KT
-        ac.holding = false
+        enterRunway(ac)
         return ACCEPTED
       }
       case 'clearedForTakeoff': {
@@ -1386,6 +1436,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         // interval; those gates live here now, not at the handoff.
         if (ac.controlledBy !== 'tower') return refused('not on tower frequency — hand off to tower first')
         if (ac.intent !== 'departure') return refused('only departures are cleared for takeoff')
+        if (ac.rollWhenLinedUp) return refused('already cleared for takeoff — taxiing into position')
         if (!ac.holdShort && !ac.lineUpWait) return refused('not holding short or lined up')
         if (guard && (!ac.goalPoint || !onRunway(ac.goalPoint, guard)))
           return refused('route crosses the runway — clear it to cross, not for takeoff')
@@ -1406,20 +1457,13 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
             return refused(`wake turbulence — ${Math.ceil(remaining)}s behind ${category}`)
           }
         }
-        // The roll ends where the declared takeoff run does, which on RWY 09 is 1,121 ft short
-        // of the pavement — that distance is not available in that direction.
-        const far = runway ? takeoffEnd(runway) : farRunwayEnd([ac.x, ac.y])
-        if (!far) return refused('no runway end found')
-        clearDiversion(ac)
-        ac.path = [[ac.x, ac.y], far]
-        ac.leg = 0
-        ac.held = null
-        ac.lineUpWait = false
-        ac.departing = true
-        ac.targetSpeed = TAKEOFF_SPEED_KT
-        ac.holding = false
-        ac.holdShort = false
-        lastDeparture = { wake: ac.wake, atTime: time }
+        // Already lined up: apply power now. Still holding short: this is "taxi into position
+        // and roll" — it taxis onto the centerline first and the roll starts on arrival. The
+        // clearance is one transmission either way; only the geometry differs.
+        if (!runway && !farRunwayEnd([ac.x, ac.y])) return refused('no runway end found')
+        if (ac.lineUpWait) return beginTakeoffRoll(ac) ? ACCEPTED : refused('no runway end found')
+        enterRunway(ac)
+        ac.rollWhenLinedUp = true
         return ACCEPTED
       }
       case 'assignExit': {
@@ -1720,6 +1764,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       }
       fleet.forEach((ac, i) => advance(ac, dt, caps[i] ?? Infinity))
       for (const ac of fleet) resolveApproach(ac, dt)
+      for (const ac of fleet) resolveLineUp(ac)
       for (const id of resolveGoals(dt)) {
         const i = fleet.findIndex((a) => a.id === id)
         if (i >= 0) fleet.splice(i, 1)

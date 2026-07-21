@@ -111,8 +111,10 @@ describe('tower — departures', () => {
     expect(A(sim, 'd').status).toBe('holdShort')
 
     expect(sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'd' })).toEqual({ ok: true })
+    // Cleared, so the strip reads TAKEOFF straight away — but it taxis into position before
+    // it rolls, rather than accelerating at takeoff power off the taxiway.
     expect(A(sim, 'd').status).toBe('departing')
-    for (let i = 0; i < 1100; i += 1) sim.step(0.1)
+    for (let i = 0; i < 2000 && sim.snapshot().departed < 1; i += 1) sim.step(0.1)
     expect(sim.snapshot().departed).toBe(1)
   })
 
@@ -259,7 +261,6 @@ describe('tower — departures', () => {
     taxiToHoldShort(sim)
     sim.dispatch({ type: 'contactTower', aircraftId: 'lead' })
     sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'lead' })
-    const t0 = sim.snapshot().time
     for (let i = 0; i < 3000 && sim.snapshot().departed < 1; i += 1) sim.step(0.1)
 
     // Follower lines up while the Heavy's wake still holds it — the takeoff clearance is refused.
@@ -272,8 +273,10 @@ describe('tower — departures', () => {
     if (!early.ok) expect(early.reason).toMatch(/wake.*heavy/i)
     expect(A(sim, 'foll').wakeHoldSec).toBeGreaterThan(0) // countdown reported while lined up
 
-    // Once the interval elapses, the clearance is accepted from the line-up.
-    for (let i = 0; i < 3000 && sim.snapshot().time - t0 < 120; i += 1) sim.step(0.1)
+    // Once the interval elapses, the clearance is accepted from the line-up. Stepped off the
+    // published countdown: the wake clock runs from the leader's roll, which is after its
+    // clearance now that a departure cleared from hold-short taxis into position first.
+    for (let i = 0; i < 3000 && A(sim, 'foll').wakeHoldSec > 0; i += 1) sim.step(0.1)
     expect(sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'foll' })).toEqual({ ok: true })
     expect(A(sim, 'foll').status).toBe('departing')
   })

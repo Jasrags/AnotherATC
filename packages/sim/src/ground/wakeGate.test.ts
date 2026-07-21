@@ -37,6 +37,14 @@ function runUntilDeparted(sim: ReturnType<typeof createGroundSim>, want: number)
   for (let i = 0; i < 3000 && sim.snapshot().departed < want; i += 1) sim.step(0.1)
 }
 
+/** Step until the follower owes no more wake separation. Driven off the sim's own published
+ *  countdown rather than a clock reconstructed from the clearance: the wake interval runs from
+ *  the leader's *roll*, and a departure cleared from hold-short taxis into position first. */
+function runOutWake(sim: ReturnType<typeof createGroundSim>, id: string): void {
+  const owed = () => sim.snapshot().aircraft.find((a) => a.id === id)!.wakeHoldSec
+  for (let i = 0; i < 3000 && owed() > 0; i += 1) sim.step(0.1)
+}
+
 describe('wake-turbulence departure gate', () => {
   it('holds a follower behind a Heavy departure until the wake interval elapses', () => {
     const lead = departure('lead', -0.3, 'H') // Heavy, departs east
@@ -48,7 +56,7 @@ describe('wake-turbulence departure gate', () => {
 
     sim.dispatch({ type: 'contactTower', aircraftId: 'lead' }) // Ground → Tower handoff
     expect(sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'lead' })).toEqual({ ok: true })
-    const t0 = sim.snapshot().time // wake clock starts at the leader's roll
+    const t0 = sim.snapshot().time // the clearance; the wake clock starts later, at the roll
     runUntilDeparted(sim, 1) // leader lifts off and clears the runway
     expect(sim.snapshot().departed).toBe(1)
 
@@ -60,8 +68,8 @@ describe('wake-turbulence departure gate', () => {
     if (!early.ok) expect(early.reason).toMatch(/wake.*heavy/i)
     expect(sim.snapshot().aircraft.find((a) => a.id === 'foll')!.status).not.toBe('departing')
 
-    // Once 120s have passed since the leader's roll, the takeoff clearance is accepted.
-    for (let i = 0; i < 3000 && sim.snapshot().time - t0 < 120; i += 1) sim.step(0.1)
+    // Once the interval has run out, the takeoff clearance is accepted.
+    runOutWake(sim, 'foll')
     expect(sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'foll' })).toEqual({ ok: true })
     expect(sim.snapshot().aircraft.find((a) => a.id === 'foll')!.status).toBe('departing')
   })
@@ -91,7 +99,6 @@ describe('wake-turbulence departure gate', () => {
 
     sim.dispatch({ type: 'contactTower', aircraftId: 'lead' })
     sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'lead' })
-    const t0 = sim.snapshot().time
     runUntilDeparted(sim, 1)
 
     const foll1 = sim.snapshot().aircraft.find((a) => a.id === 'foll')!
@@ -102,7 +109,7 @@ describe('wake-turbulence departure gate', () => {
     const foll2 = sim.snapshot().aircraft.find((a) => a.id === 'foll')!
     expect(foll2.wakeHoldSec).toBeLessThan(foll1.wakeHoldSec)
 
-    for (let i = 0; i < 3000 && sim.snapshot().time - t0 < 120; i += 1) sim.step(0.1)
+    runOutWake(sim, 'foll')
     expect(sim.snapshot().aircraft.find((a) => a.id === 'foll')!.wakeHoldSec).toBe(0) // interval elapsed
   })
 })
