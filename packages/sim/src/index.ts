@@ -11,7 +11,7 @@ export type {
   LatLon,
 } from './world/types'
 
-export { createGroundSim } from './ground/sim'
+export { createGroundSim, APPROACH_SPEED_KT } from './ground/sim'
 export type {
   AircraftInit,
   ApproachConfig,

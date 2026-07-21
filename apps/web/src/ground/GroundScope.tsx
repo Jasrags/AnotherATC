@@ -1,14 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { KSAN_SURFACE } from '@anotheratc/sim'
 import type { GroundController } from './controller'
-import { fitView, pan, reframe, toWorld, zoomAt, type View } from './view'
+import { fitPoints, fitView, pan, reframe, toWorld, zoomAt, type View } from './view'
 import {
   drawAircraft,
+  drawApproachCourse,
   drawAreaLabels,
   drawGates,
   drawGraphOverlay,
   drawHotspots,
   drawLabels,
+  drawOffscreenTraffic,
   drawProbe,
   drawRouteDraft,
   drawRouteHover,
@@ -49,6 +51,13 @@ export function GroundScope({ controller }: { controller: GroundController }) {
   const toggleGraph = () => {
     showGraphRef.current = !showGraphRef.current
     setShowGraph(showGraphRef.current)
+  }
+
+  // A pending "frame everything" request. The view lives inside the render effect, so the
+  // button/key just raises a flag the next frame consumes.
+  const refitRef = useRef(false)
+  const requestRefit = () => {
+    refitRef.current = true
   }
 
   // Dev sandbox: which surface-click tool is armed. Ref drives the click/render loop;
@@ -200,6 +209,8 @@ export function GroundScope({ controller }: { controller: GroundController }) {
         controller.removeViaAt(draft.via.length - 1) // drop the last taxiway
       } else if ((e.key === 'c' || e.key === 'C') && id) {
         controller.dispatch({ type: 'crossRunway', aircraftId: id })
+      } else if (e.key === 'f' || e.key === 'F') {
+        refitRef.current = true // frame the field + all traffic (incl. aircraft on final)
       } else if (e.key === 'g' || e.key === 'G') {
         // admin: toggle the routing-graph overlay (ref drives the loop; state drives the button)
         showGraphRef.current = !showGraphRef.current
@@ -281,15 +292,27 @@ export function GroundScope({ controller }: { controller: GroundController }) {
       controller.publish()
 
       if (view) {
+        const snap = sim.snapshot()
+        if (refitRef.current) {
+          refitRef.current = false
+          // Frame the field plus every aircraft — including traffic still several nm out
+          // on final, which sits far outside the surface bounds.
+          view = fitPoints(
+            KSAN_SURFACE.bounds,
+            snap.aircraft.map((a) => [a.x, a.y] as [number, number]),
+            width,
+            height,
+          )
+        }
         ctx.save()
         ctx.scale(dpr, dpr)
-        const snap = sim.snapshot()
         const selectedId = controller.selectedId()
         const draft = controller.routeDraft()
         drawSurface(ctx, view, prep, width, height)
         drawAreaLabels(ctx, view, prep)
         drawGates(ctx, view, prep)
         drawHotspots(ctx, view, KSAN_SURFACE)
+        drawApproachCourse(ctx, view, controller.approach)
         if (draft) {
           drawRouteDraft(ctx, view, KSAN_SURFACE, draft.via)
           if (hovering) {
@@ -302,6 +325,7 @@ export function GroundScope({ controller }: { controller: GroundController }) {
         drawAircraft(ctx, view, snap.aircraft)
         const selected = selectedId ? snap.aircraft.find((a) => a.id === selectedId) : undefined
         drawSelection(ctx, view, selected, selectedId ? sim.routeOf(selectedId) : [])
+        drawOffscreenTraffic(ctx, view, snap.aircraft, width, height)
         if (showGraphRef.current) drawGraphOverlay(ctx, view, controller.topology)
         if (controller.dev) {
           const pr = controller.probe()
@@ -320,7 +344,10 @@ export function GroundScope({ controller }: { controller: GroundController }) {
           const moving = snap.aircraft.filter((a) => a.groundspeed > 0).length
           const mm = String(Math.floor(snap.time / 60)).padStart(2, '0')
           const ss = String(Math.floor(snap.time % 60)).padStart(2, '0')
-          setText(statusRef.current, `${moving} taxiing · ${snap.aircraft.length} on surface · dep ${snap.departed} · arr ${snap.arrived} · T+${mm}:${ss}`)
+          const onFinal = snap.aircraft.filter((a) => a.altitude > 0).length
+          const surface = snap.aircraft.length - onFinal
+          const final = onFinal > 0 ? ` · ${onFinal} on final` : ''
+          setText(statusRef.current, `${moving} taxiing · ${surface} on surface${final} · dep ${snap.departed} · arr ${snap.arrived} · T+${mm}:${ss}`)
         }
         if (alertRef.current) {
           const inConflict = snap.aircraft.filter((a) => a.conflict).length
@@ -385,7 +412,7 @@ export function GroundScope({ controller }: { controller: GroundController }) {
         className="scope-canvas"
         tabIndex={0}
         role="application"
-        aria-label="KSAN ground surface radar. Tab to a flight strip to select and command an aircraft; drag to pan, scroll to zoom."
+        aria-label="KSAN tower and ground radar: the airport surface plus the final approach. Tab to a flight strip to select and command an aircraft; drag to pan, scroll to zoom, press f to frame all traffic."
       />
       <div className="hud hud-tl">
         <div className="hud-title">KSAN · SAN DIEGO INTL</div>
@@ -393,6 +420,14 @@ export function GroundScope({ controller }: { controller: GroundController }) {
       </div>
       <div className="hud hud-controls">
         {controller.dev && <span className="dev-tag mono">DEV</span>}
+        <button
+          type="button"
+          className="ctl-btn mono"
+          onClick={requestRefit}
+          title="Frame the airport and all traffic, including aircraft on final (f)"
+        >
+          ⤢ FIT
+        </button>
         <button
           type="button"
           className="ctl-btn mono"
@@ -421,6 +456,14 @@ export function GroundScope({ controller }: { controller: GroundController }) {
               title="Click two points to draw the routing path between them"
             >
               PROBE
+            </button>
+            <button
+              type="button"
+              className="ctl-btn mono"
+              onClick={() => controller.spawnArrival()}
+              title="Put a test arrival on the final approach (airborne — it can't be placed by clicking the surface)"
+            >
+              ARRIVAL
             </button>
             <button
               type="button"

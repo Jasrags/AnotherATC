@@ -97,8 +97,10 @@ const ROTATE_KT = 120
 // ─── Final approach & landing (Tower) ────────────────────────────────────────
 /** Height (ft) at the final fix. With FINAL_NM below this is a ~3° geometric descent. */
 const FINAL_ALT_FT = 1250
-/** Approach speed (kt) flown down the final, and the speed at touchdown. */
-const APPROACH_SPEED_KT = 140
+/** Approach speed (kt) flown down the final, and the speed at touchdown. Exported so a
+ *  hand-authored arrival (a scenario, or the dev sandbox) flies the same profile as a
+ *  spawned one — it is a parameter, not a rule the caller could get subtly wrong. */
+export const APPROACH_SPEED_KT = 140
 /** Braking deceleration (kt/s) on the landing rollout — harder than a taxi ramp. */
 const ROLLOUT_DECEL = 6
 /** Inside this distance (nm) from the threshold, an arrival on final owns the runway:

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { fitView, toScreen, toWorld, zoomAt, pan, reframe, MIN_SCALE, MAX_SCALE } from './view'
+import { fitPoints, fitView, toScreen, toWorld, zoomAt, pan, reframe, MIN_SCALE, MAX_SCALE } from './view'
 import type { Bounds } from '@anotheratc/sim'
 
 const bounds: Bounds = { minX: -1, minY: -0.5, maxX: 1, maxY: 0.5 }
@@ -70,5 +70,40 @@ describe('view transforms', () => {
     const [px, py] = toScreen(pan(v, 25, -10), 0.2, 0.1)
     expect(px - sx).toBeCloseTo(25, 9)
     expect(py - sy).toBeCloseTo(-10, 9)
+  })
+
+  it('fitPoints frames off-field traffic that the surface bounds exclude', () => {
+    // An arrival 4 nm west of the field is far outside the airport bounds: fitView alone
+    // leaves it off-screen, which is exactly the visibility problem this exists to solve.
+    const inbound: [number, number] = [-5, 0]
+    const fitted = fitView(bounds, 800, 600)
+    const [offX] = toScreen(fitted, inbound[0], inbound[1])
+    expect(offX).toBeLessThan(0) // off the left edge
+
+    const framed = fitPoints(bounds, [inbound], 800, 600)
+    const [sx, sy] = toScreen(framed, inbound[0], inbound[1])
+    expect(sx).toBeGreaterThanOrEqual(0)
+    expect(sx).toBeLessThanOrEqual(800)
+    expect(sy).toBeGreaterThanOrEqual(0)
+    expect(sy).toBeLessThanOrEqual(600)
+    expect(framed.scale).toBeLessThan(fitted.scale) // zoomed out to take it in
+  })
+
+  it('fitPoints with no extra points is just fitView', () => {
+    expect(fitPoints(bounds, [], 800, 600)).toEqual(fitView(bounds, 800, 600))
+  })
+
+  it('fitPoints keeps the airport in frame even when traffic is far off one side', () => {
+    const framed = fitPoints(bounds, [[-5, 0]], 800, 600)
+    for (const corner of [
+      [bounds.minX, bounds.minY],
+      [bounds.maxX, bounds.maxY],
+    ] as const) {
+      const [sx, sy] = toScreen(framed, corner[0], corner[1])
+      expect(sx).toBeGreaterThanOrEqual(0)
+      expect(sx).toBeLessThanOrEqual(800)
+      expect(sy).toBeGreaterThanOrEqual(0)
+      expect(sy).toBeLessThanOrEqual(600)
+    }
   })
 })

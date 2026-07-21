@@ -1,5 +1,6 @@
 import type {
   AirportSurface,
+  ApproachConfig,
   GroundAircraft,
   Point,
   SurfaceFeature,
@@ -532,6 +533,95 @@ export function drawSelection(
   ctx.beginPath()
   ctx.arc(sx, sy, 11, 0, Math.PI * 2)
   ctx.stroke()
+}
+
+/**
+ * The straight-in final: the runway centerline extended out to the fix arrivals appear at,
+ * with a range tick every nautical mile. A scope framed to the airport shows none of the
+ * approach, so without this the controller is clearing traffic to land that has no visible
+ * relationship to the field.
+ */
+export function drawApproachCourse(ctx: Ctx, v: View, approach: ApproachConfig): void {
+  const { fix, threshold } = approach
+  const dx = fix[0] - threshold[0]
+  const dy = fix[1] - threshold[1]
+  const len = Math.hypot(dx, dy)
+  if (len < 1e-6) return
+  const [fx, fy] = toScreen(v, fix[0], fix[1])
+  const [tx, ty] = toScreen(v, threshold[0], threshold[1])
+
+  ctx.save()
+  ctx.strokeStyle = COLORS.approachCourse
+  ctx.lineWidth = 1
+  ctx.setLineDash([8, 8])
+  ctx.beginPath()
+  ctx.moveTo(fx, fy)
+  ctx.lineTo(tx, ty)
+  ctx.stroke()
+
+  // Range ticks, drawn across the course every nm from the threshold outward.
+  ctx.setLineDash([])
+  ctx.strokeStyle = COLORS.approachTick
+  const ux = dx / len
+  const uy = dy / len
+  const half = DIMS.approachTickNm
+  for (let nm = 1; nm <= len + 1e-9; nm += 1) {
+    const px = threshold[0] + ux * nm
+    const py = threshold[1] + uy * nm
+    const [ax, ay] = toScreen(v, px - uy * half, py + ux * half)
+    const [bx, by] = toScreen(v, px + uy * half, py - ux * half)
+    ctx.beginPath()
+    ctx.moveTo(ax, ay)
+    ctx.lineTo(bx, by)
+    ctx.stroke()
+  }
+  ctx.restore()
+}
+
+const clamp = (n: number, lo: number, hi: number): number => (n < lo ? lo : n > hi ? hi : n)
+
+/**
+ * Edge markers for airborne traffic outside the viewport. The final starts several nm off
+ * the field, so on a scope framed to the airport an inbound is off-screen for most of its
+ * approach — this keeps its bearing, callsign and range in view without forcing the
+ * controller to zoom out and lose the surface.
+ */
+export function drawOffscreenTraffic(
+  ctx: Ctx,
+  v: View,
+  aircraft: GroundAircraft[],
+  width: number,
+  height: number,
+): void {
+  const pad = DIMS.edgeMarkerPad
+  ctx.save()
+  ctx.font = `${DIMS.blockFont}px ui-monospace, "SF Mono", Menlo, monospace`
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  for (const ac of aircraft) {
+    if (ac.altitude <= 0) continue
+    const [sx, sy] = toScreen(v, ac.x, ac.y)
+    if (sx >= 0 && sx <= width && sy >= 0 && sy <= height) continue
+    const cx = clamp(sx, pad, width - pad)
+    const cy = clamp(sy, pad, height - pad)
+    const ang = Math.atan2(sy - cy, sx - cx) // points out toward the true position
+
+    ctx.fillStyle = COLORS.airborneTarget
+    ctx.save()
+    ctx.translate(cx, cy)
+    ctx.rotate(ang)
+    ctx.beginPath()
+    ctx.moveTo(9, 0)
+    ctx.lineTo(-5, 6)
+    ctx.lineTo(-5, -6)
+    ctx.closePath()
+    ctx.fill()
+    ctx.restore()
+
+    // Label inboard of the chevron, so it never runs off the edge it is pinned to.
+    ctx.fillText(`${ac.callsign} ${ac.finalNm.toFixed(1)}`, cx - Math.cos(ang) * 30, cy - Math.sin(ang) * 30)
+  }
+  ctx.restore()
 }
 
 export function drawAircraft(ctx: Ctx, v: View, aircraft: GroundAircraft[]): void {

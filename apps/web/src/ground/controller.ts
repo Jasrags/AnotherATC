@@ -4,8 +4,10 @@ import {
   buildRunwayGuard,
   buildTaxiGraph,
   createGroundSim,
+  APPROACH_SPEED_KT,
 } from '@anotheratc/sim'
 import type {
+  ApproachConfig,
   ControllerPosition,
   GroundCommand,
   GroundIntent,
@@ -17,6 +19,9 @@ import type {
   TaxiTopology,
   WakeCategory,
 } from '@anotheratc/sim'
+
+/** How far apart (nm) successive dev-spawned test arrivals sit along the final. */
+const DEV_ARRIVAL_SPACING_NM = 1.2
 
 /** What a flight strip shows — deliberately excludes fast-changing fields (position,
  *  speed) so the strip bay only re-renders when phase or selection changes. */
@@ -103,6 +108,8 @@ export interface StripSnapshot {
 export interface GroundController {
   readonly sim: GroundSim
   readonly destinations: NamedDestination[]
+  /** The final-approach geometry arrivals fly in on, so the scope can draw the course. */
+  readonly approach: ApproachConfig
   /** The contracted routing graph (decision nodes + geometry edges) for the admin overlay. */
   readonly topology: TaxiTopology
   /** Whether the dev/admin sandbox is active (empty surface + spawn/probe tools). */
@@ -136,6 +143,9 @@ export interface GroundController {
   snap(point: Point): Point | null
   /** Place a test aircraft at the nearest routing node to `point` and select it. */
   spawnAt(point: Point): void
+  /** Put a test arrival on the final approach, inbound to the landing runway, and select it.
+   *  Airborne traffic can't be placed by clicking the surface, so it gets its own control. */
+  spawnArrival(): void
   /** Remove the selected aircraft, if any. */
   removeSelected(): void
   /** Remove every aircraft from the surface. */
@@ -267,6 +277,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
   return {
     sim,
     destinations,
+    approach: game.spawn.approach,
     topology,
     dev,
     snap: snapPoint,
@@ -288,6 +299,35 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
       }
       sim.add(place.gate ? { ...base, gate: place.gate } : base)
       selected = id
+      publish()
+    },
+    spawnArrival: () => {
+      const id = `dev${devSeq}`
+      devSeq += 1
+      // Stagger successive test arrivals down the final so they don't stack on one point —
+      // deterministic (driven by the spawn counter, not a clock or RNG).
+      const { fix, threshold } = game.spawn.approach
+      const back = (devSeq - 1) * DEV_ARRIVAL_SPACING_NM
+      const len = Math.hypot(fix[0] - threshold[0], fix[1] - threshold[1]) || 1
+      const start: Point = [
+        fix[0] + ((fix[0] - threshold[0]) / len) * back,
+        fix[1] + ((fix[1] - threshold[1]) / len) * back,
+      ]
+      const stand = gatePoints[(devSeq - 1) % Math.max(1, gatePoints.length)]
+      sim.add({
+        id,
+        callsign: `DEV${String(devSeq).padStart(2, '0')}`,
+        type: 'B738',
+        wake: 'M',
+        path: [start, threshold],
+        targetSpeed: APPROACH_SPEED_KT,
+        airborne: true,
+        intent: 'arrival',
+        goalPoint: stand?.point ?? threshold,
+        ...(stand ? { gate: stand.ref } : {}),
+      })
+      selected = id
+      position = 'tower' // an arrival on final is Local Control's — show the bay that owns it
       publish()
     },
     removeSelected: () => {

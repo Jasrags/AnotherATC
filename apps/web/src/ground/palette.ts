@@ -20,6 +20,8 @@ export const COLORS = {
   conflict: '#ff5a4d', // separation conflict alert
   targetHold: '#9aacbd',
   airborneTarget: '#7fd4ff', // traffic on final — hollow, to read as "not on the surface"
+  approachCourse: '#2f5d72', // the extended runway centerline arrivals fly in on
+  approachTick: '#4a7f96', // 1-nm range ticks along that course
   leader: '#5aa8cb',
   block1: '#8ef0b4',
   block2: '#54b487',
@@ -59,4 +61,8 @@ export const DIMS = {
   taxiwayNm: 0.012,
   runwayNm: 0.033,
   standNm: 0.004,
+  /** Half-length (nm) of the 1-nm range ticks drawn across the final approach course. */
+  approachTickNm: 0.05,
+  /** How far (px) an off-screen traffic marker sits in from the canvas edge. */
+  edgeMarkerPad: 34,
 } as const

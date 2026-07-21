@@ -1,4 +1,4 @@
-import type { Bounds } from '@anotheratc/sim'
+import type { Bounds, Point } from '@anotheratc/sim'
 
 /** Maps world nm (x=east, y=north) to screen px (y flipped). scale = px per nm. */
 export interface View {
@@ -14,6 +14,29 @@ export function fitView(bounds: Bounds, width: number, height: number, pad = 48)
   const cx = (bounds.minX + bounds.maxX) / 2
   const cy = (bounds.minY + bounds.maxY) / 2
   return { scale, offX: width / 2 - cx * scale, offY: height / 2 + cy * scale }
+}
+
+/**
+ * Fit the airport plus a set of world points — traffic on final sits several nm off the
+ * field, well outside the surface bounds, so framing "everything I control" needs the union
+ * rather than the static bounds. Generalizes as more airspace arrives (departures climbing
+ * out, TRACON), which is why it takes arbitrary points and not an arrival-specific shape.
+ */
+export function fitPoints(
+  bounds: Bounds,
+  points: readonly Point[],
+  width: number,
+  height: number,
+  pad = 48,
+): View {
+  let { minX, minY, maxX, maxY } = bounds
+  for (const p of points) {
+    minX = Math.min(minX, p[0])
+    maxX = Math.max(maxX, p[0])
+    minY = Math.min(minY, p[1])
+    maxY = Math.max(maxY, p[1])
+  }
+  return fitView({ minX, minY, maxX, maxY }, width, height, pad)
 }
 
 export function toScreen(v: View, x: number, y: number): [number, number] {
