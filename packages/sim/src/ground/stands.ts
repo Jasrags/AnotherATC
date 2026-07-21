@@ -87,6 +87,19 @@ function nearestTaxiPoint(surface: AirportSurface, p: Point): Point | null {
   return best
 }
 
+/** Nose setback (nm ≈ 25 m) used when a field has no charted stands to measure one from. */
+const DEFAULT_SETBACK_NM = 0.0135
+
+/** Distance a nose actually stops short of the gate label node, measured from the field's own
+ *  charted stands. A gate node marks the stand at the terminal, not the stop mark — at KSAN by
+ *  a median of 28 m — so a derived lead-in run all the way to it parks the aircraft on the
+ *  building. Calibrating from the same airport beats inventing a constant. */
+function setbackFrom(charted: readonly { gate: Point; stop: Point }[]): number {
+  if (charted.length === 0) return DEFAULT_SETBACK_NM
+  const gaps = charted.map((s) => dist(s.gate, s.stop)).sort((a, b) => a - b)
+  return gaps[Math.floor(gaps.length / 2)] as number
+}
+
 /**
  * Build one stand per gate node.
  *
@@ -105,7 +118,8 @@ export function buildStands(surface: AirportSurface): Stand[] {
     if (!charted.has(f.ref)) charted.set(f.ref, f.points)
   }
 
-  const stands: Stand[] = []
+  // Resolve the charted stands first: they are what the derived ones are calibrated against.
+  const draft: { ref: string; gate: Point; lead: Point[]; source: Stand['source'] }[] = []
   const seen = new Set<string>()
   for (const f of surface.features) {
     if (f.kind !== 'gate' || !f.ref || seen.has(f.ref)) continue
@@ -114,33 +128,52 @@ export function buildStands(surface: AirportSurface): Stand[] {
     seen.add(f.ref)
 
     const line = charted.get(f.ref)
-    let lead: Point[]
-    let source: Stand['source']
     if (line) {
       // The end nearer the gate node is the stand end; flip the line if it runs the other way.
       // Ties are impossible in practice (a gate node equidistant from both ends of its own
       // line) and resolve to "as mapped", which is the majority direction at KSAN.
       const head = line[0] as Point
       const tail = line[line.length - 1] as Point
-      lead = dist(head, gate) < dist(tail, gate) ? [...line].reverse() : [...line]
-      source = 'charted'
-    } else {
-      const entry = nearestTaxiPoint(surface, gate)
-      if (!entry) continue
-      lead = [entry, gate]
-      source = 'derived'
+      const lead = dist(head, gate) < dist(tail, gate) ? [...line].reverse() : [...line]
+      draft.push({ ref: f.ref, gate, lead, source: 'charted' })
+      continue
     }
+    const entry = nearestTaxiPoint(surface, gate)
+    if (!entry) continue
+    draft.push({ ref: f.ref, gate, lead: [entry, gate], source: 'derived' })
+  }
 
+  const setback = setbackFrom(
+    draft
+      .filter((d) => d.source === 'charted')
+      .map((d) => ({ gate: d.gate, stop: d.lead[d.lead.length - 1] as Point })),
+  )
+
+  const stands: Stand[] = []
+  for (const d of draft) {
+    let lead = d.lead
+    if (d.source === 'derived') {
+      // Stop the nose short of the label node by the field's own measured setback, instead of
+      // running the line all the way in — which parks the aircraft on the terminal itself.
+      const entry = lead[0] as Point
+      const len = dist(entry, d.gate)
+      const keep = len - setback
+      if (keep > MIN_LEAD_NM) {
+        const ux = (d.gate[0] - entry[0]) / len
+        const uy = (d.gate[1] - entry[1]) / len
+        lead = [entry, [entry[0] + ux * keep, entry[1] + uy * keep]]
+      }
+    }
     const stop = lead[lead.length - 1] as Point
     const prev = lead[lead.length - 2] as Point
     stands.push({
-      ref: f.ref,
-      gate,
+      ref: d.ref,
+      gate: d.gate,
       lead,
       entry: lead[0] as Point,
       stop,
       headingDeg: bearing(prev, stop),
-      source,
+      source: d.source,
     })
   }
   return stands

@@ -59,6 +59,25 @@ describe('buildStands — KSAN', () => {
   // The orientation rule (nearest endpoint to the gate node wins) is only as good as the gate
   // nodes. This checks the *result* against independent geometry — the terminal buildings — so
   // a bad ingest or a re-tagged OSM way shows up here rather than as aircraft parking backwards.
+  it('never parks a derived stand inside a terminal building', () => {
+    // The gate node sits at the terminal, so a derived lead-in run all the way to it put five
+    // of Terminal 1's stands inside the building. The setback is measured from the field's own
+    // charted stands rather than guessed.
+    const terminals = KSAN_SURFACE.features.filter((f) => f.kind === 'terminal')
+    const inside = (p: Point, poly: readonly Point[]): boolean => {
+      let hit = false
+      for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        const a = poly[i] as Point
+        const b = poly[j] as Point
+        if (a[1] > p[1] !== b[1] > p[1] && p[0] < ((b[0] - a[0]) * (p[1] - a[1])) / (b[1] - a[1]) + a[0])
+          hit = !hit
+      }
+      return hit
+    }
+    const parked = stands.filter((s) => terminals.some((t) => inside(s.stop, t.points as Point[])))
+    expect(parked.map((s) => s.ref)).toEqual([])
+  })
+
   it('faces every stand at a terminal, including the lines mapped back to front', () => {
     const terminals = KSAN_SURFACE.features.filter((f) => f.kind === 'terminal')
     const toTerminal = (p: Point): number =>
@@ -93,13 +112,18 @@ describe('buildStands — a field with no painted lines', () => {
     ],
   }
 
-  it('derives a straight lead-in from the taxiway to the stand', () => {
+  it('derives a straight lead-in that stops short of the gate label node', () => {
     const [s] = buildStands(surface)
     expect(s).toBeDefined()
     expect(s!.source).toBe('derived')
     expect(s!.entry[1]).toBeCloseTo(0, 6) // starts on the taxiway
-    expect(s!.stop).toEqual([0, 0.1]) // …and ends at the gate itself
     expect(s!.headingDeg).toBeCloseTo(0, 3) // nose north, straight in off the taxiway
+    // It stops short of the gate node rather than at it. A gate node marks the stand at the
+    // terminal, so a line run all the way to it parks the aircraft on the building. With no
+    // charted stands on this field to measure against, the default setback applies.
+    expect(s!.stop[1]).toBeLessThan(0.1)
+    expect(s!.stop[1]).toBeGreaterThan(0.08)
+    expect(s!.gate).toEqual([0, 0.1]) // the label node itself is still carried
   })
 
   it('skips a gate with no taxi pavement to lead in from', () => {
