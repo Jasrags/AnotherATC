@@ -14,6 +14,15 @@ import { edgeKey, type TaxiGraph } from './taxiGraph'
 import { wakeSeparationSec, WAKE_TIME_SCALE } from './wake'
 import { onRunway, splitRouteAtRunway, type RunwayGuard } from './runwayGuard'
 import {
+  finalFix,
+  glideAltitudeFt,
+  landingEnd,
+  reciprocalIdent,
+  takeoffEnd,
+  FINAL_APPROACH_NM,
+  type ActiveRunway,
+} from './runway'
+import {
   brakeRateFor,
   buildRunwayExits,
   chooseExit,
@@ -88,6 +97,10 @@ export interface GroundSimOptions {
   guard?: RunwayGuard
   spawn?: SpawnConfig
   servicing?: ServicingConfig
+  /** The runway direction in use. Supplies the real landing threshold (which is *not* the end
+   *  of the pavement where the threshold is displaced) and the far end a takeoff rolls toward,
+   *  instead of guessing both from the polyline endpoints. */
+  runway?: ActiveRunway
 }
 
 const TAXI_ACCEL = 4
@@ -97,6 +110,11 @@ const PUSHBACK_SPEED_KT = 5
 /** Takeoff roll: full-power acceleration (kt/s) up to the liftoff speed (kt). */
 const TAKEOFF_ACCEL = 12
 const TAKEOFF_SPEED_KT = 140
+/** Runway (nm) a departure needs ahead of it to get airborne, straight from this sim's own
+ *  takeoff physics: v² / (2·a) with v in kt and distance in nm. Anything less and the roll would
+ *  run off the end — which is exactly what happened when an aircraft at the *wrong* end of the
+ *  runway was cleared: the far end was right beside it, so it drove onto the grass. */
+const MIN_TAKEOFF_RUN_NM = (TAKEOFF_SPEED_KT * TAKEOFF_SPEED_KT) / (7200 * TAKEOFF_ACCEL)
 /** Groundspeed (kt) at which a departure has "rotated" — effectively airborne, so it no longer
  *  blocks the next departure's takeoff clearance (anticipated separation).
  *  SAFETY NOTE: clearing #2 once #1 passes this speed is collision-free only because takeoff
@@ -107,8 +125,8 @@ const TAKEOFF_SPEED_KT = 140
 const ROTATE_KT = 120
 
 // ─── Final approach & landing (Tower) ────────────────────────────────────────
-/** Height (ft) at the final fix. With FINAL_NM below this is a ~3° geometric descent. */
-const FINAL_ALT_FT = 1250
+/** Glide path (deg) assumed when no runway configuration supplies a real one. */
+const DEFAULT_GLIDE_DEG = 3
 /** Approach speed (kt) flown down the final, and the speed at touchdown. Exported so a
  *  hand-authored arrival (a scenario, or the dev sandbox) flies the same profile as a
  *  spawned one — it is a parameter, not a rule the caller could get subtly wrong. */
@@ -125,6 +143,9 @@ const ROLLOUT_DECEL = MAX_BRAKE_KT_S
 const SHORT_FINAL_NM = 1.5
 /** How often (s) a rolled-out arrival retries routing off the runway when routing fails. */
 const EXIT_RETRY_SEC = 1
+/** How far (nm ≈ 180 ft) up the runway a lining-up aircraft rolls past the point it entered, so
+ *  it finishes pointing down the runway rather than across it. */
+const LINEUP_ALIGN_NM = 0.03
 /** How close (nm) counts as reaching a gate. */
 const GATE_EPS = 0.02
 /** Seconds an arrival dwells at the gate before it clears the stand. */
@@ -252,6 +273,8 @@ interface Internal
   threshold: Point | null
   /** Length (nm) of the full final, used to derive the descent profile. */
   finalLenNm: number
+  /** Height (ft) at the final fix, from the runway's published glide path. */
+  finalAltFt: number
   /** Seconds until the next Tower→Ground exit-routing attempt (see {@link EXIT_RETRY_SEC}). */
   exitRetrySec: number
   /** The turnoff this arrival is planning for / rolling out to, or null when none applies. */
@@ -289,6 +312,13 @@ interface Internal
  */
 export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimOptions = {}): GroundSim {
   const { graph, guard, spawn, servicing } = opts
+  /** The runway direction in use. Mutable: an airport changes configuration. */
+  let runway: ActiveRunway | undefined = opts.runway
+  /** Where arrivals are established, derived from the active runway when there is one. */
+  const approachNow = (): ApproachConfig | null =>
+    runway
+      ? { fix: finalFix(runway, FINAL_APPROACH_NM), threshold: runway.threshold }
+      : (spawn?.approach ?? null)
   let time = 0
   let departed = 0
   let arrived = 0
@@ -325,6 +355,10 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     const next = path[1]
     const heading = init.heading ?? (next ? bearing(start[0], start[1], next[0], next[1]) : 0)
     const threshold = airborne ? (path[path.length - 1] ?? null) : null
+    const finalLenNm = threshold ? pathLength(path) : 0
+    // The descent is the runway's *published* glide path, not one hard-coded angle: KSAN is
+    // 3.3° to 09 and a notably steep 3.5° to 27 (docs/SAN/runway-9-27.md).
+    const finalAltFt = glideAltitudeFt(runway?.glidePathDeg ?? DEFAULT_GLIDE_DEG, finalLenNm)
     return {
       id: init.id,
       callsign: init.callsign,
@@ -333,7 +367,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       x: start[0],
       y: start[1],
       heading: normalizeDeg(heading),
-      altitude: airborne ? FINAL_ALT_FT : 0,
+      altitude: airborne ? finalAltFt : 0,
       groundspeed: airborne ? init.targetSpeed : 0,
       holding: !airborne && path.length < 2,
       holdShort: !airborne && path.length < 2 && held !== null,
@@ -358,7 +392,8 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       clearedToLand: false,
       rollingOut: false,
       threshold,
-      finalLenNm: threshold ? pathLength(path) : 0,
+      finalLenNm,
+      finalAltFt,
       exitRetrySec: 0,
       exit: null,
       assignedExitRef: null,
@@ -397,6 +432,9 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     return a && b ? [a, b] : []
   })()
   const farRunwayEnd = (from: Point): Point | null => {
+    // With a configuration there is one answer: everyone is using the same direction, so the
+    // far end is the same for a takeoff roll and for a landing rollout.
+    if (runway) return runway.farEnd
     if (runwayEnds.length < 2) return null
     return dist(from, runwayEnds[0]!) >= dist(from, runwayEnds[1]!) ? runwayEnds[0]! : runwayEnds[1]!
   }
@@ -431,7 +469,10 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     const key = `${threshold[0]},${threshold[1]}`
     const hit = exitCache.get(key)
     if (hit) return hit
-    const far = farRunwayEnd(threshold)
+    // Turnoffs are bounded by the *declared* landing distance, not by the pavement: on KSAN 09
+    // the last ~1,100 ft is physically there but is not landing distance available.
+    const far =
+      runway && dist(threshold, runway.threshold) < 1e-6 ? landingEnd(runway) : farRunwayEnd(threshold)
     const exits = graph && guard && far ? buildRunwayExits(graph.topology(), guard, threshold, far) : []
     exitCache.set(key, exits)
     return exits
@@ -535,6 +576,85 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
    *  while anyone occupies its surface or is committed on short final above it. */
   function blocksRunway(ac: Internal): boolean {
     return occupiesForTakeoff(ac) || onShortFinal(ac)
+  }
+
+  /**
+   * The path an aircraft drives to line up: along the connector it is holding on, onto the
+   * runway, then a short roll so it ends pointing down it.
+   *
+   * The geometry has to come from the *graph*, not from the aircraft's held clearance. A taxi
+   * clearance to a point on the runway routes to the hold-short node and then appends the exact
+   * goal, so the held portion is a straight chord from the hold line to somewhere on the
+   * pavement — none of the connector's curve survives in it. Driving that (or driving straight
+   * at the nearest centerline point) makes the aircraft cut across the fillet and kink onto the
+   * runway instead of turning through it.
+   */
+  function lineUpPath(ac: Internal, lineup: Point): Point[] {
+    const pts: Point[] = [[ac.x, ac.y]]
+    if (graph && guard) {
+      const startKey = graph.nearestNode([ac.x, ac.y])
+      // Enter at the nearest point of the runway that is actually a node, so the route runs
+      // through the connector's vertices — which is where its curvature is recorded.
+      const entryKey = graph.nearestNodeWhere(lineup, (n) => onRunway(n, guard))
+      const route = startKey && entryKey ? graph.route(startKey, entryKey) : []
+      for (const p of route) {
+        const last = pts[pts.length - 1]!
+        if (dist(last, p) > 1e-6) pts.push(p)
+      }
+    }
+    // If the route already reached the pavement we are on the centerline; going on to the
+    // perpendicular projection as well would double back and produce a near-reversal right at
+    // the runway edge. Only fall back to the projection when there was no route to follow.
+    let base = pts[pts.length - 1]!
+    if (!(guard && onRunway(base, guard))) {
+      if (dist(base, lineup) > 1e-6) pts.push(lineup)
+      base = lineup
+    }
+    // …then roll far enough up the runway to be aligned with the takeoff direction.
+    const far = farRunwayEnd(base)
+    if (far) {
+      const d = dist(base, far)
+      if (d > 1e-6) {
+        const step = Math.min(LINEUP_ALIGN_NM, d / 2)
+        pts.push([base[0] + ((far[0] - base[0]) / d) * step, base[1] + ((far[1] - base[1]) / d) * step])
+      }
+    }
+    return pts
+  }
+
+  /**
+   * Runway (nm) left ahead of an aircraft in the takeoff direction. Negative when it is past the
+   * far end — i.e. lined up facing the wrong way for the runway in use.
+   */
+  function takeoffRunRemaining(ac: Internal): number {
+    const far = runway ? takeoffEnd(runway) : farRunwayEnd([ac.x, ac.y])
+    if (!far) return Infinity
+    // Without a configuration `farRunwayEnd` answers "whichever end is further away", so this
+    // measures toward that end by construction and effectively never trips — the legacy path
+    // never had the wrong-end bug this guards against.
+    const from = runway?.departureStart ?? null
+    if (!from) return dist([ac.x, ac.y], far)
+    const dx = far[0] - from[0]
+    const dy = far[1] - from[1]
+    const len = Math.hypot(dx, dy) || 1
+    return ((far[0] - ac.x) * dx + (far[1] - ac.y) * dy) / len
+  }
+
+  /**
+   * Why an aircraft can't roll from where it is, or null if it can. Distinguishes the two very
+   * different reasons: it is at the *other* end of the field, so the runway it is pointing down
+   * simply isn't the one in use — or it is on the right runway but too far along it.
+   */
+  function takeoffBlocked(ac: Internal): string | null {
+    const remaining = takeoffRunRemaining(ac)
+    if (remaining >= MIN_TAKEOFF_RUN_NM) return null
+    if (runway) {
+      const here: Point = [ac.x, ac.y]
+      const atFarEnd = dist(here, runway.farEnd) < dist(here, runway.departureStart)
+      if (atFarEnd)
+        return `RWY ${reciprocalIdent(runway.ident)} is not in use — RWY ${runway.ident} is the active runway`
+    }
+    return 'insufficient runway remaining for takeoff'
   }
 
   /** Seconds of wake separation still owed before this holding-short departure may roll. */
@@ -1013,6 +1133,8 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         if (!ac.holdShort) return refused('not holding short of the runway')
         if (guard && (!ac.goalPoint || !onRunway(ac.goalPoint, guard)))
           return refused('route crosses the runway — clear it to cross, not to line up')
+        const cannotRoll = takeoffBlocked(ac)
+        if (cannotRoll) return refused(cannotRoll)
         // A departure actually ROLLING down the runway (moving away) does NOT block a line-up
         // behind it — that's precisely what "line up and wait" is for (anticipated separation).
         // But one merely *cleared and not yet moving* (departing, still at its spot), any
@@ -1033,7 +1155,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         // its far departure-runway goal — so it lines up where it's holding, at either end.
         const lineup: Point = nearestRunwayPoint([ac.x, ac.y]) ?? ac.goalPoint ?? [ac.x, ac.y]
         clearDiversion(ac)
-        ac.path = [[ac.x, ac.y], lineup]
+        ac.path = lineUpPath(ac, lineup)
         ac.leg = 0
         ac.held = null
         ac.holdShort = false
@@ -1052,6 +1174,10 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         if (!ac.holdShort && !ac.lineUpWait) return refused('not holding short or lined up')
         if (guard && (!ac.goalPoint || !onRunway(ac.goalPoint, guard)))
           return refused('route crosses the runway — clear it to cross, not for takeoff')
+        // Enough runway ahead to actually get airborne. This is what stops an aircraft at the
+        // wrong end being launched into a few hundred feet of pavement and then the grass.
+        const blocked = takeoffBlocked(ac)
+        if (blocked) return refused(blocked)
         // The runway must be clear of blocking traffic — but a preceding departure that has
         // rotated (near liftoff) no longer blocks, so the next may be cleared behind it.
         if (guard && fleet.some((o) => o !== ac && blocksRunway(o))) return refused('runway occupied')
@@ -1065,7 +1191,9 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
             return refused(`wake turbulence — ${Math.ceil(remaining)}s behind ${category}`)
           }
         }
-        const far = farRunwayEnd([ac.x, ac.y])
+        // The roll ends where the declared takeoff run does, which on RWY 09 is 1,121 ft short
+        // of the pavement — that distance is not available in that direction.
+        const far = runway ? takeoffEnd(runway) : farRunwayEnd([ac.x, ac.y])
         if (!far) return refused('no runway end found')
         clearDiversion(ac)
         ac.path = [[ac.x, ac.y], far]
@@ -1211,7 +1339,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     ac.x = fix[0]
     ac.y = fix[1]
     ac.leg = 0
-    ac.altitude = FINAL_ALT_FT
+    ac.altitude = ac.finalAltFt
     ac.groundspeed = ac.targetSpeed
     ac.clearedToLand = false
     ac.exit = null
@@ -1261,7 +1389,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         else goAround(ac)
         return
       }
-      ac.altitude = FINAL_ALT_FT * Math.min(1, remaining / (ac.finalLenNm || remaining))
+      ac.altitude = ac.finalAltFt * Math.min(1, remaining / (ac.finalLenNm || remaining))
       return
     }
     if (!ac.rollingOut) return
@@ -1331,12 +1459,16 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         path:
           intent === 'departure'
             ? [slot.point]
-            : [spawn.approach.fix, spawn.approach.threshold],
+            : (() => {
+                const ap = approachNow()
+                return ap ? [ap.fix, ap.threshold] : [slot.point]
+              })(),
         targetSpeed: intent === 'departure' ? 0 : APPROACH_SPEED_KT,
         airborne: intent === 'arrival',
         intent,
         gate: slot.ref,
-        goalPoint: intent === 'departure' ? spawn.departureTarget : slot.point,
+        goalPoint:
+          intent === 'departure' ? (runway?.departureStart ?? spawn.departureTarget) : slot.point,
       }),
     )
   }
@@ -1413,6 +1545,55 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       }
     },
     dispatch,
+    runway: () => runway ?? null,
+    approach: () => approachNow(),
+    setRunway(next: ActiveRunway): DispatchResult {
+      // A runway change is coordinated, not thrown. Anything already committed to the runway —
+      // on it, or on short final above it — has to finish first; the controller stops the flow,
+      // lets it land or go, and then turns the airport around.
+      if (runway && next.ident === runway.ident) return refused(`RWY ${next.ident} already in use`)
+      // Deliberately stricter than `blocksRunway`: that predicate lets a departure past
+      // ROTATE_KT stop blocking, which is safe only because everything rolls the *same* way.
+      // A direction change breaks exactly that assumption, so anything physically on the
+      // pavement counts — a jet at 130 kt is still very much on the runway.
+      const committed = fleet.find((a) => blocksRunway(a) || onRunwayNow(a))
+      if (committed)
+        return refused(`runway in use — ${committed.callsign} is committed to RWY ${runway?.ident ?? ''}`.trim())
+
+      const previous = runway
+      runway = next
+      exitCache.clear() // turnoffs are derived per landing direction
+
+      for (const ac of fleet) {
+        // Arrivals still on final for the old direction cannot land on it any more, so they go
+        // around and re-establish on the new approach. This is the cascade — one configuration
+        // change hands the controller back every inbound at once.
+        if (ac.airborne && ac.intent === 'arrival') {
+          const ap = approachNow()
+          if (ap) {
+            ac.path = [ap.fix, ap.threshold]
+            ac.threshold = ap.threshold
+            ac.finalLenNm = pathLength(ac.path)
+            ac.finalAltFt = glideAltitudeFt(next.glidePathDeg, ac.finalLenNm)
+          }
+          goAround(ac)
+          continue
+        }
+        // A departure that has not started rolling is now aimed at the wrong end of the field;
+        // its clearance is stale and Ground has to taxi it round. Retarget the goal so the strip
+        // and "taxi to the runway" mean the new end — it is not moved automatically.
+        if (
+          ac.intent === 'departure' &&
+          !ac.departing &&
+          previous &&
+          ac.goalPoint &&
+          dist(ac.goalPoint, previous.departureStart) < 1e-6
+        ) {
+          ac.goalPoint = next.departureStart
+        }
+      }
+      return ACCEPTED
+    },
     exitOptions(aircraftId: string): RunwayExit[] {
       const ac = find(aircraftId)
       return ac ? exitOptionsFor(ac) : []

@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { KSAN_SURFACE } from '@anotheratc/sim'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { KSAN_SURFACE, KSAN_RUNWAY_LAYOUT } from '@anotheratc/sim'
 import type { GroundController } from './controller'
 import { fitPoints, fitView, pan, reframe, toWorld, zoomAt, type View } from './view'
 import {
@@ -15,6 +15,8 @@ import {
   drawRouteDraft,
   drawRouteHover,
   drawRunwayExits,
+  drawRunwayMarkings,
+  runwayMarkingsVisible,
   drawSelection,
   drawSpawnPreview,
   drawSurface,
@@ -60,6 +62,13 @@ export function GroundScope({ controller }: { controller: GroundController }) {
   const requestRefit = () => {
     refitRef.current = true
   }
+
+  // Airport configuration. KSAN is single-runway, so this moves the arrival final *and* the
+  // departure end together — you cannot land one way and depart the other. Read off the
+  // published snapshot, not mirrored in local state: the sim can refuse a change, and anything
+  // else that switches the runway has to be reflected here too.
+  const activeRunway = useSyncExternalStore(controller.subscribe, controller.getSnapshot).activeRunway
+  const toggleRunway = () => controller.setRunway(activeRunway === '27' ? '09' : '27')
 
   // Dev sandbox: which surface-click tool is armed. Ref drives the click/render loop;
   // state drives the toolbar's pressed styling.
@@ -212,7 +221,7 @@ export function GroundScope({ controller }: { controller: GroundController }) {
         controller.dispatch({ type: 'crossRunway', aircraftId: id })
       } else if (e.key === 'f' || e.key === 'F') {
         refitRef.current = true // frame the field + all traffic (incl. aircraft on final)
-      } else if (e.key === 'g' || e.key === 'G') {
+      } else if (controller.dev && (e.key === 'g' || e.key === 'G')) {
         // admin: toggle the routing-graph overlay (ref drives the loop; state drives the button)
         showGraphRef.current = !showGraphRef.current
         setShowGraph(showGraphRef.current)
@@ -312,8 +321,9 @@ export function GroundScope({ controller }: { controller: GroundController }) {
         drawSurface(ctx, view, prep, width, height)
         drawAreaLabels(ctx, view, prep)
         drawGates(ctx, view, prep)
+        drawRunwayMarkings(ctx, view, KSAN_RUNWAY_LAYOUT)
         drawHotspots(ctx, view, KSAN_SURFACE)
-        drawApproachCourse(ctx, view, controller.approach)
+        drawApproachCourse(ctx, view, controller.approach())
         if (draft) {
           drawRouteDraft(ctx, view, KSAN_SURFACE, draft.via)
           if (hovering) {
@@ -322,7 +332,8 @@ export function GroundScope({ controller }: { controller: GroundController }) {
             if (ref && !draft.via.includes(ref)) drawRouteHover(ctx, view, KSAN_SURFACE, ref)
           }
         }
-        drawLabels(ctx, view, prep)
+        // The painted designators replace the schematic map numbers once they're legible.
+        drawLabels(ctx, view, prep, !runwayMarkingsVisible(view, KSAN_RUNWAY_LAYOUT))
         drawAircraft(ctx, view, snap.aircraft)
         const selected = selectedId ? snap.aircraft.find((a) => a.id === selectedId) : undefined
         // Turnoffs are only meaningful for the arrival being worked, so they are drawn for the
@@ -332,7 +343,9 @@ export function GroundScope({ controller }: { controller: GroundController }) {
         }
         drawSelection(ctx, view, selected, selectedId ? sim.routeOf(selectedId) : [])
         drawOffscreenTraffic(ctx, view, snap.aircraft, width, height)
-        if (showGraphRef.current) drawGraphOverlay(ctx, view, controller.topology)
+        // Dev-only overlay: the toggle is gone outside the sandbox, so make sure a stale ref
+        // can't leave it painted over a normal game.
+        if (controller.dev && showGraphRef.current) drawGraphOverlay(ctx, view, controller.topology)
         if (controller.dev) {
           const pr = controller.probe()
           if (pr) drawProbe(ctx, view, pr)
@@ -429,22 +442,30 @@ export function GroundScope({ controller }: { controller: GroundController }) {
         <button
           type="button"
           className="ctl-btn mono"
+          onClick={toggleRunway}
+          title="Switch the active runway. Arrivals and departures always use the same direction."
+        >
+          RWY {activeRunway}
+        </button>
+        <button
+          type="button"
+          className="ctl-btn mono"
           onClick={requestRefit}
           title="Frame the airport and all traffic, including aircraft on final (f)"
         >
           ⤢ FIT
         </button>
-        <button
-          type="button"
-          className="ctl-btn mono"
-          aria-pressed={showGraph}
-          onClick={toggleGraph}
-          title="Toggle the routing-graph overlay (g)"
-        >
-          {showGraph ? '◆ GRAPH' : '◇ GRAPH'}
-        </button>
         {controller.dev && (
-          <>
+          <span className="ctl-group" role="group" aria-label="Developer tools">
+            <button
+              type="button"
+              className="ctl-btn mono"
+              aria-pressed={showGraph}
+              onClick={toggleGraph}
+              title="Toggle the routing-graph overlay (g)"
+            >
+              {showGraph ? '◆ GRAPH' : '◇ GRAPH'}
+            </button>
             <button
               type="button"
               className="ctl-btn mono"
@@ -479,13 +500,14 @@ export function GroundScope({ controller }: { controller: GroundController }) {
             >
               CLEAR
             </button>
-          </>
+          </span>
         )}
+        {/* Shares the control bar's row so the two can't collide as the bar grows. */}
+        <div ref={hintRef} className="hud-hint mono" aria-live="polite" />
       </div>
       {controller.dev && <div ref={devRef} className="hud hud-dev mono" aria-live="polite" />}
       <div ref={statusRef} className="hud hud-tr mono" />
       <div ref={alertRef} className="hud hud-alert mono" role="alert" />
-      <div ref={hintRef} className="hud hud-bc mono" aria-live="polite" />
     </div>
   )
 }

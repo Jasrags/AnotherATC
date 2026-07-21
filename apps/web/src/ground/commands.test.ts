@@ -175,7 +175,7 @@ describe('commandsFor (strip state machine)', () => {
 
   it('parked departure without a squawk → deliver clearance', () => {
     const { controller, dispatched } = fakeController()
-    const cmds = commandsFor(controller, strip({ status: 'parked', intent: 'departure', squawk: null }), [])
+    const cmds = commandsFor(controller, strip({ status: 'parked', intent: 'departure', gate: '41', squawk: null }), [])
     expect(labels(cmds)).toEqual(['Deliver clearance'])
     const clr = cmds[0]!.action
     if (clr.kind === 'run') clr.run()
@@ -184,7 +184,7 @@ describe('commandsFor (strip state machine)', () => {
 
   it('cleared departure, servicing done → pushback approved (enabled)', () => {
     const { controller, dispatched } = fakeController()
-    const cmds = commandsFor(controller, strip({ status: 'parked', intent: 'departure', squawk: '4231', serviceSec: 0 }), [])
+    const cmds = commandsFor(controller, strip({ status: 'parked', intent: 'departure', gate: '41', squawk: '4231', serviceSec: 0 }), [])
     expect(labels(cmds)).toEqual(['Pushback approved'])
     const push = cmds[0]!.action
     if (push.kind === 'run') push.run()
@@ -193,7 +193,7 @@ describe('commandsFor (strip state machine)', () => {
 
   it('cleared departure still servicing → pushback disabled with a countdown', () => {
     const { controller } = fakeController()
-    const cmds = commandsFor(controller, strip({ status: 'parked', intent: 'departure', squawk: '4231', serviceSec: 30 }), [])
+    const cmds = commandsFor(controller, strip({ status: 'parked', intent: 'departure', gate: '41', squawk: '4231', serviceSec: 30 }), [])
     expect(labels(cmds)).toEqual(['Pushback — servicing 30s'])
     expect(cmds[0]!.action.kind).toBe('soon') // gated until services complete
   })
@@ -374,5 +374,23 @@ describe('commandsFor — Tower arrivals', () => {
     const dep = strip({ status: 'holdShort', controlledBy: 'tower', holdingForTakeoff: true })
     const cmds = commandsFor(controller, dep, [inbound])
     expect(labels(cmds)).toEqual(['Line up and wait', 'Cleared for takeoff', 'Hold position'])
+  })
+})
+
+describe('commandsFor — an aircraft parked away from a stand', () => {
+  it('skips clearance and pushback for a departure with no gate', () => {
+    // The dev sandbox can drop a test aircraft anywhere on the surface. There is no stand to
+    // push it off, so offering "Deliver clearance" then "Pushback approved" is a dead end.
+    const { controller } = fakeController()
+    const cmds = commandsFor(controller, strip({ status: 'parked', intent: 'departure', gate: null }), [])
+    expect(labels(cmds)).not.toContain('Deliver clearance')
+    expect(labels(cmds)).not.toContain('Pushback approved')
+    expect(labels(cmds)).toContain('Taxi to…')
+  })
+
+  it('still runs the full flow for one on a stand', () => {
+    const { controller } = fakeController()
+    const cmds = commandsFor(controller, strip({ status: 'parked', intent: 'departure', gate: '41' }), [])
+    expect(labels(cmds)).toEqual(['Deliver clearance'])
   })
 })

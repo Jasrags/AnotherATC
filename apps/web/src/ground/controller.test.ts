@@ -201,3 +201,27 @@ describe('ground controller — dev sandbox', () => {
     expect(c.probe()).toBeNull()
   })
 })
+
+describe('dev sandbox', () => {
+  it('spawns a test arrival on the final of the runway actually in use', () => {
+    const controller = createGroundController({ dev: true })
+    controller.setRunway('09')
+    controller.spawnArrival()
+    const a = controller.getSnapshot().aircraft.find((x) => x.callsign.startsWith('DEV'))
+    expect(a).toBeDefined()
+    // 09 is flown from the west, so its final fix is west of the threshold. Spawning on the
+    // startup configuration's approach instead would put it on the wrong side of the field.
+    const route = controller.routeOf(a!.id)
+    expect(route.length).toBeGreaterThan(0)
+    expect(route[route.length - 1]![0]).toBeGreaterThan(route[0]![0]) // tracking eastbound
+  })
+
+  it('clearing the sandbox also drops a probe left on the surface', () => {
+    const controller = createGroundController({ dev: true })
+    controller.probeClick([0, 0])
+    controller.probeClick([0.2, -0.2])
+    expect(controller.probe()).not.toBeNull()
+    controller.clearAll()
+    expect(controller.probe()).toBeNull()
+  })
+})

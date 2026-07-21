@@ -5,6 +5,7 @@ import {
   buildTaxiGraph,
   createGroundSim,
   APPROACH_SPEED_KT,
+  KSAN_RUNWAYS,
 } from '@anotheratc/sim'
 import type {
   ApproachConfig,
@@ -102,6 +103,9 @@ export interface GroundControllerOptions {
 
 export interface StripSnapshot {
   aircraft: StripItem[]
+  /** Designator of the runway direction in use. Published rather than mirrored in component
+   *  state so it cannot drift from the sim, whatever changes it. */
+  activeRunway: string
   selectedId: string | null
   /** The active controller position (which strip bay is shown). */
   position: ControllerPosition
@@ -119,8 +123,15 @@ export interface StripSnapshot {
 export interface GroundController {
   readonly sim: GroundSim
   readonly destinations: NamedDestination[]
-  /** The final-approach geometry arrivals fly in on, so the scope can draw the course. */
-  readonly approach: ApproachConfig
+  /** The final-approach geometry arrivals fly in on, so the scope can draw the course.
+   *  Follows the active runway — it changes when the configuration does. */
+  approach(): ApproachConfig
+  /** Designator of the runway direction in use, e.g. "27". */
+  activeRunway(): string
+  /** Switch the airport configuration. Single runway: this moves *both* the arrival final and
+   *  the departure end, because they are always the same direction. Refused (with a notice)
+   *  while traffic is committed to the runway in use. */
+  setRunway(ident: '09' | '27'): void
   /** Runway turnoffs this arrival could still be assigned (ahead of it and reachable).
    *  For the canvas only, which draws outside React's render cycle — anything rendered by
    *  React must use `StripItem.exitOptions` off the published snapshot instead. */
@@ -185,8 +196,14 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
     destinations.find((d) => d.id === 'rwy27') ?? destinations.find((d) => d.kind === 'runway')
   // Dev mode starts empty: no seeded aircraft, no auto-spawner, no servicing gate.
   const sim = dev
-    ? createGroundSim([], { graph, guard })
-    : createGroundSim(game.inits, { graph, guard, spawn: game.spawn, servicing: game.servicing })
+    ? createGroundSim([], { graph, guard, runway: game.runway })
+    : createGroundSim(game.inits, {
+        graph,
+        guard,
+        spawn: game.spawn,
+        servicing: game.servicing,
+        runway: game.runway,
+      })
 
   let selected: string | null = null
   let position: ControllerPosition = 'ground'
@@ -236,7 +253,13 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
     return out
   }
   const listeners = new Set<() => void>()
-  let snapshot: StripSnapshot = { aircraft: [], selectedId: null, position: 'ground', draft: null }
+  let snapshot: StripSnapshot = {
+    aircraft: [],
+    selectedId: null,
+    position: 'ground',
+    draft: null,
+    activeRunway: game.runway.ident,
+  }
   let sig = ''
 
   /** How long a refusal/error message stays on the HUD (ms). */
@@ -255,7 +278,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
         .filter((a) => a.intent === 'arrival' && a.controlledBy === 'tower')
         .map((a) => [a.id, sim.exitOptions(a.id)] as const),
     )
-    let nextSig = `${position}|${selected ?? '-'}`
+    let nextSig = `${position}|${selected ?? '-'}|${sim.runway()?.ident ?? '-'}`
     nextSig += draft ? `~${draft.id}:${draft.via.join('.')}` : ''
     // Range-to-threshold is continuous, so it enters the signature at display precision
     // (0.1 nm ≈ one re-render every ~2.5 s on final) rather than every frame.
@@ -266,6 +289,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
     snapshot = {
       selectedId: selected,
       position,
+      activeRunway: sim.runway()?.ident ?? game.runway.ident,
       draft: draft ? { id: draft.id, via: [...draft.via] } : null,
       aircraft: acs.map((a) => ({
         id: a.id,
@@ -302,7 +326,16 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
   return {
     sim,
     destinations,
-    approach: game.spawn.approach,
+    approach: () => sim.approach() ?? game.spawn.approach,
+    activeRunway: () => sim.runway()?.ident ?? game.runway.ident,
+    setRunway: (ident) => {
+      const res = sim.setRunway(KSAN_RUNWAYS[ident])
+      // Announce either way. A successful change silently moves every arrival's final and every
+      // departure's roll direction, so it needs saying as much as a refusal does — and the
+      // notice lands in an aria-live region, which is the only announcement a screen reader gets.
+      flashNotice(res.ok ? `RWY ${ident} now in use — arrivals and departures` : res.reason)
+      publish()
+    },
     exitOptions: (id) => sim.exitOptions(id),
     topology,
     dev,
@@ -321,7 +354,13 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
         intent: 'departure' as const,
         // Give it a departure-runway goal so it's a takeoff (not a crossing) when it holds
         // short — otherwise the Tower handoff / takeoff flow can't engage in the sandbox.
-        ...(departureRunway ? { goalPoint: departureRunway.point } : {}),
+        // Follows the *active* runway, so a test aircraft spawned while 09 is in use aims at
+        // 09's departure end rather than whichever end was configured at startup.
+        ...(sim.runway()
+          ? { goalPoint: sim.runway()!.departureStart }
+          : departureRunway
+            ? { goalPoint: departureRunway.point }
+            : {}),
       }
       sim.add(place.gate ? { ...base, gate: place.gate } : base)
       selected = id
@@ -332,7 +371,9 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
       devSeq += 1
       // Stagger successive test arrivals down the final so they don't stack on one point —
       // deterministic (driven by the spawn counter, not a clock or RNG).
-      const { fix, threshold } = game.spawn.approach
+      // The *active* runway's final, not whichever was configured at startup — otherwise a
+      // test arrival keeps appearing on 27's approach after the airport has turned round.
+      const { fix, threshold } = sim.approach() ?? game.spawn.approach
       const back = (devSeq - 1) * DEV_ARRIVAL_SPACING_NM
       const len = Math.hypot(fix[0] - threshold[0], fix[1] - threshold[1]) || 1
       const start: Point = [
@@ -367,6 +408,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
       sim.clear()
       selected = null
       draft = null
+      probeState = null // the probe outlives the fleet otherwise, drawn over an empty surface
       publish()
     },
     probe: () => probeState,

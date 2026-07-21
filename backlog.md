@@ -131,6 +131,13 @@ Design note: `docs/atc-tower.md` (one sim, two projections; Ground and Tower own
   automatic handoff — issued on the roll it is the real *"when vacated, contact ground"*. **Vacated
   now means past the turnoff's hold-short point**, so a landing holds the runway as long as it
   really would. _Next: 3d._
+- ✅ **Runway geometry from the FAA survey** (branch) — `docs/SAN/runway-9-27.md`. Both KSAN
+  thresholds are displaced (1,000 ft on 09, **1,810 ft** on 27), so the landing threshold is not
+  the end of the pavement; declared distances (TORA 8,280/9,401, LDA 7,280/7,591) are carried
+  rather than derived, because on 09 they do not reduce to two points. Per-end glide path (3.3°
+  / 3.5°). EMAS 315 × 218 ft at the **west** end. Markings — pre-threshold arrows, threshold
+  bars, designators, EMAS chevrons — drawn from the surveyed layout. A departure is refused when
+  it has insufficient runway ahead of it in the direction in use.
 - ⬜ **Slice 3d — communications log + read-back**: the arrival procedure is 4–5 transmissions and
   none are visible today. Also open: wake spacing on final, arrival sequence numbers, a
   player-issued go-around, hold-short during rollout, ATIS/weather line.
@@ -164,7 +171,15 @@ Design note: `docs/atc-tower.md` (one sim, two projections; Ground and Tower own
 - ⬜ **Turnaround & gate conflict** — an arrival feeds directly into the same aircraft's next departure cycle; short-turn timer; **gate conflict** when an arrival's gate is still occupied by a late departure. High-tension Ground/Ramp mechanic called out in the design docs.
 - ✅ **Sim ↔ UI bridge** — `GroundController` store + `useSyncExternalStore` for strips (canvas stays on rAF; strips re-render only on phase/selection change)
 - ⬜ **Time controls** — pause / 1× / 2× / 4× (fixed timestep already supports it)
-- ⬜ **ATIS / airport config** — active runway, wind, altimeter; runway-change cascade
+- 🚧 **ATIS / airport config** — **shipped (branch `runway-config-and-declared-distances`):** one
+  active runway direction, switchable in-game (`RWY 27` / `RWY 09` control). Arrivals and
+  departures always share it — the game previously landed RWY 9 while departing RWY 27, head-on
+  on a single runway. The configuration drives the arrival final, the departure end, the exit
+  set and the glide path. **Runway-change cascade** shipped too: a change is refused while anything is
+  committed to the runway in use (on it, or on short final above it); on success every arrival
+  still on final goes around and re-establishes on the *new* approach at that end's glide path,
+  landing clearances are voided, and departures yet to roll are retargeted to the new departure
+  end. _Next: wind + altimeter, an actual ATIS letter._
 - ⬜ **Weather** — wind (affects ops), precipitation shading on scopes
 - ⬜ **Wake-turbulence model** — categories on strips, spacing constraints
 - 🚧 **Scenario / traffic generation** — deterministic spawner (gates → RWY, RWY → gates) in place; want realistic demand curves, schedules, runway-config awareness
@@ -209,7 +224,7 @@ Design note: `docs/atc-tower.md` (one sim, two projections; Ground and Tower own
 
 ## Testing / infra
 
-- ✅ **Dev/admin sandbox** (`?dev`) — empty surface, spawner off, plus a control bar. **SPAWN**: click the surface to drop a test aircraft (snaps to the nearest routing node, auto `DEVnn`); drive it with the normal commands; **ARRIVAL** puts a test arrival on the final approach (airborne — it can't be placed by clicking the surface) and switches to the Tower bay; successive spawns stagger 1.2 nm down the final. **X** removes the selected, **CLEAR** wipes all. **PROBE**: click two points to draw the shortest graph path between them with a live length + taxiway-sequence readout (no route → dashed red). Works alongside the **GRAPH** overlay. Sim gained `add`/`remove`/`clear`. _Next: param picker (type/wake/intent), exact (off-network) placement, step/pause, save/replay._
+- ✅ **Dev/admin sandbox** (`?dev`) — empty surface, spawner off, plus a control bar. **SPAWN**: click the surface to drop a test aircraft (snaps to the nearest routing node, auto `DEVnn`); drive it with the normal commands; **GRAPH** (the routing-graph overlay, and its `g` key) is dev-only — outside the sandbox the bar is just the two gameplay controls, RWY and FIT. **ARRIVAL** puts a test arrival on the final approach of the *active* runway (airborne — it can't be placed by clicking the surface) and switches to the Tower bay; successive spawns stagger 1.2 nm down the final. **X** removes the selected, **CLEAR** wipes all. **PROBE**: click two points to draw the shortest graph path between them with a live length + taxiway-sequence readout (no route → dashed red). Works alongside the **GRAPH** overlay. Sim gained `add`/`remove`/`clear`. _Next: param picker (type/wake/intent), exact (off-network) placement, step/pause, save/replay._
 - ⬜ Playwright E2E for the interaction flows (needs dependency vetting per policy)
 - ⬜ Socket.dev GitHub app on the repo (CI already runs audit + osv-scanner)
 - ⬜ Coverage reporting + targets

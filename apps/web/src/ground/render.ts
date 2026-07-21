@@ -1,6 +1,9 @@
+import { FT_PER_NM } from '@anotheratc/sim'
 import type {
   AirportSurface,
   ApproachConfig,
+  RunwayEndLayout,
+  RunwayLayout,
   GroundAircraft,
   RunwayExit,
   Point,
@@ -125,7 +128,6 @@ export function drawSurface(ctx: Ctx, v: View, prep: PreparedSurface, w: number,
   strokeFeatures(ctx, v, prep.runwayPavement, COLORS.runway, { nm: DIMS.runwayNm, minPx: 3, cap: 'butt' })
   strokeFeatures(ctx, v, prep.runwayCenterlines, COLORS.runwayCenter, { px: 1.2, dash: [11, 9] })
   ctx.setLineDash([])
-  drawThresholds(ctx, v, prep.runwayPavement)
 
   // hold-short markers (nodes)
   ctx.fillStyle = COLORS.holdShort
@@ -137,39 +139,145 @@ export function drawSurface(ctx: Ctx, v: View, prep: PreparedSurface, w: number,
   }
 }
 
-/** Threshold markings: the solid bar across each runway end. With square-capped pavement this
- *  is what makes an end read as a threshold rather than as pavement that simply stops. */
-function drawThresholds(ctx: Ctx, v: View, runways: SurfaceFeature[]): void {
+/** Whether the painted markings are large enough to draw. Below this the runway is a few pixels
+ *  wide and they are noise — the schematic map label carries the identification instead. */
+export function runwayMarkingsVisible(v: View, layout: RunwayLayout): boolean {
+  return (layout.widthFt / 2 / FT_PER_NM) * v.scale >= 2
+}
+
+/**
+ * Runway markings, drawn from the surveyed layout rather than from the pavement polyline.
+ *
+ * The distinction matters at KSAN: both thresholds are displaced — 1,000 ft on 09 and 1,810 ft
+ * on 27 — so a threshold bar painted at the end of the pavement would be up to a third of a mile
+ * from where aircraft actually touch down. See docs/SAN/runway-9-27.md.
+ *
+ * Draws, per end: the pre-threshold pavement (arrows leading to the bar, which a departure may
+ * roll on but a landing may not touch down on), the threshold bar itself, the designator, and
+ * the EMAS bed beyond the pavement where one exists.
+ */
+export function drawRunwayMarkings(ctx: Ctx, v: View, layout: RunwayLayout): void {
+  const halfWidthNm = layout.widthFt / 2 / FT_PER_NM
+  const halfPx = halfWidthNm * v.scale
+  if (!runwayMarkingsVisible(v, layout)) return // too small to read as anything but noise
+
   ctx.save()
-  ctx.setLineDash([])
   ctx.lineCap = 'butt'
-  ctx.strokeStyle = COLORS.runwayThreshold
-  const half = (DIMS.runwayNm / 2) * v.scale
-  for (const f of runways) {
-    for (const end of [
-      { at: f.points[0], toward: f.points[1] },
-      { at: f.points[f.points.length - 1], toward: f.points[f.points.length - 2] },
-    ]) {
-      const { at, toward } = end
-      if (!at || !toward) continue
-      const [ax, ay] = toScreen(v, at[0], at[1])
-      const [bx, by] = toScreen(v, toward[0], toward[1])
-      const dx = bx - ax
-      const dy = by - ay
-      const len = Math.hypot(dx, dy)
-      if (len < 1e-6 || half < 2) continue
-      // A bar across the full runway width, set just inside the end.
-      const inset = Math.min(len, DIMS.thresholdInsetPx)
-      const cx = ax + (dx / len) * inset
-      const cy = ay + (dy / len) * inset
-      ctx.lineWidth = Math.max(2, DIMS.thresholdBarPx)
-      ctx.beginPath()
-      ctx.moveTo(cx - (dy / len) * half, cy + (dx / len) * half)
-      ctx.lineTo(cx + (dy / len) * half, cy - (dx / len) * half)
-      ctx.stroke()
+  ctx.setLineDash([])
+  const [a, b] = layout.ends
+  for (const [end, other] of [
+    [a, b],
+    [b, a],
+  ] as const) {
+    // Unit vector pointing *into* the runway from this end, and its perpendicular.
+    const dx = other.pavementEnd[0] - end.pavementEnd[0]
+    const dy = other.pavementEnd[1] - end.pavementEnd[1]
+    const len = Math.hypot(dx, dy)
+    if (len < 1e-9) continue
+    const ux = dx / len
+    const uy = dy / len
+    const px = -uy
+    const py = ux
+    /** World point: `along` nm up the runway from this end, `across` nm off the centerline. */
+    const at = (from: Point, along: number, across: number): [number, number] =>
+      toScreen(v, from[0] + ux * along + px * across, from[1] + uy * along + py * across)
+
+    // ── Pre-threshold pavement: centerline arrows leading to the bar ──
+    const displaced = Math.hypot(
+      end.threshold[0] - end.pavementEnd[0],
+      end.threshold[1] - end.pavementEnd[1],
+    )
+    if (displaced > 1e-6 && halfPx > 5) {
+      ctx.strokeStyle = COLORS.runwayMarking
+      ctx.lineWidth = Math.max(1, halfPx * 0.06)
+      const arrows = Math.max(2, Math.round((displaced * FT_PER_NM) / 400))
+      const head = halfWidthNm * 0.35
+      for (let i = 1; i <= arrows; i += 1) {
+        const along = (displaced * i) / (arrows + 1)
+        const [tx, ty] = at(end.pavementEnd, along + head, 0)
+        const [lx, ly] = at(end.pavementEnd, along, -head)
+        const [rx, ry] = at(end.pavementEnd, along, head)
+        ctx.beginPath()
+        ctx.moveTo(lx, ly)
+        ctx.lineTo(tx, ty)
+        ctx.lineTo(rx, ry)
+        ctx.stroke()
+      }
     }
+
+    // ── Threshold bar, at the displaced threshold ──
+    const [b1x, b1y] = at(end.threshold, 0, -halfWidthNm)
+    const [b2x, b2y] = at(end.threshold, 0, halfWidthNm)
+    ctx.strokeStyle = COLORS.runwayThreshold
+    ctx.lineWidth = Math.max(2, halfPx * 0.12)
+    ctx.beginPath()
+    ctx.moveTo(b1x, b1y)
+    ctx.lineTo(b2x, b2y)
+    ctx.stroke()
+
+    // ── Designator, painted just inside the bar and aligned with the runway ──
+    if (halfPx > 9) {
+      const [nx, ny] = at(end.threshold, halfWidthNm * 1.4, 0)
+      ctx.save()
+      ctx.translate(nx, ny)
+      ctx.rotate(Math.atan2(-py, px) + Math.PI / 2)
+      ctx.fillStyle = COLORS.runwayMarking
+      ctx.font = `600 ${Math.max(8, halfPx * 0.5)}px ui-sans-serif, system-ui, sans-serif`
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(end.ident, 0, 0)
+      ctx.restore()
+    }
+
+    // ── EMAS bed beyond the pavement, chevroned ──
+    if (end.emas) drawEmas(ctx, v, end, ux, uy, px, py)
   }
   ctx.restore()
+}
+
+/** The arresting bed beyond a runway end: outlined, filled, and chevroned toward the runway. */
+function drawEmas(
+  ctx: Ctx,
+  v: View,
+  end: RunwayEndLayout,
+  ux: number,
+  uy: number,
+  px: number,
+  py: number,
+): void {
+  const emas = end.emas
+  if (!emas) return
+  const lengthNm = emas.lengthFt / FT_PER_NM
+  const halfNm = emas.widthFt / 2 / FT_PER_NM
+  // The bed lies *outside* the pavement, so it runs against the into-runway direction.
+  const at = (along: number, across: number): [number, number] =>
+    toScreen(v, end.pavementEnd[0] - ux * along + px * across, end.pavementEnd[1] - uy * along + py * across)
+
+  const corners: [number, number][] = [at(0, -halfNm), at(lengthNm, -halfNm), at(lengthNm, halfNm), at(0, halfNm)]
+  ctx.beginPath()
+  corners.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)))
+  ctx.closePath()
+  ctx.fillStyle = COLORS.emasFill
+  ctx.fill()
+  ctx.strokeStyle = COLORS.emas
+  ctx.lineWidth = 1
+  ctx.stroke()
+
+  // Chevrons pointing back toward the runway — the standard "do not use this pavement" marking.
+  const rows = 4
+  ctx.lineWidth = Math.max(1, halfNm * v.scale * 0.09)
+  for (let i = 1; i <= rows; i += 1) {
+    const base = (lengthNm * i) / (rows + 0.5)
+    const tip = base - lengthNm / (rows + 0.5) / 1.6
+    const [lx, ly] = at(base, -halfNm * 0.9)
+    const [tx, ty] = at(tip, 0)
+    const [rx, ry] = at(base, halfNm * 0.9)
+    ctx.beginPath()
+    ctx.moveTo(lx, ly)
+    ctx.lineTo(tx, ty)
+    ctx.lineTo(rx, ry)
+    ctx.stroke()
+  }
 }
 
 export function distToSeg(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
@@ -438,8 +546,14 @@ export function drawHotspots(ctx: Ctx, v: View, surface: AirportSurface): void {
   }
 }
 
-/** Taxiway designator (kept off the runway) + runway numbers, with halos. */
-export function drawLabels(ctx: Ctx, v: View, prep: PreparedSurface): void {
+/**
+ * Taxiway designators (kept off the runway) + schematic runway numbers.
+ *
+ * The runway numbers here are a map label beside the pavement. Once zoomed in far enough for the
+ * real painted designators (`drawRunwayMarkings`) they would be a second, differently-placed
+ * copy of the same information, so the caller turns them off.
+ */
+export function drawLabels(ctx: Ctx, v: View, prep: PreparedSurface, runwayNumbers = true): void {
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
   ctx.lineJoin = 'round'
@@ -449,10 +563,12 @@ export function drawLabels(ctx: Ctx, v: View, prep: PreparedSurface): void {
     label(ctx, text, sx, sy, COLORS.labelTaxi)
   }
 
-  ctx.font = '700 13px ui-monospace, "SF Mono", Menlo, monospace'
-  for (const { text, at, dx } of prep.runwayNumbers) {
-    const [sx, sy] = toScreen(v, at[0], at[1])
-    label(ctx, text, sx + dx, sy, COLORS.labelRwy)
+  if (runwayNumbers) {
+    ctx.font = '700 13px ui-monospace, "SF Mono", Menlo, monospace'
+    for (const { text, at, dx } of prep.runwayNumbers) {
+      const [sx, sy] = toScreen(v, at[0], at[1])
+      label(ctx, text, sx + dx, sy, COLORS.labelRwy)
+    }
   }
 
   ctx.textAlign = 'left'
