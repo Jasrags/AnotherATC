@@ -37,7 +37,7 @@ The core ground-control loop. Ordered roughly by priority.
 - ✅ **Hold-short of runway / runway-crossing clearances** — routes stop at the runway; press C to clear across. _Next: snap the stop to the exact `holding_position` line; require Tower coordination._
 - ✅ **Spawn / despawn (traffic flow)** — intent-driven: departures start at gates → RWY, arrivals appear on a 4 nm final → land → gates; deterministic spawner, goal completion despawns, dep/arr score.
 - ✅ **Named destinations** — selected strip shows a clearance row: RWY 27 / RWY 9 (auto hold-short), arrival's gate, Hold, Cross RWY. Goal-append makes "taxi to RWY" stop at the hold line. _Next: pick an arbitrary gate/spot; assigned-route ("via B, C")._
-- 🚧 **Aircraft separation / conflict** — following separation, runway single-occupancy, conflict alerts (red ring + HUD). Right-of-way uses a deterministic *total* order (rolling-beats-stopped, id tiebreak), so two aircraft can never both yield → no head-on/intersection deadlock. **Segment reservation (hold-at-junction):** graph-routed traffic treats each taxiway edge as a one-lane resource — the lower-priority aircraft stops *short of the junction* before entering a contested edge and waits for the other to clear, instead of driving through it. Automatic no-overlap floor. _Next: **player-instructed** give-way / reroute / sequencing (ties into Assigned taxi routes); HS1-specific incursion._
+- 🚧 **Aircraft separation / conflict** — following separation, runway single-occupancy, conflict alerts (red ring + HUD). Right-of-way uses a deterministic *total* order (rolling-beats-stopped, id tiebreak), so two aircraft can never both yield → no head-on/intersection deadlock. **Segment reservation (hold-at-junction):** graph-routed traffic treats each taxiway edge as a one-lane resource — the lower-priority aircraft stops *short of the junction* before entering a contested edge and waits for the other to clear, instead of driving through it. Automatic no-overlap floor. _Next: predictive (time-to-conflict) taxiway alerts — runway incursions are now detected and alerted separately._
 - ✅ **Parallel-taxiway diversion** (separation follow-up) — when the yielder has been reservation-held at a junction for a sustained interval (`DIVERT_AFTER_SEC`), it reroutes to its current destination *around* the contested edge, if a path avoiding it exists and the detour stays within `DIVERSION_COST_FACTOR`× the direct route; otherwise it keeps waiting (no regression on the no-parallel corridor). Graph primitive `routeAvoiding` (Dijkstra excluding blocked edges) + per-clearance diversion memory. Deterministic (fixed-timestep hold accrual). The full fix for the pass-through degrade cases.
 - ⬜ **Gridlock hardening** (separation follow-up) — the two-aircraft reservation is deadlock-free; a ≥3-aircraft occupancy cycle *could* gridlock in principle. **Probed post-diversion:** a counter-rotating 3-aircraft ring (each wanting an edge the next occupies) already resolves — the total-order reservation staggers them and all three reach goals; no freeze. A genuine forced no-parallel cycle is contrived to construct and needs new reverse-motion (back-off) kinematics. **Deferred** as low-frequency until a real gridlock is observed. _If needed: build a waits-for graph each tick, detect a cycle where every member's diversion failed, lowest-rank backs off._
 - 🚧 **Assigned taxi routes** — clearance as a sequence of named taxiways ("via B, C"). **Shipped:** graph edges carry designators; `routeVia` follows an ordered taxiway sequence (falls back to shortest path); `taxiVia`/`taxiViaGoal` commands; strips display "VIA A · B · C" for every route. **Scope builder:** select an aircraft → "Route ▸" → click taxiways in order (highlighted, chips in the strip) → pick a destination to issue; Esc/Cancel to abandon. Re-issuing on a taxiing aircraft = reroute. _Next: readback confirmation; feedback when a via can't reach the goal (currently silently falls back to shortest path)._
@@ -79,8 +79,25 @@ The core ground-control loop. Ordered roughly by priority.
   treats them the same — drawn, occupied, holding arrivals off, and offered by gate reassignment.
   Refs are case-normalised (OSM had a lone lowercase `n6`). _Next: traffic that actually belongs
   there — cargo/GA types with their own spawn rules — and the 17 untagged parking lines._
-- ⬜ **HS1 hotspot** — render the KSAN hot spot; incursion-risk awareness
-- ⬜ **Ground conflict / incursion alerts** — two aircraft converging, or one entering an occupied runway
+- ⬜ **HS1 hotspot** — render the KSAN hot spot; incursion-risk awareness. Now that generic
+  incursion detection exists, this is the airport-specific flavour: HS1 as named geometry, warned
+  on earlier and louder than open pavement.
+- ✅ **Runway incursion alerts** — the sim already *refuses* every clearance that would put two
+  aircraft on one runway, which left a blind spot: the conflicts no single clearance was wrong
+  for. `detectIncursions` (pure, deterministic) classifies each aircraft on the pavement by how
+  it got there — takeoff, line-up, rollout, crossing, or nothing at all — and raises three kinds:
+  an uncleared occupant, an occupant under an aircraft cleared to land on top of it (advisory
+  beyond 1.5 nm, alert inside it), and two aircraft sharing the runway where one holds a clearance
+  for it. The occupant named first is the intruder, so the HUD names the aircraft to move.
+  Authority rides a small latch (`runwayAuth`: issued → on → dropped when it leaves), so a
+  crossing clearance is spent by the movement it was given for; a landing rollout inherits it
+  across the Tower→Ground handoff. Snapshot `incursions` + per-aircraft `incursion`; dashed red
+  ring on the scope, HUD line at the top of the alert stack. _Next: a lever — controller-issued
+  go-around for the inbound, and "expedite" for the occupant; the alert currently informs
+  without offering the action, which is the same gap the gate alert had._
+- ⬜ **Converging-traffic prediction** (incursion follow-up) — the `conflict` flag is still pure
+  proximity. Project both aircraft forward and warn on time-to-conflict, so taxiway conflicts get
+  the same "developing → happening" ladder the runway ones now have.
 - 🚧 **Handoff to/from Tower** — **Contact tower** now performs a real Ground→Tower control transfer (`controlledBy` flips; the strip moves to the TWR bay). Tower then issues **line up and wait** and an explicit **cleared for takeoff** (full-power accel to 140 kt, exempt from taxi caps/conflict; lifts off the far end, counted `departed`). Runway single-occupancy + wake separation gate the takeoff clearance. Cross runway is only for transiting traffic. **Tower→Ground on arrival** also works now: a landed aircraft flips back to Ground once it has rolled out to taxi speed and can leave the runway (Slice 2). See **Tower (Local Control)** epic + `docs/atc-tower.md`. _Next: refuse a handoff when Tower is overloaded._
 - 💭 Multiple ground frequencies (N/S) — not needed at KSAN's scale
 - 💭 Progressive taxi / follow-the-greens visualization
