@@ -261,6 +261,14 @@ export interface GroundSim {
    *  arrival still on final goes around and re-establishes on the new approach, and departures
    *  yet to roll are retargeted to the new departure end. */
   setRunway(next: ActiveRunway): DispatchResult
+  /** How much traffic the spawner generates, as a multiplier on the field's configured rate:
+   *  1 = as configured, 0 = no new traffic at all. Scales both the interval between spawn
+   *  attempts and the cap on simultaneous aircraft, so turning it down means a quieter field
+   *  rather than the same field filling more slowly. */
+  trafficRate(): number
+  /** Set the traffic rate. Takes effect immediately (the pending interval is restarted).
+   *  Throws on anything that isn't a finite multiplier ≥ 0. */
+  setTrafficRate(rate: number): void
   /** Insert an aircraft at runtime (dev/admin sandbox); returns its id. */
   add(init: AircraftInit): string
   /** Remove an aircraft by id; returns whether one was removed. */

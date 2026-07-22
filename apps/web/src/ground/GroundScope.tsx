@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import type { GroundController } from './controller'
+import { TRAFFIC_LEVELS, type GroundController } from './controller'
+import { saveTrafficRate } from './prefs'
 import { centerOn, clearanceRangeNm, fitPoints, fitView, pan, reframe, toWorld, zoomAt, type View } from './view'
 import {
   drawAircraft,
@@ -100,6 +101,16 @@ export function GroundScope({ controller }: { controller: GroundController }) {
     setSpeed(n)
   }
   const togglePause = () => applySpeed(speedRef.current === 0 ? 1 : 0)
+
+  // Traffic level: how much new traffic the field generates. Separate from the time control —
+  // one changes how fast the game runs, the other how busy it is — and remembered across
+  // reloads, because working one mechanic at a time shouldn't mean re-setting it every load.
+  const [trafficRate, setTrafficRateState] = useState<number>(() => controller.trafficRate())
+  const applyTrafficRate = (rate: number) => {
+    controller.setTrafficRate(rate)
+    saveTrafficRate(rate)
+    setTrafficRateState(rate)
+  }
 
   // Dev sandbox: which surface-click tool is armed. Ref drives the click/render loop;
   // state drives the toolbar's pressed styling.
@@ -620,6 +631,29 @@ export function GroundScope({ controller }: { controller: GroundController }) {
             </button>
           ))}
         </span>
+        {/* Traffic level. Not a difficulty setting so much as a play-testing one: at MOD the
+            surface fills faster than one mechanic can be worked through by hand. Hidden in dev
+            mode, which has no spawner to turn down. */}
+        {!controller.dev && (
+          <span className="ctl-group" role="group" aria-label="Traffic level">
+            {TRAFFIC_LEVELS.map((level) => (
+              <button
+                key={level.label}
+                type="button"
+                className="ctl-btn mono"
+                aria-pressed={trafficRate === level.rate}
+                onClick={() => applyTrafficRate(level.rate)}
+                title={
+                  level.rate === 0
+                    ? 'Generate no new traffic (aircraft already on the field stay)'
+                    : `Generate ${level.label.toLowerCase()} traffic (${level.rate}× the field's normal rate)`
+                }
+              >
+                {level.label}
+              </button>
+            ))}
+          </span>
+        )}
         {controller.dev && (
           <span className="ctl-group" role="group" aria-label="Developer tools">
             <button

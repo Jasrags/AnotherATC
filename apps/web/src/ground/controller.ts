@@ -34,6 +34,28 @@ const STAND_MENU_LIMIT = 6
 /** How far apart (nm) successive dev-spawned test arrivals sit along the final. */
 const DEV_ARRIVAL_SPACING_NM = 1.2
 
+/**
+ * The traffic levels the controller offers, as multipliers on the field's own configured rate.
+ *
+ * A rate rather than an aircraft count: how busy a field is at "moderate" is a property of the
+ * field (KSAN's single runway is not KLAX's four), so the levels scale what the airport data
+ * already states instead of overriding it. LOW exists for play-testing one mechanic at a time
+ * without the surface filling up behind you; OFF leaves you exactly the traffic already there.
+ */
+export const TRAFFIC_LEVELS = [
+  { label: 'OFF', rate: 0 },
+  { label: 'LOW', rate: 0.35 },
+  { label: 'MOD', rate: 1 },
+  { label: 'HIGH', rate: 1.75 },
+] as const
+
+/** The level a rate corresponds to, or undefined for a rate no button offers. The toolbar shows
+ *  a rate by pressing its button, so a rate outside this list would run with nothing pressed —
+ *  which is why a restored rate is checked against it rather than trusted. */
+export function trafficLevelFor(rate: number): (typeof TRAFFIC_LEVELS)[number] | undefined {
+  return TRAFFIC_LEVELS.find((l) => l.rate === rate)
+}
+
 // Read-back errors are built and tested in the sim (`readback: { errorRate, seed }`) but are
 // deliberately NOT enabled here: the base loop gets proven first, and a mechanic that makes
 // clearances silently take effect wrong is exactly the kind of thing that hides a real bug
@@ -142,6 +164,9 @@ export interface GroundControllerOptions {
   /** Which field to run. Defaults to KSAN; anything satisfying `Airport` works, which is what
    *  keeps this layer free of airport specifics. */
   airport?: Airport
+  /** Starting traffic level (see {@link TRAFFIC_LEVELS}). Omit for the field's own rate.
+   *  Ignored in dev mode, which has no spawner at all. */
+  trafficRate?: number
 }
 
 export interface StripSnapshot {
@@ -181,6 +206,12 @@ export interface GroundController {
   setRunway(ident: string): void
   /** The runway directions this field can be configured to, in display order. */
   runwayIdents(): string[]
+  /** How much traffic the field is generating, as a multiplier on its configured rate
+   *  (1 = as configured, 0 = none). See {@link TRAFFIC_LEVELS}. */
+  trafficRate(): number
+  /** Turn the traffic up or down. Takes effect on the next spawn interval; aircraft already
+   *  on the surface stay — this changes what arrives, not what is being worked. */
+  setTrafficRate(rate: number): void
   /** Every named taxiway where it meets the runway, ordered along the direction in use — the
    *  places a departure can be taxied to and hold short of for an intersection departure. */
   holdShortSpots(): NamedDestination[]
@@ -273,6 +304,10 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
         // what makes a gate a finite resource rather than a formality.
         turnaround: true,
       })
+  // A bad saved/URL value must not take the field down with it — fall back to the field's rate.
+  if (opts.trafficRate !== undefined && Number.isFinite(opts.trafficRate) && opts.trafficRate >= 0) {
+    sim.setTrafficRate(opts.trafficRate)
+  }
 
   let selected: string | null = null
   let position: ControllerPosition = 'ground'
@@ -438,6 +473,12 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
         kind: 'spot' as const,
         point: i.point,
       }))
+    },
+    trafficRate: () => sim.trafficRate(),
+    setTrafficRate: (rate) => {
+      sim.setTrafficRate(rate)
+      const level = trafficLevelFor(rate)
+      flashNotice(level ? `Traffic ${level.label}` : `Traffic rate ${rate}×`)
     },
     activeRunway: () => sim.runway()?.ident ?? game.runway.ident,
     runwayIdents: () => airport.runways.map((r) => r.ident),

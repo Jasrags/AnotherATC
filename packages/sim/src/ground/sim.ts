@@ -463,7 +463,18 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
   let lastDeparture: { wake: WakeCategory; atTime: number } | null = null
   let seq = 0
   const spawnRng = spawn ? createRng(spawn.seed) : null
-  let nextSpawnAt = spawn ? spawn.intervalSec : Infinity
+  /** Multiplier on the field's configured traffic — see {@link GroundSim.setTrafficRate}. */
+  let trafficRate = 1
+  /** Seconds between spawn attempts at the current rate; Infinity when there is no traffic. */
+  const spawnIntervalSec = (): number =>
+    spawn && trafficRate > 0 ? spawn.intervalSec / trafficRate : Infinity
+  /** Cap on simultaneous aircraft at the current rate. Scaling the cap as well as the interval
+   *  is what makes "less traffic" a smaller field rather than the same field filled slower.
+   *  Rate 0 is a cap of 0 in its own right: "no traffic" must not depend on the interval being
+   *  the only thing that says so. */
+  const spawnCap = (): number =>
+    spawn && trafficRate > 0 ? Math.max(1, Math.round(spawn.maxAircraft * trafficRate)) : 0
+  let nextSpawnAt = spawnIntervalSec()
 
   // Deterministic beacon-code assignment for IFR clearances (4-digit octal).
   let squawkSeq = 0
@@ -2482,7 +2493,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
 
   function trySpawn(): void {
     if (!spawn || !spawnRng) return
-    if (fleet.length >= spawn.maxAircraft) return
+    if (fleet.length >= spawnCap()) return
     // The class is chosen before the stand, because what an aircraft is decides where it parks.
     // Picking a stand first and then an identity would put freighters on jet bridges in
     // proportion to how many jet bridges the field has.
@@ -2557,7 +2568,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         if (i >= 0) fleet.splice(i, 1)
       }
       if (time >= nextSpawnAt) {
-        nextSpawnAt = time + (spawn?.intervalSec ?? Infinity)
+        nextSpawnAt = time + spawnIntervalSec()
         trySpawn()
       }
       detectConflicts()
@@ -2627,6 +2638,19 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     dispatch,
     runway: () => runway ?? null,
     approach: () => approachNow(),
+    trafficRate() {
+      return trafficRate
+    },
+    setTrafficRate(rate: number): void {
+      if (!Number.isFinite(rate) || rate < 0) {
+        throw new Error(`traffic rate ${rate}: expected a finite multiplier ≥ 0`)
+      }
+      trafficRate = rate
+      // Restart the countdown from now. Otherwise a rate change waits out the interval already
+      // pending — turning traffic off would still let one more aircraft through, and turning it
+      // up would take the old interval to show any effect at all.
+      nextSpawnAt = time + spawnIntervalSec()
+    },
     setRunway(next: ActiveRunway): DispatchResult {
       // A runway change is coordinated, not thrown. Anything already committed to the runway —
       // on it, or on short final above it — has to finish first; the controller stops the flow,

@@ -452,3 +452,43 @@ describe('focus request', () => {
     expect(c.takeFocus()).toBe('init1')
   })
 })
+
+describe('traffic level', () => {
+  /** Run the controller's sim for `seconds` and report how many aircraft were ever on the
+   *  field — the whole loop, on the real spawn path, not a hand-built fixture. */
+  function seenOver(c: ReturnType<typeof createGroundController>, seconds: number): number {
+    const seen = new Set<string>()
+    for (let i = 0; i < seconds * 2; i += 1) {
+      c.sim.step(0.5)
+      for (const a of c.sim.snapshot().aircraft) seen.add(a.id)
+    }
+    return seen.size
+  }
+
+  it('starts at the field\'s own rate', () => {
+    expect(createGroundController().trafficRate()).toBe(1)
+  })
+
+  it('honours a starting rate, so a saved level survives a reload', () => {
+    expect(createGroundController({ trafficRate: 0.35 }).trafficRate()).toBe(0.35)
+  })
+
+  it('ignores a nonsense starting rate rather than breaking the field', () => {
+    expect(createGroundController({ trafficRate: Number.NaN }).trafficRate()).toBe(1)
+  })
+
+  it('turning traffic off stops new arrivals but keeps the ones being worked', () => {
+    const c = createGroundController()
+    const before = c.sim.snapshot().aircraft.length
+    expect(before).toBeGreaterThan(0)
+    c.setTrafficRate(0)
+    expect(seenOver(c, 600)).toBe(before)
+    expect(c.notice()).toMatch(/traffic off/i)
+  })
+
+  it('generates less traffic at LOW than at the default', () => {
+    const low = createGroundController({ trafficRate: 0.35 })
+    const normal = createGroundController()
+    expect(seenOver(low, 900)).toBeLessThan(seenOver(normal, 900))
+  })
+})
