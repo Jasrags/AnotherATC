@@ -72,6 +72,19 @@ function expedite(controller: GroundController, item: StripItem): MenuCommand {
   }
 }
 
+/** "Cross runway 27" — gated on the same runway-clear predicate the sim refuses with, and
+ *  labelled with the reason when it is closed, exactly like the line-up and takeoff beside it.
+ *  Tower's version says "no delay" on the air; that distinction lives in the phraseology, not
+ *  here, so both positions offer the same button. */
+function crossRunway(controller: GroundController, item: StripItem, runwayBusy: boolean): MenuCommand {
+  if (runwayBusy) return { key: 'cross', label: 'Cross runway — runway busy', action: { kind: 'soon' } }
+  return {
+    key: 'cross',
+    label: 'Cross runway',
+    action: { kind: 'run', run: () => controller.dispatch({ type: 'crossRunway', aircraftId: item.id }) },
+  }
+}
+
 export function commandsFor(controller: GroundController, item: StripItem, aircraft: StripItem[]): MenuCommand[] {
   const cmds = [...phaseCommandsFor(controller, item, aircraft)]
   const stand = reassignStand(controller, item)
@@ -153,6 +166,9 @@ function phaseCommandsFor(controller: GroundController, item: StripItem, aircraf
       }
     }
 
+    // Not yet built anywhere on the runway — see docs/atc-positions.md §5, which calls this out
+    // as the gap with the largest footprint, since it is half of the crossing exchange.
+    const holdPosition: MenuCommand = { label: 'Hold position', action: { kind: 'soon' } }
     // A stationary occupant (lined up or crossing) blocks a line-up; a rolling departure doesn't.
     // Traffic on short final blocks both — you can't put anything under a landing aircraft.
     const runwayBlockedForLineup = aircraft.some(
@@ -171,13 +187,34 @@ function phaseCommandsFor(controller: GroundController, item: StripItem, aircraf
         : { key: 'takeoff', label: 'Cleared for takeoff', action: { kind: 'run', run: () => send({ type: 'clearedForTakeoff', aircraftId: id }) } }
 
     if (item.status === 'lineUpWait') {
-      return [takeoff, { label: 'Hold position', action: { kind: 'soon' } }]
+      return [takeoff, holdPosition]
     }
     if (item.status === 'holdShort') {
+      // A transit is holding short to *cross*, not to depart: Local Control owns the runway for
+      // both, but they are different operations and it gets the crossing vocabulary only.
+      // Anything else here would offer to line it up on a runway it has no business using.
+      if (!item.holdingForTakeoff) {
+        return [crossRunway(controller, item, runwayBlockedForLineup), holdPosition]
+      }
       const lineup: MenuCommand = runwayBlockedForLineup
         ? { key: 'lineup', label: 'Line up and wait — runway busy', action: { kind: 'soon' } }
         : { key: 'lineup', label: 'Line up and wait', action: { kind: 'run', run: () => send({ type: 'lineUpAndWait', aircraftId: id }) } }
-      return [lineup, takeoff, { label: 'Hold position', action: { kind: 'soon' } }]
+      return [lineup, takeoff, holdPosition]
+    }
+    // Tower-owned and no longer holding short: a crossing it cleared and now has to give back.
+    // Offered while the aircraft is still on the runway too — that is the real "when clear of
+    // the runway, contact ground", and issuing it early is what keeps the crossing moving.
+    if (item.intent !== 'arrival') {
+      return [
+        item.handoffPending
+          ? { key: 'gnd', label: 'Sent to ground — awaiting clear', action: { kind: 'soon' } }
+          : {
+              key: 'gnd',
+              label: item.onRunway ? 'When clear of the runway, contact ground' : 'Contact ground',
+              action: { kind: 'run', run: () => send({ type: 'contactGround', aircraftId: id }) },
+            },
+        expedite(controller, item),
+      ]
     }
     // Defensive net: today a Tower-owned aircraft is only ever holdShort / lineUpWait /
     // departing (departing is handled above), so this is unreachable — but if the sim grows a
@@ -195,8 +232,16 @@ function phaseCommandsFor(controller: GroundController, item: StripItem, aircraf
         { label: 'Hold position', action: { kind: 'soon' } },
       ]
     }
+    // Both real options, and the choice is the controller's: clear it across on this frequency,
+    // or hand it to Local Control for the crossing (docs/atc-runway-crossing.md §5).
+    const runwayBusy = aircraft.some((o) => o.id !== id && (o.blocksTakeoff || o.onShortFinal))
     return [
-      { label: 'Cross runway', action: { kind: 'run', run: () => send({ type: 'crossRunway', aircraftId: id }) } },
+      crossRunway(controller, item, runwayBusy),
+      {
+        key: 'twr',
+        label: 'Contact tower for crossing',
+        action: { kind: 'run', run: () => send({ type: 'contactTower', aircraftId: id }) },
+      },
       { label: 'Hold position', action: { kind: 'soon' } },
     ]
   }

@@ -142,7 +142,8 @@ describe('commandsFor (strip state machine)', () => {
 
   it('tower takeoff is gated (soon) with a wake countdown when wake separation is owed', () => {
     const { controller } = fakeController()
-    const cmds = commandsFor(controller, strip({ status: 'holdShort', controlledBy: 'tower', wakeHoldSec: 90 }), [])
+    const dep = strip({ status: 'holdShort', controlledBy: 'tower', holdingForTakeoff: true, wakeHoldSec: 90 })
+    const cmds = commandsFor(controller, dep, [])
     const takeoff = cmds.find((c) => c.label.startsWith('Cleared for takeoff'))!
     expect(takeoff.label).toBe('Cleared for takeoff — wake 90s')
     expect(takeoff.action.kind).toBe('soon')
@@ -150,7 +151,7 @@ describe('commandsFor (strip state machine)', () => {
 
   it('line up and wait is gated (soon) when a stationary aircraft occupies the runway', () => {
     const { controller } = fakeController()
-    const self = strip({ id: 'a', status: 'holdShort', controlledBy: 'tower' })
+    const self = strip({ id: 'a', status: 'holdShort', controlledBy: 'tower', holdingForTakeoff: true })
     const linedUp = strip({ id: 'b', status: 'lineUpWait', controlledBy: 'tower', onRunway: true })
     const cmds = commandsFor(controller, self, [self, linedUp])
     expect(cmds[0]!.label).toBe('Line up and wait — runway busy')
@@ -159,7 +160,7 @@ describe('commandsFor (strip state machine)', () => {
 
   it('line up and wait is allowed behind a rolling (departing) aircraft', () => {
     const { controller } = fakeController()
-    const self = strip({ id: 'a', status: 'holdShort', controlledBy: 'tower' })
+    const self = strip({ id: 'a', status: 'holdShort', controlledBy: 'tower', holdingForTakeoff: true })
     const rolling = strip({ id: 'b', status: 'departing', controlledBy: 'tower', onRunway: true, blocksTakeoff: true })
     const cmds = commandsFor(controller, self, [self, rolling])
     expect(cmds[0]!.label).toBe('Line up and wait')
@@ -169,8 +170,14 @@ describe('commandsFor (strip state machine)', () => {
   it('holdShort + arrival → cross runway (runs), hold position (soon)', () => {
     const { controller, dispatched } = fakeController()
     const cmds = commandsFor(controller, strip({ status: 'holdShort', intent: 'arrival' }), [])
-    // An arrival can always be sent to a different gate, whatever phase it is in.
-    expect(labels(cmds)).toEqual(['Cross runway', 'Hold position', 'Reassign gate…'])
+    // An arrival can always be sent to a different gate, whatever phase it is in. Ground may
+    // clear the crossing itself or hand it to Tower for it — both are real, so both are offered.
+    expect(labels(cmds)).toEqual([
+      'Cross runway',
+      'Contact tower for crossing',
+      'Hold position',
+      'Reassign gate…',
+    ])
     const cross = cmds[0]!.action
     if (cross.kind === 'run') cross.run()
     expect(dispatched).toEqual([{ type: 'crossRunway', aircraftId: 'a' }])
@@ -180,10 +187,47 @@ describe('commandsFor (strip state machine)', () => {
     const { controller, dispatched } = fakeController()
     // a departure whose route crosses the runway: holdingForTakeoff is false
     const cmds = commandsFor(controller, strip({ status: 'holdShort', intent: 'departure', holdingForTakeoff: false }), [])
+    expect(labels(cmds)).toEqual(['Cross runway', 'Contact tower for crossing', 'Hold position'])
+    const cross = cmds[0]!.action
+    if (cross.kind === 'run') cross.run()
+    expect(dispatched).toEqual([{ type: 'crossRunway', aircraftId: 'a' }])
+
+    // …and the handoff is the other half of the same decision.
+    const toTower = cmds[1]!.action
+    if (toTower.kind === 'run') toTower.run()
+    expect(dispatched.at(-1)).toEqual({ type: 'contactTower', aircraftId: 'a' })
+  })
+
+  it('gives a Tower-owned transit the crossing, never the departure vocabulary', () => {
+    const { controller, dispatched } = fakeController()
+    const transit = strip({ status: 'holdShort', controlledBy: 'tower', holdingForTakeoff: false })
+    const cmds = commandsFor(controller, transit, [])
+    // No line-up, no takeoff: it has no business using the runway, only crossing it.
     expect(labels(cmds)).toEqual(['Cross runway', 'Hold position'])
     const cross = cmds[0]!.action
     if (cross.kind === 'run') cross.run()
     expect(dispatched).toEqual([{ type: 'crossRunway', aircraftId: 'a' }])
+  })
+
+  it('gates a Tower crossing with the same reason a line-up would be gated with', () => {
+    const { controller } = fakeController()
+    const transit = strip({ id: 'a', status: 'holdShort', controlledBy: 'tower', holdingForTakeoff: false })
+    const occupant = strip({ id: 'b', status: 'lineUpWait', controlledBy: 'tower', onRunway: true })
+    const cmds = commandsFor(controller, transit, [transit, occupant])
+    expect(cmds[0]!.label).toBe('Cross runway — runway busy')
+    expect(cmds[0]!.action.kind).toBe('soon')
+  })
+
+  it('hands a Tower-owned crossing back to Ground, deferring while it is still on the runway', () => {
+    const { controller, dispatched } = fakeController()
+    const onRwy = strip({ status: 'taxi', controlledBy: 'tower', onRunway: true })
+    const across = strip({ status: 'taxi', controlledBy: 'tower', onRunway: false })
+    expect(labels(commandsFor(controller, onRwy, []))[0]).toBe('When clear of the runway, contact ground')
+    expect(labels(commandsFor(controller, across, []))[0]).toBe('Contact ground')
+
+    const cmd = commandsFor(controller, across, [])[0]!.action
+    if (cmd.kind === 'run') cmd.run()
+    expect(dispatched).toEqual([{ type: 'contactGround', aircraftId: 'a' }])
   })
 
   it('parked departure without a squawk → deliver clearance', () => {
