@@ -72,6 +72,20 @@ function expedite(controller: GroundController, item: StripItem): MenuCommand {
   }
 }
 
+/** "Hold short of runway 27" — the other half of the crossing exchange. At the line it is the
+ *  answer to a crossing request; before it, a confirmation; and after a crossing clearance the
+ *  aircraft has not acted on, it takes that clearance back. Falls back to the old disabled
+ *  "Hold position" where there is no runway ahead to hold short of, which is the only place the
+ *  placeholder was ever the right words. */
+function holdShort(controller: GroundController, item: StripItem): MenuCommand {
+  if (!item.canHoldShort) return { key: 'holdshort', label: 'Hold position', action: { kind: 'soon' } }
+  return {
+    key: 'holdshort',
+    label: 'Hold short of runway',
+    action: { kind: 'run', run: () => controller.dispatch({ type: 'holdShort', aircraftId: item.id }) },
+  }
+}
+
 /** "Cross runway 27" — gated on the same runway-clear predicate the sim refuses with, and
  *  labelled with the reason when it is closed, exactly like the line-up and takeoff beside it.
  *  Tower's version says "no delay" on the air; that distinction lives in the phraseology, not
@@ -166,8 +180,8 @@ function phaseCommandsFor(controller: GroundController, item: StripItem, aircraf
       }
     }
 
-    // Not yet built anywhere on the runway — see docs/atc-positions.md §5, which calls this out
-    // as the gap with the largest footprint, since it is half of the crossing exchange.
+    // Still a placeholder for an aircraft *on* the runway, where "hold short" is meaningless and
+    // "hold position" is the right words — the one place the stub was never the wrong idea.
     const holdPosition: MenuCommand = { label: 'Hold position', action: { kind: 'soon' } }
     // A stationary occupant (lined up or crossing) blocks a line-up; a rolling departure doesn't.
     // Traffic on short final blocks both — you can't put anything under a landing aircraft.
@@ -194,12 +208,12 @@ function phaseCommandsFor(controller: GroundController, item: StripItem, aircraf
       // both, but they are different operations and it gets the crossing vocabulary only.
       // Anything else here would offer to line it up on a runway it has no business using.
       if (!item.holdingForTakeoff) {
-        return [crossRunway(controller, item, runwayBlockedForLineup), holdPosition]
+        return [crossRunway(controller, item, runwayBlockedForLineup), holdShort(controller, item)]
       }
       const lineup: MenuCommand = runwayBlockedForLineup
         ? { key: 'lineup', label: 'Line up and wait — runway busy', action: { kind: 'soon' } }
         : { key: 'lineup', label: 'Line up and wait', action: { kind: 'run', run: () => send({ type: 'lineUpAndWait', aircraftId: id }) } }
-      return [lineup, takeoff, holdPosition]
+      return [lineup, takeoff, holdShort(controller, item)]
     }
     // Tower-owned and no longer holding short: a crossing it cleared and now has to give back.
     // Offered while the aircraft is still on the runway too — that is the real "when clear of
@@ -228,7 +242,7 @@ function phaseCommandsFor(controller: GroundController, item: StripItem, aircraf
     if (item.holdingForTakeoff) {
       return [
         { label: 'Contact tower', action: { kind: 'run', run: () => send({ type: 'contactTower', aircraftId: id }) } },
-        { label: 'Hold position', action: { kind: 'soon' } },
+        holdShort(controller, item),
       ]
     }
     // Both real options, and the choice is the controller's: clear it across on this frequency,
@@ -241,7 +255,7 @@ function phaseCommandsFor(controller: GroundController, item: StripItem, aircraf
         label: 'Contact tower for crossing',
         action: { kind: 'run', run: () => send({ type: 'contactTower', aircraftId: id }) },
       },
-      { label: 'Hold position', action: { kind: 'soon' } },
+      holdShort(controller, item),
     ]
   }
 
@@ -330,6 +344,10 @@ function phaseCommandsFor(controller: GroundController, item: StripItem, aircraf
   if (item.status === 'taxi' || item.status === 'holding' || item.giveWayTo) {
     cmds.push(expedite(controller, item))
   }
+  // A crossing clearance can be taken back right up until the aircraft is on the pavement —
+  // which is exactly the window an arrival turning up on final lands in. (Aircraft already at
+  // the line returned from the hold-short branch above and never reach here.)
+  if (item.canHoldShort) cmds.push(holdShort(controller, item))
   // Contact tower is deliberately not offered here: it becomes available only once the
   // aircraft is holding short of its runway (the 'holdShort' branch above).
   return cmds

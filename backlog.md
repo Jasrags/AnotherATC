@@ -234,8 +234,14 @@ Design note: `docs/atc-tower.md` (one sim, two projections; Ground and Tower own
   a runway incursion issued by the controller. Two discriminators now, because there are two
   questions: `holdingForTakeoff` (is the *destination* the runway?) decides what a handoff is for
   and how it is phrased; `heldRouteCrosses` (does the held route *end* off the pavement?) answers
-  the physical one. _Next: "hold short of runway N" as a real instruction — still a disabled
-  placeholder at every hold-short line, and it is the other half of this exchange (§5)._
+  the physical one. **"Hold short of runway N" now exists too** (§2–6): the taxi clearance
+  carries the clause that makes it readable back, and the instruction is real — a confirmation
+  at the line, the answer to a crossing request, and, before the aircraft is on the pavement, the
+  way to **take a crossing clearance back**. That last one is the counterpart to "cancel takeoff
+  clearance", and the lever the incursion alert most wants when an arrival appears on final in
+  the seconds after a crossing was cleared. _Next: the reason belongs on the air with it —
+  "hold short runway 27, traffic on a three mile final" — which needs refusals to become
+  transmissions rather than controller-facing notices._
 - 💭 **Ramp Control** — a third layer after Ground at large hubs (airline/airport-run, not FAA).
   Deferred: adds a frequency without adding a decision until gate conflicts + pushback contention
   exist (see Turnaround).

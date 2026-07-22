@@ -28,6 +28,7 @@ function strip(over: Partial<StripItem> = {}): StripItem {
     incursion: false,
     expedite: false,
     canExpedite: true,
+    canHoldShort: false,
     waitingForStand: null,
     destStandOccupied: false,
     standOptions: [],
@@ -372,6 +373,50 @@ describe('commandsFor (strip state machine)', () => {
     const { controller } = fakeController()
     const cmds = commandsFor(controller, strip({ status: 'taxi', giveWayTo: 'UAL2' }), [])
     expect(labels(cmds)).toContain('Continue taxi')
+  })
+})
+
+describe('commandsFor — hold short of runway N', () => {
+  it('replaces the old "Hold position" stub at the line, and dispatches', () => {
+    const { controller, dispatched } = fakeController()
+    const atLine = strip({ status: 'holdShort', intent: 'departure', holdingForTakeoff: true, canHoldShort: true })
+    const cmds = commandsFor(controller, atLine, [])
+    const hs = cmds.find((c) => c.key === 'holdshort')!
+    expect(hs.label).toBe('Hold short of runway')
+    if (hs.action.kind === 'run') hs.action.run()
+    expect(dispatched).toEqual([{ type: 'holdShort', aircraftId: 'a' }])
+  })
+
+  it('keeps the disabled stub where there is no runway ahead to hold short of', () => {
+    // On the runway, "hold short" is meaningless and "hold position" is the right words —
+    // the one place the placeholder was never the wrong idea.
+    const { controller } = fakeController()
+    const atLine = strip({ status: 'holdShort', holdingForTakeoff: true, canHoldShort: false })
+    const hs = commandsFor(controller, atLine, []).find((c) => c.key === 'holdshort')!
+    expect(hs.label).toBe('Hold position')
+    expect(hs.action.kind).toBe('soon')
+  })
+
+  it('offers it to a taxiing aircraft, which is how a crossing clearance is taken back', () => {
+    const { controller, dispatched } = fakeController()
+    const rolling = strip({ status: 'taxi', canHoldShort: true })
+    const cmds = commandsFor(controller, rolling, [])
+    const hs = cmds.find((c) => c.key === 'holdshort')!
+    expect(hs.action.kind).toBe('run')
+    if (hs.action.kind === 'run') hs.action.run()
+    expect(dispatched).toEqual([{ type: 'holdShort', aircraftId: 'a' }])
+  })
+
+  it('is absent from a taxiing aircraft with no runway on its route', () => {
+    const { controller } = fakeController()
+    const cmds = commandsFor(controller, strip({ status: 'taxi', canHoldShort: false }), [])
+    expect(cmds.find((c) => c.key === 'holdshort')).toBeUndefined()
+  })
+
+  it('is offered to a Tower-owned transit at the line, beside the crossing', () => {
+    const { controller } = fakeController()
+    const transit = strip({ status: 'holdShort', controlledBy: 'tower', holdingForTakeoff: false, canHoldShort: true })
+    expect(labels(commandsFor(controller, transit, []))).toEqual(['Cross runway', 'Hold short of runway'])
   })
 })
 

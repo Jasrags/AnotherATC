@@ -27,6 +27,7 @@ function strip(over: Partial<StripItem> = {}): StripItem {
     incursion: false,
     expedite: false,
     canExpedite: true,
+    canHoldShort: false,
     waitingForStand: null,
     destStandOccupied: false,
     standOptions: [],
