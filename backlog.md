@@ -93,12 +93,19 @@ The core ground-control loop. Ordered roughly by priority.
   pairing it was written for. `SpawnConfig.gates`/`identity` are *replaced* by `fleets`, not sat
   beside them, so there is one source of truth for who parks where. End-to-end test flies the
   whole thing: land → roll out → contact ground → taxi → hold short → cross → park.
+  **Per-fleet servicing is now in** (2026-07-22): `SpawnFleet.servicing` overrides the field's
+  profile, and the aircraft carries its fleet so it is serviced as what it is — including after a
+  turnaround, when the spawner is long out of the picture. KSAN has three tempos: airline (fuel
+  45s the long pole), cargo (**freight** 68s — freighters are the field's Heavies *and* they park
+  across the runway, so time on stand is pressure on the crossing), GA (fuel 16s, preflight 9s —
+  traffic that appears, pushes and goes). No UI work: the strip already drew one bar per service.
+  The profile is on the *fleet* rather than the field because it is a fact about the aircraft —
+  a light single needs fuel and nothing else at any airport in the world.
   _Next: play it. Also — commuter stands 11–14 and West/Island W2–W4 are south, so they carry no
-  crossing and have no fleet yet; and **servicing is still one global profile**, so a Cessna on
-  the GA ramp waits out a full airline turnaround — 45s fuel, catering, cabin — before it may
-  push. `SpawnFleet` has no servicing field; threading one through is the natural next step, and
-  the one place "what an aircraft is decides what happens to it" is not yet honoured. (Raised
-  independently in review, which is why it is written down rather than left as a nicety.)_
+  crossing and have no fleet yet. Deferred deliberately: a **quick-turn** (arrival → same
+  aircraft's next departure) should be shorter than an originating departure, and a widebody
+  should take longer than a narrowbody **within** one fleet — both are second axes on this one,
+  and the fleet is the coarse handle. See the aircraft-types discussion._
 - ✅ **HS1 hotspot** — a hot spot is not geometry the sim can derive: it is somewhere real pilots
   and controllers have repeatedly got confused, published because history says so, and the only
   honest thing a simulation can do with that is **watch harder there**. Inside a shared hot spot

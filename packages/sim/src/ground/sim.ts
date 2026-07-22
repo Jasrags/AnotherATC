@@ -70,6 +70,10 @@ export interface AircraftInit {
   /** Where this aircraft ultimately wants to go (runway for departures, gate for arrivals). */
   goalPoint?: Point
   gate?: string
+  /** Which traffic class this aircraft belongs to ({@link SpawnFleet.kind}). Decides what
+   *  happens to it on stand — see {@link SpawnFleet.servicing}. Omitted for hand-authored
+   *  aircraft and the dev sandbox, which fall back to the field's own profile. */
+  fleet?: string
 }
 
 /** A gate/stand the spawner can use. */
@@ -110,6 +114,17 @@ export interface SpawnFleet {
   gates: readonly GateSlot[]
   /** Produces a callsign/type for one aircraft of this fleet. */
   identity: (rng: Rng) => { callsign: string; type: string; wake: WakeCategory }
+  /**
+   * What this fleet's aircraft need done before they can push back. Omit to use the field's
+   * own {@link GroundSimOptions.servicing}.
+   *
+   * Here rather than on the field because it is a fact about the *aircraft*, not the airport:
+   * a light single needs fuel and nothing else at any airport in the world, and a freighter is
+   * loading freight wherever it is parked. One global profile made a Cessna wait out an airline
+   * catering truck — the last place "what an aircraft is decides what happens to it" was not
+   * honoured, having already decided where it parks and what it does to the wake matrix.
+   */
+  servicing?: ServicingConfig
 }
 
 export interface SpawnConfig {
@@ -440,6 +455,10 @@ interface Internal
   groundPending: boolean
   /** Parallel ground services still counting down while parked at the gate (empty when none). */
   services: { kind: string; total: number; remaining: number }[]
+  /** The traffic class this aircraft belongs to ({@link SpawnFleet.kind}), or null when it came
+   *  from no fleet. Internal for now: it decides what happens to the aircraft on stand, and
+   *  nothing outside the sim has asked which fleet a strip belongs to. */
+  fleet: string | null
   /** Undirected edge (key) the reservation is currently making this aircraft hold short of, or null. */
   blockedEdge: string | null
   /** Id of the aircraft it is being held *for* — the contender that won the edge. Named as well
@@ -825,7 +844,8 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       speedLimits: [],
       vacated: false,
       groundPending: false,
-      services: (init.intent ?? 'departure') === 'departure' ? freshServices() : [],
+      fleet: init.fleet ?? null,
+      services: (init.intent ?? 'departure') === 'departure' ? servicesFor(init.fleet ?? null) : [],
       blockedEdge: null,
       blockedBy: null,
       heldSec: 0,
@@ -2774,8 +2794,10 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
   /** A fresh set of ground services, as a departure gets on the stand. Declared rather than
    *  assigned: the seeded fleet is built during construction, before a `const` here would be
    *  initialised. */
-  function freshServices(): { kind: string; total: number; remaining: number }[] {
-    return servicing ? servicing.services.map((s) => ({ kind: s.kind, total: s.sec, remaining: s.sec })) : []
+  function servicesFor(fleetKind: string | null): { kind: string; total: number; remaining: number }[] {
+    const own = fleetKind === null ? undefined : spawn?.fleets.find((f) => f.kind === fleetKind)?.servicing
+    const profile = own ?? servicing
+    return profile ? profile.services.map((s) => ({ kind: s.kind, total: s.sec, remaining: s.sec })) : []
   }
 
   /**
@@ -2823,7 +2845,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     // told clears it — so the new flight would sit on the stand looking freshly arrived and
     // silently refuse to move, held for an instruction nobody gave it.
     ac.giveWayTo = null
-    ac.services = freshServices()
+    ac.services = servicesFor(ac.fleet)
     return true
   }
 
@@ -2910,6 +2932,9 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         airborne: intent === 'arrival',
         intent,
         gate: slot.ref,
+        // What it is, carried with it: the aircraft is serviced as its own class from here on,
+        // including after a turnaround, when the spawner is long out of the picture.
+        fleet: traffic.kind,
         goalPoint:
           intent === 'departure' ? (runway?.departureStart ?? spawn.departureTarget) : slot.point,
       }),

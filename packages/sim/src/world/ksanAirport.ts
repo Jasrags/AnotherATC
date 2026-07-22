@@ -6,8 +6,14 @@ import type { ServicingConfig } from '../ground/sim'
 import type { ActiveRunway, RunwayLayout } from '../ground/runway'
 import type { WakeCategory } from '../ground/types'
 
-/** Pre-push ground services, run in parallel (game seconds). Fueling is the long pole, so it
- *  sets when pushback unlocks; the shorter services finish earlier. Tuned for surface pacing. */
+/**
+ * Pre-push ground services, run in parallel (game seconds). Fueling is the long pole, so it
+ * sets when pushback unlocks; the shorter services finish earlier. Tuned for surface pacing.
+ *
+ * This is the *airline* turnaround, and the field's default. The other two fleets state their
+ * own below: what an aircraft needs before it can leave is a fact about the aircraft, and a
+ * single profile had a Cessna waiting on a catering truck.
+ */
 const SERVICING: ServicingConfig = {
   services: [
     { kind: 'fuel', sec: 45 },
@@ -15,6 +21,25 @@ const SERVICING: ServicingConfig = {
     { kind: 'catering', sec: 28 },
     { kind: 'water', sec: 20 },
     { kind: 'cabin', sec: 13 },
+  ],
+}
+
+/** A freighter is loading freight — that is the long pole, and it is longer than an airliner's
+ *  fuel. No cabin, no catering, nobody to board. Freighters are also this field's Heavies and
+ *  they park across the runway, so time on stand is pressure on the crossing, not just a clock. */
+const CARGO_SERVICING: ServicingConfig = {
+  services: [
+    { kind: 'freight', sec: 68 },
+    { kind: 'fuel', sec: 38 },
+  ],
+}
+
+/** A light single takes fuel and a walk-round. It is on the ramp for a fraction of a turnaround
+ *  and should feel like it: traffic that appears, pushes and goes. */
+const GA_SERVICING: ServicingConfig = {
+  services: [
+    { kind: 'fuel', sec: 16 },
+    { kind: 'preflight', sec: 9 },
   ],
 }
 
@@ -158,12 +183,14 @@ export const KSAN: Airport = {
       weight: 2,
       gates: standsAsGates(KSAN_SURFACE, (s) => NORTH_RAMP.has(s.ref)),
       identity: cargoIdentity,
+      servicing: CARGO_SERVICING,
     },
     {
       kind: 'ga',
       weight: 2,
       gates: standsAsGates(KSAN_SURFACE, (s) => GA_RAMP.has(s.ref)),
       identity: gaIdentity,
+      servicing: GA_SERVICING,
     },
   ],
   servicing: SERVICING,

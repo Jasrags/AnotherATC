@@ -173,6 +173,7 @@ export function createAirportGame(airport: Airport, seed = 1, runwayIdent?: stri
         ...(slot.headingDeg !== undefined ? { heading: slot.headingDeg } : {}),
         intent: 'departure' as const,
         gate: slot.ref,
+        fleet: home.kind,
         goalPoint: departureTarget,
       }
     })
