@@ -215,6 +215,19 @@ Design note: `docs/atc-tower.md` (one sim, two projections; Ground and Tower own
   (see Cross-cutting systems) — the arrival procedure's transmissions are now all visible in the TWR
   bay. Still open: wake spacing on final, arrival sequence numbers, a player-issued go-around,
   hold-short during rollout, ATIS/weather line.
+- ⬜ **Slice 3e — Tower has no crossing vocabulary.** Once a departure is handed off, its
+  hold-short menu is *line up and wait* / *cleared for takeoff* / hold — there is no **cross
+  runway** on Tower's frequency at all. The handoff is therefore one-way in practice: an
+  aircraft whose plan changes after it is handed off (a runway change, a different intersection,
+  or simply a handoff issued too early) is stranded holding short with no instruction that gets
+  it across, and the only way out is back through Ground. This is a *menu* gap, not a missing
+  mechanic — `crossRunway` has no position gate in the sim, so it would be accepted from Tower
+  today, and `blocksRunway` already gates a crossing exactly as it gates a line-up or a takeoff.
+  Needs: **Cross runway** in the Tower hold-short branch, gated and labelled with the reason like
+  its neighbours; a decision on whether Ground's own **Cross runway** stays direct or becomes a
+  request Tower approves (the hold-short item under Ground already carries "require Tower
+  coordination" as its next step, and Local Control owning the surface is the real-world
+  argument for it); and phraseology that tells the two apart on the transcript.
 - 💭 **Ramp Control** — a third layer after Ground at large hubs (airline/airport-run, not FAA).
   Deferred: adds a frequency without adding a decision until gate conflicts + pushback contention
   exist (see Turnaround).
@@ -359,6 +372,17 @@ is switched on.
 - ✅ Mobile: pinch-zoom / touch pan / tap-select, responsive stacked layout, LAN dev hosting
 - ⬜ Label density control (show major spines when zoomed out, exits when zoomed in) + collision avoidance
 - ✅ **Zoom-to-fit + off-screen traffic** — **FIT** button / `f` frames the airport *and* all traffic (`fitPoints` takes arbitrary world points, so it generalizes to climb-outs and TRACON). The final approach course is drawn as the extended centerline with 1-nm range ticks, and airborne traffic outside the viewport gets an edge chevron labelled callsign + range. _Next: scale bar / range rings._
+- ⬜ **Bug: a click on open ground silently re-clears the selected aircraft.** With an aircraft
+  selected, *any* click that misses a target counts as a taxi clearance: the raw world point is
+  dispatched as `taxiTo`, and `goalNodeFor` snaps it to the nearest graph node with no distance
+  limit. A click on the grass, the bay, or empty space well off the field therefore re-routes the
+  aircraft to whichever node happens to be closest — and does it silently, superseding whatever
+  clearance it was running along with any give-way, expedite or diversion memory attached to it.
+  Nothing about the click looks like issuing a clearance, which is exactly why it reads as the
+  aircraft changing its mind on its own. Needs a proximity gate (a click beyond some distance
+  from routable pavement is a deselect or a no-op, not a clearance) and visible confirmation when
+  one *is* issued — the route builder's hover preview is the model to copy. Same root cause as
+  the raw-click destinations noted under Tech debt.
 - ⬜ Scale bar / range rings
 - ⬜ Pan/zoom clamping (don't lose the airport off-screen)
 - ✅ Runway turnoffs drawn along their real geometry for the selected arrival, assigned one emphasized
