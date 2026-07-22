@@ -181,6 +181,11 @@ export interface GroundAircraft {
    *  so anything that sets a new speed ends it. Separation still caps it: hurrying is not
    *  permission to run into anyone. */
   expedite: boolean
+  /** The charted hot spot this aircraft is currently inside, or null. Inside one, traffic is
+   *  called as converging while it is still a few hundred feet apart — a hot spot is somewhere
+   *  the field's own diagram says to watch harder, and watching harder is all the sim can do
+   *  with that. */
+  hotspot: string | null
   /** Callsign of the traffic this aircraft has been told to give way to, or null. */
   giveWayTo: string | null
   /** Designator of the stand this aircraft is holding for because someone is still on it, or
@@ -224,6 +229,9 @@ export interface GroundSnapshot {
   readbackCaught: number
   /** Runway conflicts developing right now, most severe first. Empty is the normal case. */
   incursions: readonly RunwayIncursion[]
+  /** Charted hot spots holding two or more aircraft right now, in charted order. One aircraft
+   *  in a hot spot is just an aircraft; two is the situation the chart is warning about. */
+  busyHotspots: readonly string[]
 }
 
 /** Outcome of a dispatched command: accepted, or refused with a controller-facing reason. */

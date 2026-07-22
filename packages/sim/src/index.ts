@@ -13,6 +13,7 @@ export type {
   Bounds,
   Point,
   LatLon,
+  Hotspot,
 } from './world/types'
 
 export { createGroundSim, APPROACH_SPEED_KT } from './ground/sim'
@@ -51,6 +52,7 @@ export { buildRunwayExits, buildRunwayIntersections, chooseExit } from './ground
 export type { RunwayExit, RunwayIntersection } from './ground/runwayExits'
 export type { RunwayGuard } from './ground/runwayGuard'
 export { detectIncursions } from './ground/incursion'
+export { hotspotAt, busyHotspots, HOTSPOT_CONFLICT_FACTOR } from './ground/hotspot'
 export type { RunwayIncursion, IncursionKind, IncursionSeverity, RunwayUse } from './ground/incursion'
 export type {
   GroundAircraft,

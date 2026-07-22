@@ -1,5 +1,5 @@
 import { createRng, type Rng } from '../random'
-import type { Point } from '../world/types'
+import type { Hotspot, Point } from '../world/types'
 import type {
   ControllerPosition,
   PushbackOption,
@@ -28,6 +28,7 @@ import {
 import { wakeSeparationSec, WAKE_TIME_SCALE } from './wake'
 import { onRunway, splitRouteAtRunway, type RunwayGuard } from './runwayGuard'
 import { detectIncursions, type RunwayIncursion, type RunwayUse } from './incursion'
+import { busyHotspots, hotspotAt, HOTSPOT_CONFLICT_FACTOR } from './hotspot'
 import {
   finalFix,
   glideAltitudeFt,
@@ -136,6 +137,9 @@ export interface ServicingConfig {
 export interface GroundSimOptions {
   graph?: TaxiGraph
   guard?: RunwayGuard
+  /** Charted incursion hot spots. Omit for a field whose diagram publishes none — the sim then
+   *  behaves exactly as it did before they existed. */
+  hotspots?: readonly Hotspot[]
   spawn?: SpawnConfig
   servicing?: ServicingConfig
   /** Published controller frequencies, quoted in handoff phraseology ("contact tower 118.3").
@@ -440,6 +444,7 @@ interface Internal
  */
 export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimOptions = {}): GroundSim {
   const { graph, guard, spawn, servicing, frequencies, readback, turnaround } = opts
+  const hotspots = opts.hotspots ?? []
   const stands = opts.stands ?? []
   /** The runway direction in use. Mutable: an airport changes configuration. */
   let runway: ActiveRunway | undefined = opts.runway
@@ -671,6 +676,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       conflict: false,
       runwayAuth: null,
       incursion: false,
+      hotspot: null,
       path,
       leg: 0,
       targetSpeed: init.targetSpeed,
@@ -1298,15 +1304,28 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     return d <= GIVEWAY_WATCH_NM ? 0 : Infinity // hold only once it's actually near
   }
 
+  /** The charted hot spot an aircraft is currently inside, or null. */
+  function hotspotOf(ac: Internal): string | null {
+    return hotspots.length === 0 || ac.airborne ? null : hotspotAt([ac.x, ac.y], hotspots)
+  }
+
   function detectConflicts(): void {
-    for (const ac of fleet) ac.conflict = false
+    for (const ac of fleet) {
+      ac.conflict = false
+      ac.hotspot = hotspotOf(ac)
+    }
     for (let i = 0; i < fleet.length; i += 1) {
       for (let j = i + 1; j < fleet.length; j += 1) {
         const a = fleet[i]
         const b = fleet[j]
         // Neither a takeoff roll nor an aircraft on final is a surface (taxi) conflict.
         if (a?.departing || b?.departing || a?.airborne || b?.airborne) continue
-        if (a && b && Math.hypot(a.x - b.x, a.y - b.y) < CONFLICT_NM) {
+        if (!a || !b) continue
+        // Inside a shared hot spot the call comes earlier — that is the entire behaviour a
+        // charted hot spot asks for. Elsewhere it is the ordinary nose-to-nose distance.
+        const shared = a.hotspot !== null && a.hotspot === b.hotspot
+        const limit = shared ? CONFLICT_NM * HOTSPOT_CONFLICT_FACTOR : CONFLICT_NM
+        if (Math.hypot(a.x - b.x, a.y - b.y) < limit) {
           a.conflict = true
           b.conflict = true
         }
@@ -2553,6 +2572,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         readbackErrors,
         readbackCaught,
         incursions,
+        busyHotspots: busyHotspots(fleet.map((a) => a.hotspot), hotspots),
         aircraft: fleet.map((ac) => ({
           id: ac.id,
           callsign: ac.callsign,
@@ -2581,6 +2601,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
           handoffPending: ac.groundPending,
           conflict: ac.conflict,
           incursion: ac.incursion,
+          hotspot: ac.hotspot,
           // Derived, never stored: "expediting" *is* "the target speed is the expedite speed".
           // Held as its own flag it went stale the moment any other clearance reset the speed —
           // crossing, lining up, rolling — and the strip claimed an expedite that had ended,
