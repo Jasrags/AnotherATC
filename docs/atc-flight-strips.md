@@ -55,6 +55,10 @@ Ground Control
 
 ## Controller Mode Details
 
+> Summarized here at the level the flight strip needs. For the full **who owns what** split
+> between Ground and Tower — including the parts this game does not model yet, such as vehicle
+> movement and emergency authority — see `docs/atc-positions.md`.
+
 ### Clearance Delivery
 - Issues full IFR clearance before pushback: route, initial altitude, squawk code, departure frequency
 - Assigns SID (Standard Instrument Departure) if applicable
