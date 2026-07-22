@@ -103,6 +103,10 @@ export interface PhraseContext {
   /** Designator of the runway this aircraft's clearance stops short of, or null. The clause a
    *  taxi clearance has to carry, and which the procedure makes mandatory to read back. */
   holdingShortOf: string | null
+  /** Why this aircraft is being held, worded for the air ("traffic on a 3 mile final"), or null
+   *  when nothing is in the way. A cause, not a clearance — it is transmitted with the
+   *  instruction and deliberately absent from the read-back. */
+  holdReason: string | null
 }
 
 /** A controller instruction and the pilot's correct read-back of it. */
@@ -166,7 +170,9 @@ export function phraseFor(cmd: GroundCommand, ctx: PhraseContext): Exchange | nu
       )
     }
     case 'holdShort':
-      return say(`hold short of ${rwy}`, `Hold short of ${rwy}`)
+      // The reason rides on the instruction and not on the read-back: a pilot reads back what
+      // they must comply with, and "traffic on a 3 mile final" is why, not what.
+      return say(`hold short of ${rwy}${ctx.holdReason ? `, ${ctx.holdReason}` : ''}`, `Hold short of ${rwy}`)
     case 'hold':
       return say('hold position', 'Hold position')
     case 'resume':

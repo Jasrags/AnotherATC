@@ -136,7 +136,7 @@ status; nothing in this section is a plan, only an honest statement of the diver
 | Ground hands off for the crossing (option B) | ✅ `contactTower` takes a transit — including an arrival, which crosses to reach its gate — and says what the handoff is for. |
 | Tower clears a crossing | ✅ Tower's hold-short menu splits on what the aircraft is there for: a transit gets **Cross runway** and not the departure vocabulary, gated on the same runway-clear predicate the sim refuses with. |
 | "No delay" as a distinct instruction | ✅ Tower's crossing clearance carries it; Ground's does not. (`expedite` remains the separate, stronger instruction for an aircraft already moving.) |
-| Hold with a stated reason ("traffic on a 3 mile final") | ⚠️ "Hold short of runway N" is now transmitted, but without the reason. Refusals carry one and the UI surfaces it, as controller-facing text rather than something said on the air. |
+| Hold with a stated reason ("traffic on a 3 mile final") | ✅ The instruction names the traffic it is issued for — an inbound at its range in whole miles, or an occupant on the runway — and says nothing when nothing is in the way. Absent from the read-back: a cause is not a clearance. |
 | Return to Ground after crossing | ✅ "when clear of the runway, contact ground" — armed when issued mid-crossing, applied the moment the aircraft is off the pavement. Nothing is re-routed: a transit is already taxiing its own clearance. |
 | One runway at a time | ➖ Not yet meaningful: KSAN is single-runway. It becomes real at the first intersecting-runway field (backlog: second airport). |
 | Lights on when crossing | ➖ Not modelled; no aircraft lighting state exists. |

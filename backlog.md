@@ -276,20 +276,23 @@ Design note: `docs/atc-tower.md` (one sim, two projections; Ground and Tower own
   (go-around, touchdown, handoff, expired give-way) stops being repeatable. Opt-in
   `readback: { errorRate, seed }`; **the running game passes no config, so nothing is ever
   misheard** — see *Gaming the game* below for why and what turning it on entails.
-- ⬜ **A refusal should be a transmission, not a tooltip.** The sim already knows *why* it says
-  no — every `DispatchResult` carries a controller-facing reason ("runway occupied", "wake
-  turbulence — 40s behind Heavy", "gate 39 occupied by SWA12"), and the HUD flashes it. But the
-  real exchange is on the air and *names the reason to the pilot*: "hold short runway 27,
-  **traffic on a three mile final**"; "cancel takeoff clearance, hold position". Today the pilot
-  is never told anything, so the transcript records a conversation with half of it missing, and
-  the reason is a UI affordance rather than something that happened in the world.
-  Needs: a refusal path through `phraseFor` (a refused command has no `Exchange` today — only
-  accepted ones are logged, deliberately, so this is a real change to that rule); a decision on
-  *which* refusals are spoken (a controller does not read the sim's internal reasons aloud —
-  "unknown aircraft" is a bug, not a transmission); and the reason attached to the instruction
-  that carries it rather than to the refusal, since "hold short, traffic on final" is an
-  *accepted* hold-short with a cause. Surfaced by the crossing work — see Tower Slice 3e and
-  `docs/atc-runway-crossing.md` §6, where Tower's denial is quoted with its reason.
+- ✅ **Instructions carry their cause** (this item was originally filed as *"a refusal should be
+  a transmission, not a tooltip"* — that framing was wrong, see below). `holdShort` now transmits
+  the traffic it is being issued for: *"hold short of runway 27, traffic on a 3 mile final"*,
+  or *"traffic on the runway"*, or nothing at all when nothing is in the way — no invented
+  reasons. The cause rides on the **instruction** and is deliberately absent from the read-back:
+  a pilot reads back what they must comply with, and the reason is *why*, not *what*.
+  **Why refusals are not transmitted:** in this game the player *is* the controller. When the sim
+  refuses "cleared for takeoff — runway busy", a real controller would not say anything — they
+  would look at the scope and simply not issue it. Transmitting "unable" would be the controller
+  talking to themselves. The HUD notice is already the right channel, because it *is* the
+  controller's own situational awareness rather than a radio call. So the rule that only accepted
+  commands are logged stands, and was never the problem.
+- ⬜ **The rest of the missing context** (same shape, different instructions). `docs/atc-operations.md`
+  Part C lists them: wind on takeoff and landing clearances, traffic advisories on a landing
+  clearance, the wake-turbulence caution, "plan Charlie for your exit". All are accepted
+  instructions missing the context the real ones carry — worth one pass rather than piecemeal.
+  Needs a wind model (there isn't one) before the first two.
 - 🚧 **Squawk / transponder codes** — beacon code assigned at clearance delivery (deterministic 4-digit octal), shown on the strip. Note the strip shows the code the aircraft is *squawking*, which is not the issued code when the pilot misheard it — comparing the two is the read-back game. _Next: link the code to a radar target once airborne (feeds TRACON radar contact)._
 - ✅ **Stand occupancy** — a stand is a resource, not a label. `standOccupied(ref)` reports who is
   physically on the mark; an aircraft cleared to an occupied stand is *not refused* — the

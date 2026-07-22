@@ -502,6 +502,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       // The runway this aircraft's clearance stops short of, if any — the clause that makes a
       // taxi clearance readable back as the procedure requires.
       holdingShortOf: ac.held !== null ? rwy : null,
+      holdReason: holdReasonFor(ac),
       onRunway: onRunwayNow(ac),
     }
   }
@@ -916,6 +917,23 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     // Either the route still stops at a runway, or it did until a crossing clearance released
     // it — and that clearance has not been used yet, since it is not on the pavement.
     return ac.held !== null || ac.runwayAuth === 'issued'
+  }
+
+  /**
+   * Why an aircraft is being held short, worded for the air — or null when nothing is in the
+   * way and the instruction stands on its own.
+   *
+   * The same traffic the runway-clear predicate finds, said out loud. A hold with no stated
+   * cause is half a transmission: it tells the pilot what to do and nothing about the situation
+   * they are in, and the situation is what makes it make sense.
+   */
+  function holdReasonFor(ac: Internal): string | null {
+    const occupant = fleet.find((o) => o !== ac && occupiesForTakeoff(o))
+    if (occupant) return 'traffic on the runway'
+    const inbound = fleet.find((o) => o !== ac && o.airborne && o.intent === 'arrival' && o.threshold)
+    if (!inbound) return null
+    // Whole miles, as it is said: "a 3 mile final", never "a 2.7 mile final".
+    return `traffic on a ${Math.max(1, Math.round(finalDistance(inbound)))} mile final`
   }
 
   /** Put a released crossing route back on hold at the runway, undoing a crossing clearance the

@@ -161,6 +161,47 @@ describe('hold short — on the air', () => {
     expect(said[1]!.text).toMatch(/hold short of runway \d/i)
   })
 
+  it('states the reason when there is one — the traffic the hold is for', () => {
+    // "[Callsign], hold short runway 15, traffic on a 3 mile final" — the instruction the
+    // procedure quotes (docs/atc-runway-crossing.md §6). Holding an aircraft without saying
+    // why is half a transmission.
+    const inbound: AircraftInit = {
+      id: 'inb', callsign: 'inb', type: 'B738', wake: 'M',
+      path: [[-4, 0], [0, 0]], targetSpeed: 140, airborne: true, intent: 'arrival', goalPoint: [1, -0.4],
+    }
+    const sim = createGroundSim([transit('x'), inbound], { guard, runway: KSAN_RUNWAYS['27'] })
+    expect(until(sim, () => A(sim, 'x').holdShort && A(sim, 'inb').finalNm <= 3)).toBe(true)
+
+    const before = sim.snapshot().comms.length
+    sim.dispatch({ type: 'holdShort', aircraftId: 'x' })
+    const said = sim.snapshot().comms.slice(before)
+    expect(said[0]!.text).toMatch(/hold short of runway \d+, traffic on a \d+ mile final/i)
+    // The pilot reads back the instruction, not the reason: a cause is not a clearance.
+    expect(said[1]!.text).toMatch(/hold short of runway \d+/i)
+    expect(said[1]!.text).not.toMatch(/traffic/i)
+  })
+
+  it('names traffic on the runway when that is what the hold is for', () => {
+    const sim = createGroundSim([transit('x'), transit('y')], { guard, runway: KSAN_RUNWAYS['27'] })
+    expect(until(sim, () => A(sim, 'x').holdShort && A(sim, 'y').holdShort)).toBe(true)
+    sim.dispatch({ type: 'crossRunway', aircraftId: 'y' })
+    expect(until(sim, () => A(sim, 'y').onRunway)).toBe(true)
+
+    const before = sim.snapshot().comms.length
+    sim.dispatch({ type: 'holdShort', aircraftId: 'x' })
+    expect(sim.snapshot().comms.slice(before)[0]!.text).toMatch(/traffic on the runway/i)
+  })
+
+  it('says it plainly when nothing is in the way — no invented reason', () => {
+    const sim = createGroundSim([transit('x')], { guard, runway: KSAN_RUNWAYS['27'] })
+    expect(until(sim, () => A(sim, 'x').holdShort)).toBe(true)
+    const before = sim.snapshot().comms.length
+    sim.dispatch({ type: 'holdShort', aircraftId: 'x' })
+    const said = sim.snapshot().comms.slice(before)[0]!.text
+    expect(said).toMatch(/hold short of runway \d+\.$/i)
+    expect(said).not.toMatch(/traffic/i)
+  })
+
   it('leaves it off a clearance that never reaches a runway', () => {
     const noRunway: AircraftInit = {
       id: 'g', callsign: 'g', type: 'B738', wake: 'M',

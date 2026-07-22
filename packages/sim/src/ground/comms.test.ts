@@ -16,6 +16,7 @@ const ctx = (over: Partial<PhraseContext> = {}): PhraseContext => ({
   crossing: false,
   onRunway: false,
   holdingShortOf: null,
+  holdReason: null,
   ...over,
 })
 
@@ -23,6 +24,13 @@ describe('phraseFor — hold short', () => {
   it('names the runway both ways, because the read-back is the point', () => {
     const ex = phraseFor({ type: 'holdShort', aircraftId: 'a' }, ctx())
     expect(ex?.instruction).toBe('SKW412, hold short of runway 27.')
+    expect(ex?.readback).toBe('Hold short of runway 27, SKW412.')
+  })
+
+  it('carries the cause on the instruction but never on the read-back', () => {
+    const ex = phraseFor({ type: 'holdShort', aircraftId: 'a' }, ctx({ holdReason: 'traffic on a 3 mile final' }))
+    expect(ex?.instruction).toBe('SKW412, hold short of runway 27, traffic on a 3 mile final.')
+    // A pilot reads back what they must comply with; the reason is why, not what.
     expect(ex?.readback).toBe('Hold short of runway 27, SKW412.')
   })
 
