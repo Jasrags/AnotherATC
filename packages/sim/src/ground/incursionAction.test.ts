@@ -163,6 +163,32 @@ describe('expedite', () => {
     expect(A(sim, 'x').expedite).toBe(false)
   })
 
+  it('stops reporting an expedite the moment another clearance changes the speed', () => {
+    // crossRunway/line-up/takeoff all reset the target speed. If the flag outlived them the
+    // strip would claim "Expediting" forever on an aircraft taxiing at 15 kt, and the menu
+    // offers no way to take it back.
+    const sim = createGroundSim([crosser('x')], { guard })
+    sim.dispatch({ type: 'expedite', aircraftId: 'x' })
+    expect(A(sim, 'x').expedite).toBe(true)
+    expect(until(sim, () => A(sim, 'x').holdShort)).toBe(true)
+    expect(sim.dispatch({ type: 'crossRunway', aircraftId: 'x' }).ok).toBe(true)
+    expect(A(sim, 'x').expedite).toBe(false)
+    run(sim, 100)
+    expect(A(sim, 'x').groundspeed).toBeLessThanOrEqual(15)
+    expect(A(sim, 'x').expedite).toBe(false)
+  })
+
+  it('refuses a landing rollout, where the speed target is a ceiling and not a floor', () => {
+    // A rollout is braking from approach speed under a solved profile; setting a taxi-speed
+    // target would *cap* it and slow it down. The lever for a slow rollout is an earlier
+    // turnoff, so this refuses rather than quietly doing the opposite of what it says.
+    const sim = createGroundSim([arrival('inb')], { guard })
+    sim.dispatch({ type: 'clearedToLand', aircraftId: 'inb' })
+    expect(until(sim, () => A(sim, 'inb').status === 'rollout')).toBe(true)
+    expect(A(sim, 'inb').canExpedite).toBe(false)
+    expect(sim.dispatch({ type: 'expedite', aircraftId: 'inb' }).ok).toBe(false)
+  })
+
   it('refuses an aircraft with nothing left to run', () => {
     const parked: AircraftInit = { id: 'p', callsign: 'P', type: 'B738', wake: 'M', path: [[1, -0.4]], targetSpeed: 0 }
     const sim = createGroundSim([parked], { guard })

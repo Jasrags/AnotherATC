@@ -305,6 +305,8 @@ interface Internal
     | 'onShortFinal'
     // Derived at snapshot time from the route position, not stored twice.
     | 'canExpedite'
+    // Derived at snapshot time from the target speed, which is what it means.
+    | 'expedite'
     | 'finalNm'
     | 'exitRef'
     | 'vacated'
@@ -623,7 +625,6 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       held,
       pushingBack: false,
       giveWayTo: null,
-      expedite: false,
       squawk: null,
       departing: false,
       lineUpWait: false,
@@ -818,6 +819,23 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
    *  while anyone occupies its surface or is committed on short final above it. */
   function blocksRunway(ac: Internal): boolean {
     return occupiesForTakeoff(ac) || onShortFinal(ac)
+  }
+
+  /**
+   * Whether "expedite" has anything to act on. It is a *taxi* instruction: it raises the speed
+   * the aircraft drives its remaining route at, so it needs a route left to drive and a phase
+   * where target speed is what governs.
+   *
+   * A landing rollout is excluded because there the target speed is a ceiling, not a floor —
+   * the aircraft is braking from approach speed under a solved deceleration profile, and
+   * "expediting" it would *cap* it at taxi speed and slow it down. The lever for a rollout
+   * that is slow to clear is the earlier turnoff (`assignExit`), which already exists. A
+   * pushback is excluded for the same reason in the other direction: hurrying a tug is not a
+   * thing, and the speed there is the push profile's.
+   */
+  function canExpedite(ac: Internal): boolean {
+    if (ac.airborne || ac.rollingOut || ac.departing || ac.pushingBack || ac.lineUpWait) return false
+    return ac.leg < ac.path.length - 1
   }
 
   /** What an aircraft on the runway is doing there, or null when it isn't on it. Ordered by
@@ -1244,7 +1262,6 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     ac.held = held
     ac.dwell = -1
     ac.giveWayTo = null // a fresh clearance supersedes any give-way hold
-    ac.expedite = false // …and an expedite: it applied to the movement it was given for
     ac.pushingBack = false // …and aborts an in-progress pushback,
     ac.pushFacing = null // …including the direction it was being swung toward,
     ac.pushFacingLabel = null
@@ -1756,7 +1773,6 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         return ACCEPTED
       case 'resume':
         ac.giveWayTo = null // "continue taxi" also cancels a give-way hold
-        ac.expedite = false // …and returns an expedited aircraft to a normal taxi
         if (ac.leg < ac.path.length - 1) {
           ac.targetSpeed = TAXI_SPEED_KT
           ac.holding = false
@@ -1793,8 +1809,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         // "Expedite" runs the clearance the aircraft already has, so there has to be one left
         // to run. Refusing here rather than silently accepting keeps the alert honest: if the
         // occupant cannot be hurried, the answer is the go-around instead.
-        if (ac.leg >= ac.path.length - 1) return refused('nothing to expedite — no clearance to run')
-        ac.expedite = true
+        if (!canExpedite(ac)) return refused('nothing to expedite — no clearance to run')
         ac.giveWayTo = null // the opposite instruction — you cannot hurry and wait at once
         ac.targetSpeed = EXPEDITE_SPEED_KT
         ac.holding = false
@@ -2339,8 +2354,12 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
           handoffPending: ac.rollingOut && ac.groundPending,
           conflict: ac.conflict,
           incursion: ac.incursion,
-          expedite: ac.expedite,
-          canExpedite: ac.leg < ac.path.length - 1,
+          // Derived, never stored: "expediting" *is* "the target speed is the expedite speed".
+          // Held as its own flag it went stale the moment any other clearance reset the speed —
+          // crossing, lining up, rolling — and the strip claimed an expedite that had ended,
+          // with no command left in the menu that would take it back.
+          expedite: ac.targetSpeed === EXPEDITE_SPEED_KT,
+          canExpedite: canExpedite(ac),
           giveWayTo: ac.giveWayTo ? (find(ac.giveWayTo)?.callsign ?? null) : null,
           waitingForStand: ac.gate !== null && standHoldCap(ac) === 0 ? ac.gate : null,
           gateBlocked:
