@@ -47,6 +47,31 @@ function reassignStand(controller: GroundController, item: StripItem): MenuComma
   }
 }
 
+/** "Go around" — the half of the runway-incursion answer that moves the aircraft in the air.
+ *  Labelled with the reason when this arrival is the one being landed on top of something, so
+ *  the reason to open the menu is on the menu (as with the gate conflict above). */
+function goAround(controller: GroundController, item: StripItem): MenuCommand {
+  return {
+    key: 'goAround',
+    label: item.incursion ? 'Go around — runway occupied' : 'Go around',
+    action: { kind: 'run', run: () => controller.dispatch({ type: 'goAround', aircraftId: item.id }) },
+  }
+}
+
+/** "Expedite" — the other half: move the aircraft on the ground instead. Offered wherever there
+ *  is a clearance left to run, and named for the job when the aircraft is the one on the runway;
+ *  disabled (rather than hidden) when it cannot be hurried, because "this aircraft cannot get out
+ *  of the way" is exactly what tells you to send the other one around. */
+function expedite(controller: GroundController, item: StripItem): MenuCommand {
+  if (item.expedite) return { key: 'expedite', label: 'Expediting', action: { kind: 'soon' } }
+  if (!item.canExpedite) return { key: 'expedite', label: 'Expedite — nothing to run', action: { kind: 'soon' } }
+  return {
+    key: 'expedite',
+    label: item.incursion ? 'Expedite — clear the runway' : 'Expedite',
+    action: { kind: 'run', run: () => controller.dispatch({ type: 'expedite', aircraftId: item.id }) },
+  }
+}
+
 export function commandsFor(controller: GroundController, item: StripItem, aircraft: StripItem[]): MenuCommand[] {
   const cmds = [...phaseCommandsFor(controller, item, aircraft)]
   const stand = reassignStand(controller, item)
@@ -110,10 +135,10 @@ function phaseCommandsFor(controller: GroundController, item: StripItem, aircraf
                 action: { kind: 'run', run: () => send({ type: 'clearedToLand', aircraftId: id }) },
               },
           exitMenu,
-          { label: 'Go around', action: { kind: 'soon' } },
+          goAround(controller, item),
         ]
       }
-      if (item.status === 'landing') return [exitMenu, { label: 'Go around', action: { kind: 'soon' } }]
+      if (item.status === 'landing') return [exitMenu, goAround(controller, item)]
       if (item.status === 'rollout') {
         // The pilot never switches frequency unprompted. Issued before the aircraft is clear,
         // this is the real "when vacated, contact ground" — it applies the moment it vacates.
@@ -255,6 +280,11 @@ function phaseCommandsFor(controller: GroundController, item: StripItem, aircraf
   }
   if (item.status === 'holding' || item.giveWayTo) {
     cmds.push({ label: 'Continue taxi', action: { kind: 'run', run: () => send({ type: 'resume', aircraftId: id }) } })
+  }
+  // Offered from every phase that has a route under way, not only when it has gone wrong: an
+  // expedite is an ordinary instruction, and one that only appears during an alert is a prompt.
+  if (item.status === 'taxi' || item.status === 'holding' || item.giveWayTo) {
+    cmds.push(expedite(controller, item))
   }
   // Contact tower is deliberately not offered here: it becomes available only once the
   // aircraft is holding short of its runway (the 'holdShort' branch above).

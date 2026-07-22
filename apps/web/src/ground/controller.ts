@@ -86,6 +86,13 @@ export interface StripItem {
   via: string[]
   /** Callsign of the traffic this aircraft is giving way to, or null. */
   giveWayTo: string | null
+  /** Named in a runway incursion — on the runway uncleared, or sharing it with traffic that is
+   *  landing, lining up or rolling. Drives the "clear the runway" framing on its menu. */
+  incursion: boolean
+  /** Already running its clearance at expedite speed. */
+  expedite: boolean
+  /** Has route left to run, so "expedite" has something to act on. The sim's own guard. */
+  canExpedite: boolean
   /** Stand this aircraft is waiting on because someone is still parked there, or null. */
   waitingForStand: string | null
   /** For an inbound arrival not yet parked: its destination stand is already occupied by someone
@@ -361,7 +368,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
     // Range-to-threshold is continuous, so it enters the signature at display precision
     // (0.1 nm ≈ one re-render every ~2.5 s on final) rather than every frame.
     for (const a of acs)
-      nextSig += `|${a.id}:${a.status}:${a.controlledBy}:${a.onRunway ? 'R' : ''}${a.blocksTakeoff ? 'B' : ''}${a.onShortFinal ? 'F' : ''}${a.vacated ? 'V' : ''}${a.handoffPending ? 'H' : ''}:${a.exitRef ?? ''}:${(exitOpts.get(a.id) ?? []).map((e) => e.ref).join('+')}:${vias.get(a.id)!.join('.')}:${a.giveWayTo ?? ''}:${a.waitingForStand ?? ''}:${a.gateBlocked ? 'O' : ''}:${a.squawk ?? ''}:${a.hasInstruction ? 'I' : ''}:${a.wakeHoldSec}:${a.serviceSec}:${a.finalNm.toFixed(1)}`
+      nextSig += `|${a.id}:${a.status}:${a.controlledBy}:${a.onRunway ? 'R' : ''}${a.blocksTakeoff ? 'B' : ''}${a.onShortFinal ? 'F' : ''}${a.vacated ? 'V' : ''}${a.handoffPending ? 'H' : ''}${a.incursion ? 'X' : ''}${a.expedite ? 'E' : ''}${a.canExpedite ? 'C' : ''}:${a.exitRef ?? ''}:${(exitOpts.get(a.id) ?? []).map((e) => e.ref).join('+')}:${vias.get(a.id)!.join('.')}:${a.giveWayTo ?? ''}:${a.waitingForStand ?? ''}:${a.gateBlocked ? 'O' : ''}:${a.squawk ?? ''}:${a.hasInstruction ? 'I' : ''}:${a.wakeHoldSec}:${a.serviceSec}:${a.finalNm.toFixed(1)}`
     if (nextSig === sig) return
     sig = nextSig
     snapshot = {
@@ -392,6 +399,9 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
         finalNm: Math.round(a.finalNm * 10) / 10,
         via: vias.get(a.id)!,
         giveWayTo: a.giveWayTo,
+        incursion: a.incursion,
+        expedite: a.expedite,
+        canExpedite: a.canExpedite,
         waitingForStand: a.waitingForStand,
         destStandOccupied: a.gateBlocked,
         standOptions: standOpts.get(a.id) ?? [],

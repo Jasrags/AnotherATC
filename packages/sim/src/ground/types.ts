@@ -164,6 +164,11 @@ export interface GroundAircraft {
    *  or sharing it with traffic that is landing, lining up or rolling. Unlike {@link conflict}
    *  this is about *authority*, not distance — the two aircraft may be a mile apart. */
   incursion: boolean
+  /** There is route left to run, so an "expedite" has something to act on. The sim's own
+   *  guard, exposed rather than re-derived, so the menu can gate and explain the instruction
+   *  exactly as the sim would refuse it — an aircraft already at the end of its clearance
+   *  cannot be hurried, and the answer to the incursion is the go-around instead. */
+  canExpedite: boolean
   /** Told to expedite: running its current clearance at more than a normal taxi speed. Spent
    *  by the next clearance — an instruction to hurry applies to the movement it was given for.
    *  Separation still caps it: hurrying is not permission to run into anyone. */

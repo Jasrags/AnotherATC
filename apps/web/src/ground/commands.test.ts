@@ -25,6 +25,9 @@ function strip(over: Partial<StripItem> = {}): StripItem {
     finalNm: 0,
     via: [],
     giveWayTo: null,
+    incursion: false,
+    expedite: false,
+    canExpedite: true,
     waitingForStand: null,
     destStandOccupied: false,
     standOptions: [],
@@ -241,10 +244,10 @@ describe('commandsFor (strip state machine)', () => {
     expect(cmds).toEqual([])
   })
 
-  it('taxi departure → taxi-to submenu of destinations, route via, hold, give way (no contact tower until hold short)', () => {
+  it('taxi departure → taxi-to submenu of destinations, route via, hold, give way, expedite (no contact tower until hold short)', () => {
     const { controller, dispatched } = fakeController()
     const cmds = commandsFor(controller, strip({ status: 'taxi' }), [strip({ status: 'taxi' })])
-    expect(labels(cmds)).toEqual(['Taxi to…', 'Route via…', 'Hold position', 'Give way to…'])
+    expect(labels(cmds)).toEqual(['Taxi to…', 'Route via…', 'Hold position', 'Give way to…', 'Expedite'])
 
     const taxiTo = cmds[0]!.action
     expect(taxiTo.kind).toBe('submenu')
@@ -319,18 +322,68 @@ describe('commandsFor (strip state machine)', () => {
   })
 })
 
+describe('commandsFor — expedite', () => {
+  const running = (over: Partial<StripItem> = {}) => strip({ status: 'taxi', ...over })
+
+  it('dispatches an expedite for an aircraft with a clearance still to run', () => {
+    const { controller, dispatched } = fakeController()
+    const cmd = commandsFor(controller, running(), []).find((c) => c.key === 'expedite')!
+    expect(cmd.label).toBe('Expedite')
+    if (cmd.action.kind === 'run') cmd.action.run()
+    expect(dispatched).toEqual([{ type: 'expedite', aircraftId: 'a' }])
+  })
+
+  it('names the job when this is the aircraft sitting on the runway', () => {
+    const { controller } = fakeController()
+    const cmd = commandsFor(controller, running({ incursion: true }), []).find((c) => c.key === 'expedite')!
+    expect(cmd.label).toBe('Expedite — clear the runway')
+  })
+
+  it('says so rather than vanishing when the aircraft cannot be hurried', () => {
+    // "This one cannot get out of the way" is exactly what tells you to send the other one
+    // around, so it has to be visible — a missing item says nothing.
+    const { controller } = fakeController()
+    const cmd = commandsFor(controller, running({ canExpedite: false }), []).find((c) => c.key === 'expedite')!
+    expect(cmd.label).toBe('Expedite — nothing to run')
+    expect(cmd.action.kind).toBe('soon')
+  })
+
+  it('does not offer to expedite an aircraft that already is', () => {
+    const { controller } = fakeController()
+    const cmd = commandsFor(controller, running({ expedite: true }), []).find((c) => c.key === 'expedite')!
+    expect(cmd.label).toBe('Expediting')
+    expect(cmd.action.kind).toBe('soon')
+  })
+
+  it('is not offered to a parked aircraft, which has no clearance under way', () => {
+    const { controller } = fakeController()
+    const cmds = commandsFor(controller, strip({ status: 'parked', gate: null }), [])
+    expect(cmds.find((c) => c.key === 'expedite')).toBeUndefined()
+  })
+})
+
 describe('commandsFor — Tower arrivals', () => {
   const onFinal = (over: Partial<StripItem> = {}) =>
     strip({ status: 'onFinal', controlledBy: 'tower', intent: 'arrival', altitude: 1250, finalNm: 4, ...over })
 
-  it('on final → cleared to land (runs), exit assignment, go around (soon)', () => {
+  it('on final → cleared to land, exit assignment, and a go-around that really goes around', () => {
     const { controller, dispatched } = fakeController()
     const cmds = commandsFor(controller, onFinal(), [])
     expect(labels(cmds)).toEqual(['Cleared to land', 'Exit at…', 'Go around', 'Reassign gate…'])
     const land = cmds[0]!.action
     if (land.kind === 'run') land.run()
     expect(dispatched).toEqual([{ type: 'clearedToLand', aircraftId: 'a' }])
-    expect(cmds[2]!.action.kind).toBe('soon')
+    const around = cmds[2]!.action
+    expect(around.kind).toBe('run')
+    if (around.kind === 'run') around.run()
+    expect(dispatched.at(-1)).toEqual({ type: 'goAround', aircraftId: 'a' })
+  })
+
+  it('names the reason on the go-around when this arrival is the one being landed on top', () => {
+    // The reason to open the menu belongs on the menu, as with the gate conflict.
+    const { controller } = fakeController()
+    const cmds = commandsFor(controller, onFinal({ incursion: true }), [])
+    expect(labels(cmds)[2]).toBe('Go around — runway occupied')
   })
 
   it('lists only the turnoffs the sim says are still makeable', () => {

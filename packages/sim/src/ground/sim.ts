@@ -303,6 +303,8 @@ interface Internal
     | 'onRunway'
     | 'blocksTakeoff'
     | 'onShortFinal'
+    // Derived at snapshot time from the route position, not stored twice.
+    | 'canExpedite'
     | 'finalNm'
     | 'exitRef'
     | 'vacated'
@@ -2338,6 +2340,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
           conflict: ac.conflict,
           incursion: ac.incursion,
           expedite: ac.expedite,
+          canExpedite: ac.leg < ac.path.length - 1,
           giveWayTo: ac.giveWayTo ? (find(ac.giveWayTo)?.callsign ?? null) : null,
           waitingForStand: ac.gate !== null && standHoldCap(ac) === 0 ? ac.gate : null,
           gateBlocked:
