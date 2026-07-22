@@ -10,6 +10,7 @@ import {
   drawRunwayMarkings,
   nearestTaxiwayRef,
   prepareSurface,
+  distanceToNetworkNm,
 } from './render'
 import { COLORS } from './palette'
 import { fitView } from './view'
@@ -556,5 +557,40 @@ describe('runway incursion ring', () => {
     expect(inc!.dash.length).toBeGreaterThan(0)
     expect(conf!.dash).toEqual([])
     expect(inc!.r).toBeGreaterThan(conf!.r)
+  })
+})
+
+describe('distanceToNetworkNm', () => {
+  // The routable network is the taxi graph, not the painted surface: "can I be cleared to
+  // here" and "is there pavement here" are different questions, and the first is the one a
+  // click-to-taxi has to answer.
+  const topo: TaxiTopology = {
+    nodes: [],
+    edges: [
+      { a: 'n1', b: 'n2', geom: [[0, 0], [1, 0]], length: 1, straight: true },
+      { a: 'n2', b: 'n3', geom: [[1, 0], [1, 1]], length: 1, straight: true },
+    ],
+  }
+
+  it('is zero on the network', () => {
+    expect(distanceToNetworkNm(topo, [0.5, 0])).toBeCloseTo(0, 9)
+    expect(distanceToNetworkNm(topo, [1, 0.5])).toBeCloseTo(0, 9)
+  })
+
+  it('measures perpendicular distance to the nearest edge, not to its endpoints', () => {
+    expect(distanceToNetworkNm(topo, [0.5, 0.2])).toBeCloseTo(0.2, 9)
+  })
+
+  it('follows the edge polyline, so a bent edge is not treated as its chord', () => {
+    const bent: TaxiTopology = {
+      nodes: [],
+      edges: [{ a: 'a', b: 'b', geom: [[0, 0], [1, 0], [1, 1]], length: 2, straight: false }],
+    }
+    // The corner point is on the polyline but far off the chord from [0,0] to [1,1].
+    expect(distanceToNetworkNm(bent, [1, 0])).toBeCloseTo(0, 9)
+  })
+
+  it('is Infinity for an empty graph, so a click can never be "near" nothing', () => {
+    expect(distanceToNetworkNm({ nodes: [], edges: [] }, [0, 0])).toBe(Infinity)
   })
 })

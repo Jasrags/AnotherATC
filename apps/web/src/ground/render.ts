@@ -363,6 +363,29 @@ function drawEmas(
   }
 }
 
+/**
+ * Distance (nm) from a point to the nearest routable pavement — the taxi graph itself, walked
+ * along each edge's real polyline rather than its chord.
+ *
+ * The graph is the right question to ask. "Is there pavement here" and "can an aircraft be
+ * cleared to here" are different: apron paint an aircraft cannot be routed onto answers yes to
+ * the first and no to the second, and it is the second that decides whether a click is a
+ * clearance. Infinity when the graph is empty, so nothing is ever "near" nothing.
+ */
+export function distanceToNetworkNm(topology: TaxiTopology, p: Point): number {
+  let best = Infinity
+  for (const e of topology.edges) {
+    for (let i = 1; i < e.geom.length; i += 1) {
+      const a = e.geom[i - 1]
+      const b = e.geom[i]
+      if (!a || !b) continue
+      const d = distToSeg(p[0], p[1], a[0], a[1], b[0], b[1])
+      if (d < best) best = d
+    }
+  }
+  return best
+}
+
 export function distToSeg(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
   const vx = bx - ax
   const vy = by - ay

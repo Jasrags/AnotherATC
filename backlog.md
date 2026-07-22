@@ -372,17 +372,22 @@ is switched on.
 - ✅ Mobile: pinch-zoom / touch pan / tap-select, responsive stacked layout, LAN dev hosting
 - ⬜ Label density control (show major spines when zoomed out, exits when zoomed in) + collision avoidance
 - ✅ **Zoom-to-fit + off-screen traffic** — **FIT** button / `f` frames the airport *and* all traffic (`fitPoints` takes arbitrary world points, so it generalizes to climb-outs and TRACON). The final approach course is drawn as the extended centerline with 1-nm range ticks, and airborne traffic outside the viewport gets an edge chevron labelled callsign + range. _Next: scale bar / range rings._
-- ⬜ **Bug: a click on open ground silently re-clears the selected aircraft.** With an aircraft
-  selected, *any* click that misses a target counts as a taxi clearance: the raw world point is
-  dispatched as `taxiTo`, and `goalNodeFor` snaps it to the nearest graph node with no distance
-  limit. A click on the grass, the bay, or empty space well off the field therefore re-routes the
-  aircraft to whichever node happens to be closest — and does it silently, superseding whatever
-  clearance it was running along with any give-way, expedite or diversion memory attached to it.
-  Nothing about the click looks like issuing a clearance, which is exactly why it reads as the
-  aircraft changing its mind on its own. Needs a proximity gate (a click beyond some distance
-  from routable pavement is a deselect or a no-op, not a clearance) and visible confirmation when
-  one *is* issued — the route builder's hover preview is the model to copy. Same root cause as
-  the raw-click destinations noted under Tech debt.
+- ✅ **Bug: a click on open ground silently re-cleared the selected aircraft.** *Any* click that
+  missed a target counted as a taxi clearance: the raw world point went to `taxiTo`, and
+  `goalNodeFor` snapped it to the nearest graph node with no distance limit — so a click on the
+  grass or the bay re-routed the selection to whichever node happened to be closest, superseding
+  its clearance along with any give-way, expedite or diversion memory. Nothing about clicking
+  empty space looks like issuing a clearance, which is why it read as the aircraft changing its
+  mind on its own. Fixed in two layers: the scope now reads a click as a clearance only when it
+  lands within `CLEARANCE_HIT_PX` of the **routable network** (`distanceToNetworkNm`, walking
+  each graph edge's real polyline — "is there pavement here" and "can an aircraft be routed
+  here" are different questions, and it is the second that decides); off the network a click
+  means what it means with nothing selected, deselect. Underneath, `goalNodeFor` refuses to snap
+  a destination further than `MAX_GOAL_SNAP_NM` (0.25 nm) from the network at all — a backstop
+  deliberately looser than any aiming tolerance, since a stand's stop mark legitimately sits a
+  lead-in line off the nearest node, so no caller can turn a point over the water into a
+  clearance. _Not done: a hover preview of where the clearance would go, the way the route
+  builder previews the taxiway a click would pick._
 - ⬜ Scale bar / range rings
 - ⬜ Pan/zoom clamping (don't lose the airport off-screen)
 - ✅ Runway turnoffs drawn along their real geometry for the selected arrival, assigned one emphasized

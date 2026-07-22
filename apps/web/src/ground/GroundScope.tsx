@@ -22,6 +22,7 @@ import {
   drawSurface,
   nearestTaxiwayRef,
   prepareSurface,
+  distanceToNetworkNm,
 } from './render'
 import { COLORS, DIMS } from './palette'
 import { isTypingTarget } from './keyboard'
@@ -36,6 +37,10 @@ const HIT_PX = 14
 const TAXI_HIT_PX = 26
 /** Pointer movement beyond this (px) counts as a pan, not a click. */
 const DRAG_PX = 4
+/** How near the routable network (px) a click has to land to be read as a taxi clearance rather
+ *  than a deselect. Measured in pixels, not nm, because it is an aiming tolerance: what counts
+ *  as "on the pavement" is what looks like it on screen, at whatever zoom you are working at. */
+const CLEARANCE_HIT_PX = 44
 
 /** Set an element's text only when it changed — avoids re-announcing aria-live regions. */
 function setText(el: HTMLElement, text: string): void {
@@ -316,8 +321,20 @@ export function GroundScope({ controller }: { controller: GroundController }) {
         const ref = nearestTaxiwayRef(airport.surface, wx, wy, TAXI_HIT_PX / view.scale)
         if (ref) controller.addVia(ref)
       } else if (selectedId) {
+        // A click only becomes a taxi clearance when it lands on (or near) pavement the aircraft
+        // could actually be routed to. Without this test *every* miss was a clearance: the raw
+        // point went to `taxiTo`, which snapped it to the nearest graph node however far away
+        // that was, so a click on the grass or the bay silently re-routed the selection — and
+        // took its give-way, expedite and diversion state with it. Nothing about clicking empty
+        // space looks like issuing a clearance, which is why it read as the aircraft changing
+        // its mind on its own. Off the network, a click means what it means with nothing
+        // selected: deselect.
         const [wx, wy] = toWorld(view, sx, sy)
-        controller.dispatch({ type: 'taxiTo', aircraftId: selectedId, dest: [wx, wy] })
+        if (distanceToNetworkNm(controller.topology, [wx, wy]) <= CLEARANCE_HIT_PX / view.scale) {
+          controller.dispatch({ type: 'taxiTo', aircraftId: selectedId, dest: [wx, wy] })
+        } else {
+          controller.select(null)
+        }
       } else {
         controller.select(null)
       }

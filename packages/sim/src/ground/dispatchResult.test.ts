@@ -37,6 +37,36 @@ describe('dispatch result feedback', () => {
     if (!r.ok) expect(r.reason).toMatch(/departure/i)
   })
 
+  it('refuses a destination nowhere near the movement area, rather than snapping to it', () => {
+    // Snapping is unbounded by nature — `nearestNode` always answers — so a point out over the
+    // water used to resolve to whichever node happened to be closest and read back as an
+    // accepted clearance. That is what made a stray click on the scope silently re-route the
+    // selected aircraft.
+    const surface: AirportSurface = {
+      icao: 'T',
+      name: 'T',
+      ref: { lat: 0, lon: 0, elevationFt: 0 },
+      units: 'nm',
+      source: 'x',
+      bounds: { minX: -1, minY: -1, maxX: 2, maxY: 1 },
+      features: [{ kind: 'taxiway', ref: 'A', points: [[0, 0], [1, 0]] }],
+    }
+    const graph = buildTaxiGraph(surface)
+    const taxiing: AircraftInit = {
+      id: 'a', callsign: 'a', type: 'B738', wake: 'M', path: [[0, 0]], targetSpeed: 0, intent: 'departure',
+    }
+    const sim = createGroundSim([taxiing], { graph })
+
+    // On the taxiway: a normal clearance.
+    expect(sim.dispatch({ type: 'taxiTo', aircraftId: 'a', dest: [1, 0] }).ok).toBe(true)
+    // Half a mile off the end of it: nothing to be cleared to.
+    const far = sim.dispatch({ type: 'taxiTo', aircraftId: 'a', dest: [1.5, 0] })
+    expect(far.ok).toBe(false)
+    if (!far.ok) expect(far.reason).toMatch(/no taxi route/i)
+    // …and the refusal left the aircraft's existing clearance alone.
+    expect(sim.routeOf('a').at(-1)).toEqual([1, 0])
+  })
+
   it('refuses crossRunway when not holding short', () => {
     const sim = createGroundSim([dep('a')])
     const r = sim.dispatch({ type: 'crossRunway', aircraftId: 'a' })

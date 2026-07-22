@@ -139,6 +139,10 @@ export interface GroundSimOptions {
 }
 
 const TAXI_ACCEL = 4
+/** How far (nm) from the taxi network a requested destination may be and still be snapped onto
+ *  it. Roughly 1,500 ft: wider than any stand's lead-in, narrow enough that a point out over the
+ *  bay is not quietly turned into a clearance. See {@link withinSnap}. */
+const MAX_GOAL_SNAP_NM = 0.25
 const TAXI_SPEED_KT = 15
 /** Taxi speed (kt) under an "expedite". Faster, but still a speed a jet can hold on pavement
  *  and still subject to every separation cap — hurrying is not permission to run into anyone. */
@@ -1294,6 +1298,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
    */
   function goalNodeFor(dest: Point, from: Point): string | null {
     if (!graph) return null
+    if (!withinSnap(dest)) return null
     if (guard && onRunway(dest, guard)) {
       let seg: (typeof guard.segments)[number] | null = null
       let best = Infinity
@@ -1317,6 +1322,23 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       }
     }
     return graph.nearestNode(dest)
+  }
+
+  /**
+   * Whether a requested destination is close enough to the movement area to be snapped onto it
+   * at all.
+   *
+   * Snapping is unbounded by nature — `nearestNode` always answers — so without a limit a
+   * destination anywhere on earth resolves to *some* node and reads back as an accepted
+   * clearance. A backstop, not an aiming tolerance: it is deliberately far looser than anything
+   * a controller would click, because legitimate destinations include a stand's stop mark,
+   * which sits a lead-in line off the nearest graph node. The UI does its own, tighter test.
+   */
+  function withinSnap(dest: Point): boolean {
+    if (!graph) return false
+    const near = graph.nearestNode(dest)
+    const p = near ? graph.nodePoint(near) : undefined
+    return p !== undefined && dist(p, dest) <= MAX_GOAL_SNAP_NM
   }
 
   /** Route to a destination. Returns false (nothing applied) when there is no graph or
