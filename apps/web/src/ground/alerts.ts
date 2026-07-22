@@ -1,4 +1,4 @@
-import type { IncursionSeverity, RunwayIncursion } from '@anotheratc/sim'
+import type { ControllerPosition, IncursionSeverity, RunwayIncursion } from '@anotheratc/sim'
 
 export interface IncursionAlert {
   /** Severity glyph, rendered decoratively (aria-hidden) so it is not read out as "no entry
@@ -60,6 +60,14 @@ export const AWAITING_ADVISORY_SEC = 30
 export interface AwaitingItem {
   callsign: string
   awaitingSec: number
+  /** Which position owes it something — and therefore *what* it is owed. */
+  controlledBy: ControllerPosition
+}
+
+/** What this aircraft is waiting to be told. Tower's job with a landed arrival that has stopped
+ *  clear of the runway is the frequency change; everything else is waiting to be taxied. */
+export function awaitingLabel(item: AwaitingItem): string {
+  return item.controlledBy === 'tower' ? 'AWAITING HANDOFF' : 'AWAITING TAXI'
 }
 
 export interface AwaitingAlert {
@@ -102,7 +110,7 @@ export function awaitingAlert(aircraft: readonly AwaitingItem[]): AwaitingAlert 
   const lead = waiting[0]
   if (!lead) return NOTHING
   const named = waiting.slice(0, AWAITING_NAMED)
-  const head = `${lead.callsign} AWAITING TAXI ${awaitingClock(lead.awaitingSec)}`
+  const head = `${lead.callsign} ${awaitingLabel(lead)} ${awaitingClock(lead.awaitingSec)}`
   const rest = named.slice(1).map((a) => `${a.callsign} ${awaitingClock(a.awaitingSec)}`)
   const more = waiting.length > named.length ? [`+${waiting.length - named.length} more`] : []
   const others = waiting.length - 1
@@ -110,6 +118,6 @@ export function awaitingAlert(aircraft: readonly AwaitingItem[]): AwaitingAlert 
     text: `⧗ ${[head, ...rest, ...more].join(' · ')}`,
     // Named, not counted, for the one you should answer first — and a plain count for the rest,
     // because a list of callsigns read aloud is not something anyone acts on.
-    announcement: `${lead.callsign} awaiting taxi${others > 0 ? `, and ${others} other aircraft waiting` : ''}.`,
+    announcement: `${lead.callsign} ${awaitingLabel(lead).toLowerCase()}${others > 0 ? `, and ${others} other aircraft waiting` : ''}.`,
   }
 }

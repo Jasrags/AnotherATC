@@ -211,15 +211,19 @@ export interface GroundAircraft {
    * Whole seconds this aircraft has been stopped with no clearance to run — waiting on the
    * controller, not on traffic, a gate or a runway. 0 when it is not.
    *
-   * The case it exists for is an arrival that has checked in with Ground after landing: it has
-   * been issued nothing, it cannot move until it is, and it holds its turnoff for as long as it
-   * sits there — silently, looking exactly like an aircraft that is fine. A departure left on
-   * the alley after its pushback is the same failure and counts the same way.
+   * The case it exists for is an arrival that has landed and stopped clear of the runway: it
+   * has been issued nothing, it cannot move until it is, and it holds its turnoff for as long
+   * as it sits there — silently, looking exactly like an aircraft that is fine. It counts
+   * whichever position owns it, because being forgotten on Tower's frequency (the handoff never
+   * came) and on Ground's (the taxi never came) are the same aircraft and the same mistake. A
+   * departure left on the alley after its pushback is that mistake too.
    *
    * Deliberately *not* counted: a departure on its stand (waiting for a clearance the strip
-   * already shows), anything holding short of a runway or giving way (it has a clearance, it is
-   * waiting on something real), and anything told to hold position — an instruction is not
-   * neglect. Whole seconds rather than raw time so a UI can key a re-render on it.
+   * already shows), anything holding short of a runway, lined up, or giving way (it is waiting
+   * on something real, and all three are unmissable already — own badge, own place in the
+   * takeoff queue, sitting at or on the runway), and anything told to hold position, since an
+   * instruction is not neglect. Whole seconds rather than raw time so a UI can key a re-render
+   * on it.
    */
   awaitingSec: number
   /** Parallel ground services on a parked departure (fuel/cargo/…); empty when none apply. */

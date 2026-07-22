@@ -860,8 +860,15 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
    * {@link GroundAircraft.awaitingSec} for what this is and what it deliberately excludes.
    */
   function awaitingInstruction(ac: Internal): boolean {
-    if (ac.controlledBy !== 'ground' || !ac.holding) return false
-    if (ac.airborne || ac.rollingOut || ac.departing || ac.pushingBack) return false
+    // Whichever position owns it. An arrival that has vacated and stopped, still on Tower's
+    // frequency because the handoff was never issued, is the same aircraft with the same
+    // problem as one that has checked in with Ground and been told nothing since — it is
+    // simply forgotten one step earlier. `rollingOut` is not excluded for that reason: a
+    // rollout that has come to a stop has finished rolling out in every sense but the flag.
+    if (!ac.holding) return false
+    // Lined up on the runway waiting for a takeoff clearance is also waiting on the controller,
+    // and is deliberately not counted — see the exclusions in `GroundAircraft.awaitingSec`.
+    if (ac.airborne || ac.departing || ac.pushingBack || ac.lineUpWait) return false
     // On a stand — arrived and dwelling, or a departure waiting for its clearance. Both are
     // already said elsewhere, and neither is holding anything up.
     if (ac.dwell >= 0 || atGate(ac) || ac.path.length < 2) return false
@@ -1909,6 +1916,11 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     const before = situationBefore(ac)
     const result = applyCommand(command)
     if (result.ok && ac) {
+      // Anything said to an aircraft answers it. The clock is "how long since anyone spoke to
+      // this one", so a handoff resets it even though the aircraft is now waiting for the next
+      // instruction — otherwise the aircraft you have just dealt with keeps its old number and
+      // goes on being reported as neglected.
+      ac.awaitingSec = 0
       if (command.type === 'sayAgain') {
         logCorrection(ac, issuedBy)
         return result

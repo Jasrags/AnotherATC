@@ -118,3 +118,66 @@ describe('awaitingSec', () => {
     expect(B().awaitingSec).toBeGreaterThan(30)
   })
 })
+
+describe('awaitingSec covers the handoff, not just the taxi', () => {
+  const sim = () =>
+    createGroundSim([inbound('a')], { graph, guard, runway: game.runway, stands: game.stands })
+  const A = (s: ReturnType<typeof sim>) => s.snapshot().aircraft.find((x) => x.id === 'a')!
+
+  it('counts an arrival stopped clear of the runway that Tower never handed off', () => {
+    // The controller forgot the aircraft one step earlier than before: it landed, took its
+    // turnoff, stopped — and is still sitting on Tower's frequency having been told nothing.
+    // Waiting on the controller is waiting on the controller, whichever position they are on.
+    const s = sim()
+    s.dispatch({ type: 'clearedToLand', aircraftId: 'a' })
+    for (let i = 0; i < 6000 && A(s).status !== 'rollout'; i += 1) s.step(0.1)
+    for (let i = 0; i < 3000 && A(s).groundspeed > 0; i += 1) s.step(0.1)
+
+    const stopped = A(s)
+    expect(stopped.controlledBy).toBe('tower') // never handed off
+    expect(stopped.onRunway).toBe(false) // it cleared the runway on its own, as it must
+    for (let i = 0; i < 600; i += 1) s.step(0.1)
+    expect(A(s).awaitingSec).toBeGreaterThan(55)
+  })
+
+  it('stops counting the moment Tower makes the handoff, and starts again on the far side', () => {
+    const s = sim()
+    s.dispatch({ type: 'clearedToLand', aircraftId: 'a' })
+    for (let i = 0; i < 6000 && A(s).status !== 'rollout'; i += 1) s.step(0.1)
+    for (let i = 0; i < 3000 && A(s).groundspeed > 0; i += 1) s.step(0.1)
+    for (let i = 0; i < 400; i += 1) s.step(0.1)
+    expect(A(s).awaitingSec).toBeGreaterThan(30)
+
+    s.dispatch({ type: 'contactGround', aircraftId: 'a' })
+    s.step(0.1)
+    expect(A(s).controlledBy).toBe('ground')
+    expect(A(s).awaitingSec).toBe(0) // answered — the clock restarts on the new frequency
+    for (let i = 0; i < 400; i += 1) s.step(0.1)
+    expect(A(s).awaitingSec).toBeGreaterThan(30) // …and it is waiting again, for its taxi
+  })
+
+  it('does not count a departure holding short or lined up — those are unmissable already', () => {
+    // Both are waiting on the controller too, but both have their own badge, their own place in
+    // the takeoff queue, and are sitting at or on the runway. This signal is for the aircraft
+    // that is easy to forget, and adding the ones you cannot miss would drown it.
+    const inits = createAirportGame(KSAN, 1).inits
+    const s = createGroundSim(inits, { graph, guard, runway: game.runway, stands: game.stands })
+    const id = inits[0]!.id
+    const B = () => s.snapshot().aircraft.find((x) => x.id === id)!
+    s.dispatch({ type: 'clearance', aircraftId: id })
+    s.dispatch({ type: 'pushback', aircraftId: id })
+    for (let i = 0; i < 3000 && B().status === 'pushback'; i += 1) s.step(0.1)
+    s.dispatch({ type: 'taxiToGoal', aircraftId: id })
+    for (let i = 0; i < 20000 && B().status !== 'holdShort'; i += 1) s.step(0.1)
+    expect(B().status).toBe('holdShort')
+    for (let i = 0; i < 600; i += 1) s.step(0.1)
+    expect(B().awaitingSec).toBe(0)
+
+    s.dispatch({ type: 'contactTower', aircraftId: id })
+    s.dispatch({ type: 'lineUpAndWait', aircraftId: id })
+    for (let i = 0; i < 3000 && B().status !== 'lineUpWait'; i += 1) s.step(0.1)
+    for (let i = 0; i < 600; i += 1) s.step(0.1)
+    expect(B().status).toBe('lineUpWait')
+    expect(B().awaitingSec).toBe(0)
+  })
+})

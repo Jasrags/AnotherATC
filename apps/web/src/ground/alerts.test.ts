@@ -72,7 +72,11 @@ describe('incursionAlert', () => {
 })
 
 describe('awaitingAlert', () => {
-  const wait = (callsign: string, awaitingSec: number) => ({ callsign, awaitingSec }) as AwaitingItem
+  const wait = (
+    callsign: string,
+    awaitingSec: number,
+    controlledBy: AwaitingItem['controlledBy'] = 'ground',
+  ): AwaitingItem => ({ callsign, awaitingSec, controlledBy })
 
   it('says nothing when nobody has been left waiting long enough to mention', () => {
     expect(awaitingAlert([])).toEqual({ text: '', announcement: '' })
@@ -102,6 +106,13 @@ describe('awaitingAlert', () => {
     expect(at(45)).toBe('AAL1 awaiting taxi, and 1 other aircraft waiting.')
     expect(at(46)).toBe(at(45))
     expect(at(300)).toBe(at(45))
+  })
+
+  it('says what the aircraft is actually waiting for, which depends on who owns it', () => {
+    // Still Tower's: it has landed and stopped clear of the runway, and what it is owed is the
+    // frequency change — telling the controller to taxi it would be telling them the wrong job.
+    expect(awaitingAlert([wait('AAL1', 45, 'tower')]).text).toBe('⧗ AAL1 AWAITING HANDOFF 0:45')
+    expect(awaitingAlert([wait('AAL1', 45, 'tower')]).announcement).toBe('AAL1 awaiting handoff.')
   })
 
   it('announces again when a different aircraft becomes the one to answer', () => {
