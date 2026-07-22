@@ -45,6 +45,7 @@ export const COLORS = {
   labelArea: '#6f8493', // muted blue-gray for ramp/terminal area names
   labelHalo: 'rgba(4, 8, 13, 0.92)',
   hotspot: '#e0932f', // charted hot-spot orange
+  hotspotBusy: '#ff7a1a', // …and the same spot with two aircraft in it: brighter, and filled
   // Admin routing-graph overlay (debug layer, deliberately off-palette from gameplay).
   graphEdge: '#7c5cff', // contracted taxiway run
   graphEdgeFlag: '#ff4d94', // long dead-straight run → eyeball vs. the chart

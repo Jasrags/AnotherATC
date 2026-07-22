@@ -7,6 +7,7 @@ import {
   polylineMidpoint,
   distToSeg,
   drawGraphOverlay,
+  drawHotspots,
   drawRunwayMarkings,
   nearestTaxiwayRef,
   prepareSurface,
@@ -592,5 +593,59 @@ describe('distanceToNetworkNm', () => {
 
   it('is Infinity for an empty graph, so a click can never be "near" nothing', () => {
     expect(distanceToNetworkNm({ nodes: [], edges: [] }, [0, 0])).toBe(Infinity)
+  })
+})
+
+describe('hot spots', () => {
+  /** Records stroked/filled arcs with the style and dash in force. */
+  function tracing() {
+    const arcs: { r: number; style: string; dash: number[]; filled: boolean }[] = []
+    let pending: { r: number } | null = null
+    let dash: number[] = []
+    const ctx = {
+      canvas: { width: 400, height: 400 },
+      save() {}, restore() {}, translate() {}, rotate() {},
+      setLineDash(d: number[]) { dash = d },
+      beginPath() { pending = null },
+      closePath() {},
+      moveTo() {}, lineTo() {},
+      arc(_x: number, _y: number, r: number) { pending = { r } },
+      rect() {}, fillText() {}, strokeText() {}, measureText: () => ({ width: 10 }),
+      fill() { if (pending) arcs.push({ r: pending.r, style: ctx.fillStyle, dash: [...dash], filled: true }) },
+      stroke() { if (pending) arcs.push({ r: pending.r, style: ctx.strokeStyle, dash: [...dash], filled: false }) },
+      fillStyle: '', strokeStyle: '', lineWidth: 0, font: '', textAlign: '', textBaseline: '',
+      shadowColor: '', shadowBlur: 0, lineJoin: '', lineCap: '', globalAlpha: 1,
+    }
+    return { ctx: ctx as unknown as CanvasRenderingContext2D, arcs }
+  }
+
+  const withHotspot: AirportSurface = {
+    ...surfaceOf([]),
+    hotspots: [{ id: 'HS1', label: 'HS 1', point: [0, 0], radiusNm: 0.05 }],
+  }
+  const view = fitView({ minX: -1, minY: -1, maxX: 1, maxY: 1 }, 400, 400)
+
+  it('draws a quiet dashed ring when nothing is happening there', () => {
+    const { ctx, arcs } = tracing()
+    drawHotspots(ctx, view, withHotspot, [])
+    const ring = arcs.find((a) => a.style === COLORS.hotspot)!
+    expect(ring).toBeDefined()
+    expect(ring.dash.length).toBeGreaterThan(0) // a standing caution, not an event
+    expect(arcs.some((a) => a.filled)).toBe(false)
+  })
+
+  it('fills and brightens the ring once the sim says two aircraft are in it', () => {
+    const { ctx, arcs } = tracing()
+    drawHotspots(ctx, view, withHotspot, ['HS1'])
+    const solid = arcs.find((a) => a.style === COLORS.hotspotBusy && !a.filled)!
+    expect(solid).toBeDefined()
+    expect(solid.dash).toEqual([]) // solid: something is happening now
+    expect(arcs.some((a) => a.filled && a.style === COLORS.hotspotBusy)).toBe(true)
+  })
+
+  it('leaves other hot spots alone', () => {
+    const { ctx, arcs } = tracing()
+    drawHotspots(ctx, view, withHotspot, ['HS9'])
+    expect(arcs.every((a) => a.style !== COLORS.hotspotBusy)).toBe(true)
   })
 })

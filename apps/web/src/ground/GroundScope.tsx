@@ -389,7 +389,7 @@ export function GroundScope({ controller }: { controller: GroundController }) {
         drawAreaLabels(ctx, view, prep)
         drawGates(ctx, view, prep)
         drawRunwayMarkings(ctx, view, airport.layout)
-        drawHotspots(ctx, view, airport.surface)
+        drawHotspots(ctx, view, airport.surface, snap.busyHotspots)
         drawApproachCourse(ctx, view, controller.approach())
         if (draft) {
           drawRouteDraft(ctx, view, airport.surface, draft.via)
@@ -490,8 +490,12 @@ export function GroundScope({ controller }: { controller: GroundController }) {
           el.hidden = hide
         }
         if (alertRef.current) {
-          const inConflict = snap.aircraft.filter((a) => a.conflict).length
-          setText(alertRef.current, inConflict > 0 ? `⚠ CONFLICT` : '')
+          const inConflict = snap.aircraft.filter((a) => a.conflict)
+          // Name the hot spot when the conflict is in one. "Where" is most of what you need to
+          // act, and a charted hot spot is the one place the scope can say it in one token.
+          const where = [...new Set(inConflict.map((a) => a.hotspot).filter(Boolean))].sort()
+          const at = where.length > 0 ? ` · ${where.join(' ')}` : ''
+          setText(alertRef.current, inConflict.length > 0 ? `⚠ CONFLICT${at}` : '')
         }
         // Gate conflicts, field-wide: inbound arrivals heading for stands somebody is still
         // parked on. Deliberately a separate, quieter line — a separation conflict is happening

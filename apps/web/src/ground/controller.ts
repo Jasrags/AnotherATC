@@ -254,11 +254,16 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
   const { destinations } = game
   // Dev mode starts empty: no seeded aircraft, no auto-spawner, no servicing gate.
   const frequencies = { ground: airport.comms.ground, tower: airport.comms.tower }
+  // Charted hot spots come from the field's own surface data — the sim watches harder inside
+  // them. Handed to the sandbox too: a hot spot is a property of the airport, not of the game
+  // mode, and the sandbox is where you go to stage exactly the situation it warns about.
+  const hotspots = airport.surface.hotspots ?? []
   const sim = dev
-    ? createGroundSim([], { graph, guard, runway: game.runway, frequencies, stands: game.stands })
+    ? createGroundSim([], { graph, guard, hotspots, runway: game.runway, frequencies, stands: game.stands })
     : createGroundSim(game.inits, {
         graph,
         guard,
+        hotspots,
         spawn: game.spawn,
         servicing: game.servicing,
         runway: game.runway,

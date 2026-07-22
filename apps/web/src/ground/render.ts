@@ -649,22 +649,46 @@ export function drawGates(ctx: Ctx, v: View, prep: PreparedSurface): void {
 }
 
 /** Charted runway-incursion hot spots (dashed orange circle + id). */
-export function drawHotspots(ctx: Ctx, v: View, surface: AirportSurface): void {
+/**
+ * Charted hot spots. Dashed and quiet by default — it is a standing caution, not an event —
+ * and filled and brighter for the ones holding two or more aircraft right now, which is the
+ * situation the chart exists to warn about. `busy` comes from the sim, so the circle and the
+ * conflict ring inside it can never disagree about whether anything is happening.
+ */
+export function drawHotspots(
+  ctx: Ctx,
+  v: View,
+  surface: AirportSurface,
+  busy: readonly string[] = [],
+): void {
   if (!surface.hotspots) return
   for (const hs of surface.hotspots) {
+    const active = busy.includes(hs.id)
     const [sx, sy] = toScreen(v, hs.point[0], hs.point[1])
     const r = Math.max(hs.radiusNm * v.scale, 10)
-    ctx.strokeStyle = COLORS.hotspot
-    ctx.lineWidth = 1.6
-    ctx.setLineDash([5, 4])
+    const color = active ? COLORS.hotspotBusy : COLORS.hotspot
+    ctx.save()
+    if (active) {
+      // A wash rather than a solid: it must read behind the targets, never over them.
+      ctx.globalAlpha = 0.13
+      ctx.fillStyle = color
+      ctx.beginPath()
+      ctx.arc(sx, sy, r, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.globalAlpha = 1
+    }
+    ctx.strokeStyle = color
+    ctx.lineWidth = active ? 2.2 : 1.6
+    ctx.setLineDash(active ? [] : [5, 4])
     ctx.beginPath()
     ctx.arc(sx, sy, r, 0, Math.PI * 2)
     ctx.stroke()
+    ctx.restore()
     ctx.setLineDash([])
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
     ctx.font = '700 10px ui-monospace, "SF Mono", Menlo, monospace'
-    label(ctx, hs.id, sx, sy - r - 8, COLORS.hotspot)
+    label(ctx, hs.id, sx, sy - r - 8, color)
     ctx.textAlign = 'left'
   }
 }
