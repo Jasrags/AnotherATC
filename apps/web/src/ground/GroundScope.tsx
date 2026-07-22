@@ -26,7 +26,7 @@ import {
 import { COLORS, DIMS } from './palette'
 import { isTypingTarget } from './keyboard'
 import { FIXED_DT, tick } from './simClock'
-import { incursionBanner } from './alerts'
+import { incursionAlert } from './alerts'
 import type { GroundAircraft } from '@anotheratc/sim'
 
 /** Click must land within this many px of a target to select it. */
@@ -52,6 +52,7 @@ export function GroundScope({ controller }: { controller: GroundController }) {
   const alertRef = useRef<HTMLDivElement>(null)
   const gateAlertRef = useRef<HTMLDivElement>(null)
   const incursionRef = useRef<HTMLDivElement>(null)
+  const incursionSrRef = useRef<HTMLDivElement>(null)
   const devRef = useRef<HTMLDivElement>(null)
 
   // Admin routing-graph overlay. The render loop reads a ref (no effect re-run); the state
@@ -447,8 +448,16 @@ export function GroundScope({ controller }: { controller: GroundController }) {
         }
         // Runway incursions top the alert stack: a conflict is two aircraft too close, this is
         // two aircraft on a runway, which is the one that ends the game rather than the shift.
-        if (incursionRef.current) {
-          setText(incursionRef.current, incursionBanner(snap.incursions))
+        // The visible line and the announced one are different strings — see alerts.ts — so the
+        // range can tick on screen without interrupting a screen reader every tenth of a mile.
+        if (incursionRef.current && incursionSrRef.current) {
+          const alert = incursionAlert(snap.incursions)
+          setText(incursionRef.current, alert.text)
+          setText(incursionSrRef.current, alert.announcement)
+          // Only pulse when there is something to pulse about, and only in the alert's colour
+          // when it is an alert — an advisory is amber and still, like the gate line.
+          incursionRef.current.classList.toggle('is-alert', alert.severity === 'alert')
+          incursionRef.current.classList.toggle('is-advisory', alert.severity === 'advisory')
         }
         if (alertRef.current) {
           const inConflict = snap.aircraft.filter((a) => a.conflict).length
@@ -638,7 +647,11 @@ export function GroundScope({ controller }: { controller: GroundController }) {
       </div>
       {controller.dev && <div ref={devRef} className="hud hud-dev mono" aria-live="polite" />}
       <div ref={statusRef} className="hud hud-tr mono" />
-      <div ref={incursionRef} className="hud hud-incursion mono" role="alert" />
+      {/* Two nodes for one alert: the visible line carries the closing range and repaints
+          constantly, so it is hidden from assistive tech; the off-screen twin carries the
+          stable sentence and is the thing that actually gets announced. */}
+      <div ref={incursionRef} className="hud hud-incursion mono" aria-hidden="true" />
+      <div ref={incursionSrRef} className="sr-only" role="alert" />
       <div ref={alertRef} className="hud hud-alert mono" role="alert" />
       {/* Advisory, not an alarm: polite rather than role="alert", so it never cuts across the
           separation conflict above it. */}

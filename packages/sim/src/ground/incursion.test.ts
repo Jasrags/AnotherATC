@@ -47,7 +47,13 @@ describe('runway incursion detection', () => {
 
     const alert = detectIncursions([crossing, near])
     expect(alert[0]!.severity).toBe('alert')
-    expect(alert[0]!.message).toContain('1.0 nm final')
+    // The range lives in its own field, never in the sentence: `message` has to stay stable
+    // while the aircraft closes, or a consumer cannot tell a new situation from a new tenth
+    // of a mile. Advisory and alert say exactly the same words; only the severity differs.
+    expect(alert[0]!.message).toBe(advisory[0]!.message)
+    expect(alert[0]!.message).not.toMatch(/nm/)
+    expect(alert[0]!.finalNm).toBeCloseTo(1.0, 9)
+    expect(advisory[0]!.finalNm).toBeCloseTo(2.5, 9)
   })
 
   it('ignores an arrival that is still a long way out, or has no landing clearance', () => {

@@ -41,8 +41,13 @@ export interface RunwayIncursion {
   occupantId: string
   /** The traffic it conflicts with; null when the occupant is simply uncleared. */
   conflictId: string | null
-  /** Controller-facing one-liner, e.g. "SWA12 on the runway — DAL8 landing, 1.0 nm final". */
+  /** Controller-facing one-liner, e.g. "SWA12 on the runway — DAL8 landing". Deliberately
+   *  free of anything that ticks: this string changes only when the *situation* changes, which
+   *  is what lets a consumer announce it once instead of once per frame. */
   message: string
+  /** How far out the conflicting arrival is, or null when no arrival is involved. Kept out of
+   *  {@link message} because it changes continuously — display it, don't re-announce it. */
+  finalNm: number | null
 }
 
 /** The per-aircraft facts incursion detection needs. */
@@ -86,6 +91,7 @@ export function detectIncursions(fleet: readonly IncursionView[]): RunwayIncursi
         occupantId: occ.id,
         conflictId: null,
         message: `${occ.callsign} on the runway without a clearance`,
+        finalNm: null,
       })
     }
 
@@ -96,7 +102,8 @@ export function detectIncursions(fleet: readonly IncursionView[]): RunwayIncursi
         severity: inb.finalNm <= ALERT_FINAL_NM ? 'alert' : 'advisory',
         occupantId: occ.id,
         conflictId: inb.id,
-        message: `${occ.callsign} on the runway — ${inb.callsign} landing, ${inb.finalNm.toFixed(1)} nm final`,
+        message: `${occ.callsign} on the runway — ${inb.callsign} landing`,
+        finalNm: inb.finalNm,
       })
     }
   }
@@ -118,6 +125,7 @@ export function detectIncursions(fleet: readonly IncursionView[]): RunwayIncursi
         occupantId: occ.id,
         conflictId: other.id,
         message: `${occ.callsign} on the runway with ${other.callsign}`,
+        finalNm: null,
       })
     }
   }
