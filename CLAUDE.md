@@ -87,6 +87,49 @@ How we collaborate here (defaults — override any time with a one-off instructi
 
 **Always-on guardrails** (enforced without asking): determinism (seeded `Rng`, never `Math.random`/`Date.now`), immutability, sim headless boundary, supply-chain vetting before any dep, `make check` green before every commit, a code-review pass + an end-to-end scenario test per slice, docs-win-over-realism.
 
+### Model selection
+
+Pick the cheaper model that can do the job; escalate only when the work actually demands deeper
+reasoning. Default to **`claude-sonnet-5`** and reach for **`claude-opus-4-8`** for the hard,
+high-stakes work.
+
+**Use `claude-sonnet-5` (default) for:**
+- Implementing a specced slice where the design is already settled.
+- Single-file or small multi-file edits, bug fixes, and refactors with a clear shape.
+- Writing tests, docs, commit messages, and backlog/`docs/` authoring.
+- Mechanical follow-ups from a review (applying agreed fixes).
+- Wiring a built sim command into the strip menu, or a snapshot field into a strip.
+- Tracing/answering "where does X live" and other code-navigation questions.
+
+**Use `claude-opus-4-8` for:**
+- Architectural decisions that cross the **sim ↔ UI boundary** or change the command/snapshot
+  contract (a new snapshot predicate is routine; changing what `dispatch` logs, or how
+  clearances are phrased and read back, is not).
+- A genuinely new subsystem — a new controller mode, a new airport's data pipeline — which per
+  the cadence above gets a short `docs/` note before code.
+- Authoring or amending a `docs/` design note, or resolving a fork the docs leave open (e.g.
+  whether Ground's crossing stays direct or becomes a Tower-coordinated request).
+- Modelling **authority and state machines**: who owns an aircraft, what a clearance permits and
+  when it is spent, which of two predicates is the authority for a question. These are cheap to
+  write and expensive to unwind, and they are where the real bugs have been.
+- Determinism and ordering bugs — per-tick resolution order, a latch that goes stale, state read
+  a frame after the thing that set it. The class where the test passes and the model is wrong.
+- Multi-step work spanning many files where the plan itself is uncertain.
+
+**Escalate Sonnet → Opus mid-task when:**
+- Sonnet has tried twice and the fix isn't converging (thrashing, or re-introducing the same bug).
+- The change turns out to deviate from a `docs/` note or an always-on guardrail, and the right
+  call needs design judgment rather than a patch.
+- The blast radius grew past the original estimate — what looked like a one-file edit now
+  reshapes the sim/UI contract, the comms phraseology, or a widely-used test fixture. *(Real
+  example: tightening a clearance guard to read the held route instead of the goal broke ~30
+  tests, because "where is it going" and "what does this clearance do" are different questions.
+  That is an escalate, not a fixture sweep.)*
+- A code review surfaces a CRITICAL/architectural finding rather than a mechanical one.
+
+When escalating, hand off with the current state captured — what was tried, what failed, the
+relevant `file:line` — so Opus isn't re-deriving from scratch.
+
 ## Working Conventions
 
 - **Git:** commit directly to `main` — this is a solo project, no PRs. Keep commits conventional-format and green (`make check` passes). Don't branch or open PRs unless explicitly asked.
