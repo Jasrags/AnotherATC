@@ -50,6 +50,13 @@ export type GroundCommand =
   | { type: 'lineUpAndWait'; aircraftId: string }
   | { type: 'clearedForTakeoff'; aircraftId: string }
   | { type: 'clearedToLand'; aircraftId: string }
+  /** "Go around" — the controller's call, not the pilot's. The lever the runway-incursion
+   *  alert would otherwise leave you without: when the aircraft on the runway cannot be moved
+   *  in time, the one in the air is the one you move. */
+  | { type: 'goAround'; aircraftId: string }
+  /** "Expedite" — run the clearance you already have. The other half of the incursion answer:
+   *  get the occupant off the runway rather than sending the inbound around. */
+  | { type: 'expedite'; aircraftId: string }
   | { type: 'assignExit'; aircraftId: string; ref: string }
   | { type: 'contactGround'; aircraftId: string }
   | { type: 'clearance'; aircraftId: string }
@@ -157,6 +164,10 @@ export interface GroundAircraft {
    *  or sharing it with traffic that is landing, lining up or rolling. Unlike {@link conflict}
    *  this is about *authority*, not distance — the two aircraft may be a mile apart. */
   incursion: boolean
+  /** Told to expedite: running its current clearance at more than a normal taxi speed. Spent
+   *  by the next clearance — an instruction to hurry applies to the movement it was given for.
+   *  Separation still caps it: hurrying is not permission to run into anyone. */
+  expedite: boolean
   /** Callsign of the traffic this aircraft has been told to give way to, or null. */
   giveWayTo: string | null
   /** Designator of the stand this aircraft is holding for because someone is still on it, or

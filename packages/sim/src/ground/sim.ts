@@ -140,6 +140,9 @@ export interface GroundSimOptions {
 
 const TAXI_ACCEL = 4
 const TAXI_SPEED_KT = 15
+/** Taxi speed (kt) under an "expedite". Faster, but still a speed a jet can hold on pavement
+ *  and still subject to every separation cap — hurrying is not permission to run into anyone. */
+const EXPEDITE_SPEED_KT = 25
 /** Pushback creep speed (kt) — a tug easing the aircraft off the stand. */
 const PUSHBACK_SPEED_KT = 5
 /**
@@ -618,6 +621,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       held,
       pushingBack: false,
       giveWayTo: null,
+      expedite: false,
       squawk: null,
       departing: false,
       lineUpWait: false,
@@ -1238,6 +1242,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     ac.held = held
     ac.dwell = -1
     ac.giveWayTo = null // a fresh clearance supersedes any give-way hold
+    ac.expedite = false // …and an expedite: it applied to the movement it was given for
     ac.pushingBack = false // …and aborts an in-progress pushback,
     ac.pushFacing = null // …including the direction it was being swung toward,
     ac.pushFacingLabel = null
@@ -1642,6 +1647,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     'hold',
     'resume',
     'giveWay',
+    'expedite',
   ])
 
   /**
@@ -1748,6 +1754,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         return ACCEPTED
       case 'resume':
         ac.giveWayTo = null // "continue taxi" also cancels a give-way hold
+        ac.expedite = false // …and returns an expedited aircraft to a normal taxi
         if (ac.leg < ac.path.length - 1) {
           ac.targetSpeed = TAXI_SPEED_KT
           ac.holding = false
@@ -1772,6 +1779,26 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         ac.holding = false
         ac.holdShort = false
         return ACCEPTED
+      case 'goAround':
+        // Deliberately not gated on holding a landing clearance: an arrival still awaiting one
+        // is exactly the aircraft you most want to turn away early, and refusing it there would
+        // make the lever unavailable in half the situations it exists for.
+        if (ac.intent !== 'arrival' || !ac.airborne)
+          return refused('only an arrival on final can be sent around')
+        if (!reestablishOnFinal(ac)) return refused('no approach to re-fly')
+        return ACCEPTED
+      case 'expedite': {
+        // "Expedite" runs the clearance the aircraft already has, so there has to be one left
+        // to run. Refusing here rather than silently accepting keeps the alert honest: if the
+        // occupant cannot be hurried, the answer is the go-around instead.
+        if (ac.leg >= ac.path.length - 1) return refused('nothing to expedite — no clearance to run')
+        ac.expedite = true
+        ac.giveWayTo = null // the opposite instruction — you cannot hurry and wait at once
+        ac.targetSpeed = EXPEDITE_SPEED_KT
+        ac.holding = false
+        ac.holdShort = false
+        return ACCEPTED
+      }
       case 'sayAgain':
         // Refused only when there is nothing to repeat — never because the read-back happened
         // to be correct, which would turn the mechanic into a free answer.
@@ -2021,9 +2048,9 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
    * clearance is re-established at the final fix and flies the approach again. The real
    * version climbs out and re-enters TRACON sequencing (docs/atc-tower.md, Slice 3).
    */
-  function goAround(ac: Internal): void {
+  function reestablishOnFinal(ac: Internal): boolean {
     const fix = ac.path[0]
-    if (!fix) return
+    if (!fix) return false
     ac.x = fix[0]
     ac.y = fix[1]
     ac.leg = 0
@@ -2034,8 +2061,15 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     ac.assignedExitRef = null
     const next = ac.path[1]
     if (next) ac.heading = normalizeDeg(bearing(fix[0], fix[1], next[0], next[1]))
-    // A go-around is the pilot's call, not the controller's — it is announced, not cleared.
-    // It also voids the landing clearance, so that clearance is no longer repeatable.
+    return true
+  }
+
+  /** The go-around the *pilot* calls: reaching the threshold with no landing clearance. It is
+   *  announced, not cleared, and it voids the landing clearance so that clearance is no longer
+   *  repeatable. The controller-issued one is the `goAround` command, which shares the state
+   *  change above but is transmitted the other way round — as an instruction with a read-back. */
+  function goAround(ac: Internal): void {
+    if (!reestablishOnFinal(ac)) return
     voidClearance(ac)
     transmit('pilot', 'tower', ac, `${ac.callsign}, going around.`)
   }
@@ -2303,6 +2337,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
           handoffPending: ac.rollingOut && ac.groundPending,
           conflict: ac.conflict,
           incursion: ac.incursion,
+          expedite: ac.expedite,
           giveWayTo: ac.giveWayTo ? (find(ac.giveWayTo)?.callsign ?? null) : null,
           waitingForStand: ac.gate !== null && standHoldCap(ac) === 0 ? ac.gate : null,
           gateBlocked:

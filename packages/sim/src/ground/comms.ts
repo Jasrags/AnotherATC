@@ -163,6 +163,12 @@ export function phraseFor(cmd: GroundCommand, ctx: PhraseContext): Exchange | nu
       return say(`${rwy}, cleared for takeoff`, `${Rwy}, cleared for takeoff`)
     case 'clearedToLand':
       return say(`${rwy}, cleared to land`, `${Rwy}, cleared to land`)
+    case 'goAround':
+      // An instruction with a read-back. The pilot's own go-around is a single announcement
+      // transmitted elsewhere — the transcript has to be able to tell the two apart.
+      return say('go around', 'Going around')
+    case 'expedite':
+      return say('expedite', 'Expediting')
     case 'assignExit': {
       const exit = phonetic(cmd.ref)
       return say(`turn off at ${exit}`, exit)
