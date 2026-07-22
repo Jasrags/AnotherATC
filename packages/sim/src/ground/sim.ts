@@ -221,8 +221,6 @@ export const APPROACH_SPEED_KT = 140
  *  exit assigned the rate is solved per rollout instead, so it arrives at the turnoff at the
  *  turnoff's speed (see runwayExits.ts). */
 const ROLLOUT_DECEL = MAX_BRAKE_KT_S
-/** How often (s) a rolled-out arrival retries routing off the runway when routing fails. */
-const EXIT_RETRY_SEC = 1
 /** How far (nm ≈ 180 ft) up the runway a lining-up aircraft rolls past the point it entered, so
  *  it finishes pointing down the runway rather than across it. */
 const LINEUP_ALIGN_NM = 0.03
@@ -377,8 +375,6 @@ interface Internal
   finalLenNm: number
   /** Height (ft) at the final fix, from the runway's published glide path. */
   finalAltFt: number
-  /** Seconds until the next Tower→Ground exit-routing attempt (see {@link EXIT_RETRY_SEC}). */
-  exitRetrySec: number
   /** The turnoff this arrival is planning for / rolling out to, or null when none applies. */
   exit: RunwayExit | null
   /** Turnoff the controller assigned by designator; overrides the default choice. */
@@ -705,7 +701,6 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       threshold,
       finalLenNm,
       finalAltFt,
-      exitRetrySec: 0,
       exit: null,
       assignedExitRef: null,
       brakeRate: ROLLOUT_DECEL,
@@ -1953,13 +1948,21 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       case 'hold':
         ac.targetSpeed = 0
         return ACCEPTED
-      case 'resume':
+      case 'resume': {
+        // "Continue taxi" continues something. An aircraft at the end of its route — an arrival
+        // that has just checked in with Ground and been issued nothing, most of all — has no
+        // clearance to run, and accepting the instruction anyway is how a frequency change came
+        // to look like it had also sent the aircraft somewhere. A give-way is still cancellable:
+        // that *is* the hold being lifted.
+        const hasRoute = ac.leg < ac.path.length - 1
+        if (!hasRoute && !ac.giveWayTo) return refused('nothing to continue — no clearance to run')
         ac.giveWayTo = null // "continue taxi" also cancels a give-way hold
-        if (ac.leg < ac.path.length - 1) {
+        if (hasRoute) {
           ac.targetSpeed = TAXI_SPEED_KT
           ac.holding = false
         }
         return ACCEPTED
+      }
       case 'giveWay': {
         const target = find(command.toId)
         if (!target || target === ac) return refused('unknown or self give-way target')
@@ -2180,7 +2183,10 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         if (ac.intent !== 'arrival') return refused('only arrivals are handed to ground after landing')
         // Arm the change only if it isn't applicable yet; a failed immediate handoff must not
         // leave the aircraft looking "already sent" when it was actually refused.
-        if (ac.vacated) return handOffToGround(ac) ? ACCEPTED : refused('no taxi route to the gate')
+        if (ac.vacated) {
+          handOffToGround(ac)
+          return ACCEPTED
+        }
         ac.groundPending = true
         return ACCEPTED
       }
@@ -2309,15 +2315,17 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
   }
 
   /**
-   * Tower → Ground handoff: once the rollout has slowed to taxi speed the arrival can leave
-   * the runway, so it becomes an ordinary Ground aircraft routed to its gate. `goalPoint` is
-   * guaranteed for an airborne init (validated in {@link makeInternal}). Routing can still fail
-   * — no graph, or a gate the graph can't reach — so the attempt is retried, but at
-   * {@link EXIT_RETRY_SEC} rather than every tick: a failing route is a full Dijkstra search,
-   * and the aircraft is parked on the runway while it fails.
+   * Tower → Ground handoff for a landed arrival: a **frequency change, and nothing else**.
+   *
+   * The aircraft has already cleared the runway on its landing rollout — vacating is the end of
+   * the landing, which the pilot does without being told. What it does not have is anywhere to
+   * go: it stops clear of the runway on Ground's frequency, checks in ("clear of the runway at
+   * Bravo"), and waits. Ground taxis it to the gate as a separate instruction, because that is
+   * a separate instruction — this used to route it to its stand as a side effect of the
+   * handoff, which made "contact ground" silently mean "and taxi to the gate" and left the
+   * position with nothing to actually do.
    */
-  function handOffToGround(ac: Internal): boolean {
-    if (!ac.goalPoint || !routeToOwnGoal(ac)) return false
+  function handOffToGround(ac: Internal): void {
     ac.rollingOut = false
     // It stops being a rollout the moment Ground has it, but it is still on the pavement and
     // still entitled to be — the taxi off the runway is the end of the landing, not a new entry.
@@ -2326,7 +2334,6 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     ac.controlledBy = 'ground'
     // Tower's business with this aircraft is finished; Ground has issued it nothing yet.
     voidClearance(ac)
-    return true
   }
 
   /**
@@ -2360,7 +2367,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
 
   /** Post-motion airborne bookkeeping: descend the final, touch down or go around at the
    *  threshold, and hand a slowed rollout over to Ground. */
-  function resolveApproach(ac: Internal, dt: number): void {
+  function resolveApproach(ac: Internal): void {
     if (ac.airborne) {
       const remaining = finalDistance(ac)
       if (ac.leg >= ac.path.length - 1 || remaining <= 1e-6) {
@@ -2382,10 +2389,8 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     // The aircraft never changes frequency on its own: it moves to Ground only once Tower has
     // issued the change *and* it is actually clear of the runway.
     if (!ac.vacated || !ac.groundPending) return
-    ac.exitRetrySec -= dt
-    if (ac.exitRetrySec > 0) return
-    ac.exitRetrySec = EXIT_RETRY_SEC
-    if (handOffToGround(ac)) checkIn(ac)
+    handOffToGround(ac)
+    checkIn(ac)
   }
 
   /** A fresh set of ground services, as a departure gets on the stand. Declared rather than
@@ -2560,7 +2565,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         }
       }
       fleet.forEach((ac, i) => advance(ac, dt, caps[i] ?? Infinity))
-      for (const ac of fleet) resolveApproach(ac, dt)
+      for (const ac of fleet) resolveApproach(ac)
       for (const ac of fleet) resolveCrossingHandoff(ac)
       for (const ac of fleet) resolveLineUp(ac)
       for (const id of resolveGoals(dt)) {

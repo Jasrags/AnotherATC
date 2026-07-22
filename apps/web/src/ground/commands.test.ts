@@ -681,3 +681,40 @@ describe('reassign gate', () => {
     expect(parked.find((c) => c.key === 'stand')).toBeUndefined()
   })
 })
+
+describe('an arrival that has just checked in with Ground', () => {
+  // Stopped clear of the runway after landing: it has been handed the frequency and nothing
+  // else, so what it needs is a taxi clearance — not an instruction implying it was already
+  // taxiing somewhere.
+  const checkedIn = (over: Partial<StripItem> = {}) =>
+    strip({
+      status: 'holding',
+      controlledBy: 'ground',
+      intent: 'arrival',
+      gate: 'A12',
+      vacated: true,
+      canExpedite: false, // no route left to run — it was never given one
+      ...over,
+    })
+
+  it('is offered a taxi clearance to its gate', () => {
+    const { controller } = fakeController()
+    const cmds = commandsFor(controller, checkedIn(), [])
+    const taxi = cmds.find((c) => c.label === 'Taxi to…')
+    expect(taxi).toBeDefined()
+    expect(taxi!.action.kind).toBe('submenu')
+    const items = taxi!.action.kind === 'submenu' ? taxi!.action.items : []
+    expect(items.map((i) => i.label)).toContain('Gate A12')
+  })
+
+  it('is not offered "Continue taxi" — there is no clearance to continue', () => {
+    const { controller } = fakeController()
+    expect(commandsFor(controller, checkedIn(), []).map((c) => c.label)).not.toContain('Continue taxi')
+  })
+
+  it('still offers it to an aircraft actually stopped part-way through a clearance', () => {
+    const { controller } = fakeController()
+    const held = checkedIn({ intent: 'departure', gate: null, canExpedite: true })
+    expect(commandsFor(controller, held, []).map((c) => c.label)).toContain('Continue taxi')
+  })
+})

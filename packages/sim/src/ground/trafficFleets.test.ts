@@ -70,8 +70,11 @@ describe('the spawner mixes the fleets', () => {
     const game = createAirportGame(KSAN, seed)
     const sim = createGroundSim([], { graph, guard, spawn: game.spawn, runway: game.runway })
     const seen = new Set<string>()
-    for (let i = 0; i < seconds * 10; i += 1) {
-      sim.step(0.1)
+    // Half-second steps: this measures the spawner's *mix* over most of an hour, and nobody is
+    // working the traffic — with arrivals now parking themselves clear of the runway until
+    // Ground taxis them, an unattended field stays full, so each tick is not cheap.
+    for (let i = 0; i < seconds * 2; i += 1) {
+      sim.step(0.5)
       for (const a of sim.snapshot().aircraft) seen.add(a.callsign)
     }
     return [...seen]
@@ -125,11 +128,18 @@ describe('the crossing is now an ordinary event', () => {
     const A = () => sim.snapshot().aircraft.find((a) => a.id === 'fdx')
     // Land, roll out, get handed to Ground, taxi — and stop at the runway it has to cross.
     let heldShort = false
+    let taxied = false
     for (let i = 0; i < 40000 && !heldShort; i += 1) {
       sim.step(0.1)
       const a = A()
       if (!a) break
       if (a.status === 'rollout' && !a.handoffPending) sim.dispatch({ type: 'contactGround', aircraftId: 'fdx' })
+      // Ground's own instruction: the handoff put it on this frequency, it did not send it
+      // anywhere. This is where the taxi to the North Ramp is actually issued.
+      if (a.controlledBy === 'ground' && !taxied) {
+        taxied = true
+        expect(sim.dispatch({ type: 'taxiToGoal', aircraftId: 'fdx' }).ok).toBe(true)
+      }
       heldShort = a.holdShort
     }
     expect(heldShort).toBe(true)

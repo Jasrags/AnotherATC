@@ -244,6 +244,7 @@ describe('arrival end-to-end: final → land → exit → Ground → gate', () =
     const seen = new Set<string>()
     let handedToGroundAt = -1
     let sentToGround = false
+    let taxied = false
     for (let i = 0; i < 8000; i += 1) {
       sim.step(0.1)
       const a = A(sim, 'a')
@@ -255,6 +256,12 @@ describe('arrival end-to-end: final → land → exit → Ground → gate', () =
         expect(sim.dispatch({ type: 'contactGround', aircraftId: 'a' })).toEqual({ ok: true })
       }
       if (a.controlledBy === 'ground' && handedToGroundAt < 0) handedToGroundAt = sim.snapshot().time
+      // …and Ground taxis it in, which is a second instruction: the handoff only moved it to
+      // this frequency, it did not send it anywhere.
+      if (a.controlledBy === 'ground' && !taxied) {
+        taxied = true
+        expect(sim.dispatch({ type: 'taxiToGoal', aircraftId: 'a' })).toEqual({ ok: true })
+      }
     }
 
     expect(seen.has('landing')).toBe(true)
@@ -428,5 +435,81 @@ describe('Tower → Ground: the pilot never switches frequency unprompted', () =
       ok: false,
       reason: 'already sent to ground',
     })
+  })
+})
+
+describe('the handoff to Ground is a frequency change, not a taxi clearance', () => {
+  /** Land an arrival, send it to Ground, and run until it is on Ground's frequency and stopped. */
+  function landedAndCheckedIn() {
+    const sim = createGroundSim([arrivalOnFinal('a')], { guard, graph })
+    sim.dispatch({ type: 'clearedToLand', aircraftId: 'a' })
+    for (let i = 0; i < 4000 && A(sim, 'a')?.status !== 'rollout'; i += 1) sim.step(0.1)
+    expect(sim.dispatch({ type: 'contactGround', aircraftId: 'a' })).toEqual({ ok: true })
+    for (let i = 0; i < 4000 && A(sim, 'a')?.controlledBy !== 'ground'; i += 1) sim.step(0.1)
+    return sim
+  }
+
+  it('leaves the aircraft stopped clear of the runway, awaiting a taxi clearance', () => {
+    const sim = landedAndCheckedIn()
+    run(sim, 600) // a minute on Ground's frequency with nothing issued to it
+    const a = A(sim, 'a')!
+    expect(a.controlledBy).toBe('ground')
+    expect(a.onRunway).toBe(false) // it cleared the runway on its landing rollout…
+    expect(a.groundspeed).toBe(0) // …and then stopped, because nobody has taxied it
+    expect(a.status).toBe('holding')
+    // Nowhere near the gate: the handoff must not have routed it there.
+    expect(Math.hypot(a.x - GATE[0], a.y - GATE[1])).toBeGreaterThan(0.05)
+    expect(sim.snapshot().arrived).toBe(0)
+  })
+
+  it('checks in with Ground, and says nothing about taxiing until Ground taxis it', () => {
+    const sim = landedAndCheckedIn()
+    const checkIn = sim.snapshot().comms.at(-1)!
+    expect(checkIn.from).toBe('pilot')
+    expect(checkIn.position).toBe('ground')
+    expect(checkIn.text).toMatch(/clear of the runway/i)
+
+    run(sim, 300)
+    expect(sim.snapshot().comms.at(-1)!.text).toBe(checkIn.text) // nothing further was said
+  })
+
+  it('taxis to the gate once Ground actually clears it to, and counts as arrived', () => {
+    const sim = landedAndCheckedIn()
+    expect(sim.dispatch({ type: 'taxiToGoal', aircraftId: 'a' })).toEqual({ ok: true })
+    for (let i = 0; i < 8000 && A(sim, 'a'); i += 1) sim.step(0.1)
+    expect(A(sim, 'a')).toBeUndefined() // parked, dwelled, cleared the stand
+    expect(sim.snapshot().arrived).toBe(1)
+  })
+})
+
+describe('"continue taxi" needs a taxi to continue', () => {
+  it('is refused to an arrival that has checked in with Ground but been given nothing', () => {
+    const sim = createGroundSim([arrivalOnFinal('a')], { guard, graph })
+    sim.dispatch({ type: 'clearedToLand', aircraftId: 'a' })
+    for (let i = 0; i < 4000 && A(sim, 'a')?.status !== 'rollout'; i += 1) sim.step(0.1)
+    sim.dispatch({ type: 'contactGround', aircraftId: 'a' })
+    for (let i = 0; i < 4000 && A(sim, 'a')?.controlledBy !== 'ground'; i += 1) sim.step(0.1)
+
+    // Silently accepting this is how "contact ground" came to look like a taxi clearance: the
+    // aircraft has no route, so there is nothing to resume, and saying so is the point.
+    expect(sim.dispatch({ type: 'resume', aircraftId: 'a' })).toEqual({
+      ok: false,
+      reason: 'nothing to continue — no clearance to run',
+    })
+    run(sim, 100)
+    expect(A(sim, 'a')!.groundspeed).toBe(0)
+  })
+
+  it('is accepted once Ground has actually cleared it to taxi', () => {
+    const sim = createGroundSim([arrivalOnFinal('a')], { guard, graph })
+    sim.dispatch({ type: 'clearedToLand', aircraftId: 'a' })
+    for (let i = 0; i < 4000 && A(sim, 'a')?.status !== 'rollout'; i += 1) sim.step(0.1)
+    sim.dispatch({ type: 'contactGround', aircraftId: 'a' })
+    for (let i = 0; i < 4000 && A(sim, 'a')?.controlledBy !== 'ground'; i += 1) sim.step(0.1)
+    sim.dispatch({ type: 'taxiToGoal', aircraftId: 'a' })
+    sim.dispatch({ type: 'hold', aircraftId: 'a' })
+    expect(sim.dispatch({ type: 'resume', aircraftId: 'a' })).toEqual({ ok: true })
+    run(sim, 100)
+    expect(A(sim, 'a')!.groundspeed).toBeGreaterThan(0)
   })
 })

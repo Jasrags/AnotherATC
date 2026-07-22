@@ -178,6 +178,7 @@ describe('a second, made-up airport', () => {
 
     const seen = new Set<string>()
     let sentToGround = false
+    let taxied = false
     for (let i = 0; i < 8000; i += 1) {
       sim.step(0.1)
       const a = sim.snapshot().aircraft.find((x) => x.id === 'a')
@@ -186,6 +187,11 @@ describe('a second, made-up airport', () => {
       if (a.status === 'rollout' && !sentToGround) {
         sentToGround = true
         expect(sim.dispatch({ type: 'contactGround', aircraftId: 'a' })).toEqual({ ok: true })
+      }
+      // Ground taxis it in — the handoff was a frequency change, not a clearance to the gate.
+      if (a.controlledBy === 'ground' && !taxied) {
+        taxied = true
+        expect(sim.dispatch({ type: 'taxiToGoal', aircraftId: 'a' })).toEqual({ ok: true })
       }
     }
     expect(seen.has('landing')).toBe(true)

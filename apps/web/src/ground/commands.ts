@@ -336,7 +336,12 @@ function phaseCommandsFor(controller: GroundController, item: StripItem, aircraf
         : { label: 'Give way to…', action: { kind: 'soon' } },
     )
   }
-  if (item.status === 'holding' || item.giveWayTo) {
+  // Only when there is a clearance to continue. `canExpedite` is the sim's own "route left to
+  // run" predicate, which is exactly what `resume` acts on — an arrival stopped clear of the
+  // runway awaiting its first taxi instruction has none, and offering it "Continue taxi" there
+  // is what made the handoff read as though it had already been sent somewhere. A give-way hold
+  // is separate: continuing lifts it whether or not the route is spent.
+  if ((item.status === 'holding' && item.canExpedite) || item.giveWayTo) {
     cmds.push({ label: 'Continue taxi', action: { kind: 'run', run: () => send({ type: 'resume', aircraftId: id }) } })
   }
   // Offered from every phase that has a route under way, not only when it has gone wrong: an
