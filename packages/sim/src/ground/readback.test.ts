@@ -92,9 +92,9 @@ describe('read-back verification', () => {
     sim.dispatch({ type: 'hold', aircraftId: 'a' }) // a new clearance, correctly read back or not
     sim.dispatch({ type: 'sayAgain', aircraftId: 'a' })
 
-    // What is *said* is the latest instruction: "say again" repeats what was said most
-    // recently, not a stale one.
-    expect(sim.snapshot().comms.at(-2)!.text).toContain('hold position')
+    // A stale code gets its own phrase rather than a repeat of whatever was said last:
+    // "negative, hold position" would be a lie about an exchange that fixed a transponder.
+    expect(sim.snapshot().comms.at(-2)!.text).toContain('verify transponder code')
     // The code, though, is not a thing that was said — it is a thing the transponder is set
     // to, and it stays set wrong through every instruction that follows. It used to be
     // treated as superseded, which made an uncaught error permanent *and* invisible: nothing
@@ -240,6 +240,38 @@ describe('clearances the sim voids on its own are no longer repeatable', () => {
     expect(sim.snapshot().comms.at(-1)!.text).toContain('going around')
     expect(sim.snapshot().aircraft[0]!.status).toBe('onFinal') // clearance voided by the sim
     expect(sim.dispatch({ type: 'sayAgain', aircraftId: 'r' }).ok).toBe(false)
+  })
+})
+
+describe('a wrong code can always be put right', () => {
+  it('survives its clearance becoming unrepeatable — no aircraft is ever stuck with it', () => {
+    // The deadlock this guards: a give-way clears *itself* once the traffic has passed, and
+    // that void takes the last clearance with it. If "say again" needed something to repeat,
+    // an aircraft that had been given way at any point would reach the hold-short line
+    // squawking a code nobody issued, be refused the handoff for it, and have no instruction
+    // left that fixed it — stuck there for the rest of the session.
+    const sim = createGroundSim([parked('a'), { ...parked('b'), path: [[1, 1]] }], always)
+    sim.dispatch({ type: 'clearance', aircraftId: 'a' })
+    const issued = /squawk ([0-7]{4})/.exec(sim.snapshot().comms[0]!.text)![1]!
+    const A = () => sim.snapshot().aircraft.find((x) => x.id === 'a')!
+    expect(A().squawk).not.toBe(issued)
+
+    sim.dispatch({ type: 'giveWay', aircraftId: 'a', toId: 'b' }) // now the last thing issued…
+    for (let i = 0; i < 200; i += 1) sim.step(0.1) // …and it drops itself: b is nowhere near
+    expect(A().giveWayTo).toBeNull()
+
+    expect(sim.dispatch({ type: 'sayAgain', aircraftId: 'a' })).toEqual({ ok: true })
+    expect(A().squawk).toBe(issued)
+    expect(sim.snapshot().readbackCaught).toBe(1)
+    expect(sim.snapshot().comms.at(-2)!.text).toContain('verify transponder code')
+  })
+
+  it('is still refused when there is genuinely nothing to say', () => {
+    const sim = createGroundSim([parked('a')], never)
+    expect(sim.dispatch({ type: 'sayAgain', aircraftId: 'a' })).toEqual({
+      ok: false,
+      reason: 'nothing has been issued to that aircraft',
+    })
   })
 })
 

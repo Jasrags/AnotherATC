@@ -35,6 +35,14 @@ as a property of the last thing said. An uncaught error therefore reaches the ru
 aircraft, and the whole taxi was the window to notice. A crossing is not gated — a transit is
 coming straight back and nothing is about to look for it on radar.
 
+Because the code outlives the clearance, so must the fix: "say again" is accepted whenever a
+code is unverified, *including* when there is no longer anything to repeat. A clearance can stop
+being repeatable on its own — a give-way clears itself once the traffic passes — and an aircraft
+whose only correction had expired would sit at the hold-short line, refused the handoff, for the
+rest of the session. Caught at once the correction is the clearance ("negative, cleared as filed,
+squawk 4271"); caught later the code gets its own phrase ("verify transponder code 4271"), because
+repeating whatever was said last would be a lie about what the exchange actually fixed.
+
 #### Ground Servicing (Concurrent with clearance and boarding)
 All of the following happen in parallel — the aircraft cannot push until all are complete:
 

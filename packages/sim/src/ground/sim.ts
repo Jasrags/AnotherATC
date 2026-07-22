@@ -642,7 +642,17 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
 
   /** "Negative, …": repeat the last clearance, correctly. Never mishears — the point of a
    *  correction is that it lands. */
-  function logCorrection(ac: Internal, position: ControllerPosition): void {
+  function logCorrection(ac: Internal, position: ControllerPosition, verifiedCode: boolean): void {
+    // Caught immediately, the correction is the clearance itself: "negative, cleared as filed,
+    // squawk 4271" is what a controller says to a wrong read-back, and the repeat below carries
+    // the code. Once anything else has been said, repeating *that* would put "negative, hold
+    // position" in the log for an exchange that actually fixed a transponder — so the code gets
+    // its own phrase. The transcript is the only record the controller has of either.
+    if (verifiedCode && ac.squawk && ac.lastClearance?.type !== 'clearance') {
+      transmit('controller', position, ac, `${ac.callsign}, verify transponder code ${ac.squawk}.`)
+      transmit('pilot', position, ac, `Squawk ${ac.squawk}, ${ac.callsign}.`)
+      return
+    }
     const prior = ac.lastClearance
     if (!prior) return
     const ex = phraseFor(prior, phraseContext(ac))
@@ -1960,6 +1970,9 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     const ac = find(command.aircraftId)
     const issuedBy = ac?.controlledBy ?? 'ground'
     const before = situationBefore(ac)
+    // Captured before the command runs: applying a "say again" is what clears the mismatch, so
+    // afterwards there is no way to tell whether this call was the one that fixed a code.
+    const unverified = ac ? squawkUnverified(ac) : false
     const result = applyCommand(command)
     if (result.ok && ac) {
       // Anything said to an aircraft answers it. The clock is "how long since anyone spoke to
@@ -1968,7 +1981,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       // goes on being reported as neglected.
       ac.awaitingSec = 0
       if (command.type === 'sayAgain') {
-        logCorrection(ac, issuedBy)
+        logCorrection(ac, issuedBy, unverified)
         return result
       }
       logExchange(command, ac, issuedBy, before)
@@ -2132,9 +2145,16 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         return ACCEPTED
       }
       case 'sayAgain':
-        // Refused only when there is nothing to repeat — never because the read-back happened
-        // to be correct, which would turn the mechanic into a free answer.
-        if (!ac.lastClearance) return refused('nothing has been issued to that aircraft')
+        // Refused only when there is nothing to repeat *and* no code to verify — never because
+        // the read-back happened to be correct, which would turn the mechanic into a free
+        // answer. The second half is not redundant: a clearance can stop being repeatable on
+        // its own (a give-way that clears itself when the traffic passes, a handoff that ends
+        // the position's business with the aircraft), and a transponder set to the wrong code
+        // is not repaired by that. Without it an aircraft could be left squawking a code
+        // nobody issued, refused the handoff for it, and with no instruction left that fixes
+        // it — stuck at the hold-short line for the rest of the session.
+        if (!ac.lastClearance && !squawkUnverified(ac))
+          return refused('nothing has been issued to that aircraft')
         correctMishearing(ac)
         return ACCEPTED
       case 'assignStand': {
@@ -2191,6 +2211,12 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         // transcript is the whole game (see `maybeMishear`). It is also not a gate on a
         // crossing: a transit is coming straight back, and nothing is about to look for it on
         // radar. "Say again" is the fix, and the delay is the price of not having noticed.
+        // NOTE (multi-runway): `holdingForTakeoff` keys off the *goal* sitting on a runway,
+        // while its sibling `heldRouteCrosses` keys off the held route. On a single-runway
+        // field the two cannot disagree. On a field where a departure crosses one runway to
+        // reach another, an aircraft holding short of the *crossing* would still answer "yes"
+        // here — gating a crossing this deliberately exempts. Fix by deriving it from the held
+        // route's endpoint, with the rest of the multi-runway work (docs/adding-an-airport.md).
         if (squawkUnverified(ac) && holdingForTakeoff(ac))
           return refused('verify transponder code — the read-back was never checked')
         ac.controlledBy = 'tower'
