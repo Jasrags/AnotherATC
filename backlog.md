@@ -98,9 +98,19 @@ The core ground-control loop. Ordered roughly by priority.
   push. `SpawnFleet` has no servicing field; threading one through is the natural next step, and
   the one place "what an aircraft is decides what happens to it" is not yet honoured. (Raised
   independently in review, which is why it is written down rather than left as a nicety.)_
-- ⬜ **HS1 hotspot** — render the KSAN hot spot; incursion-risk awareness. Now that generic
-  incursion detection exists, this is the airport-specific flavour: HS1 as named geometry, warned
-  on earlier and louder than open pavement.
+- ✅ **HS1 hotspot** — a hot spot is not geometry the sim can derive: it is somewhere real pilots
+  and controllers have repeatedly got confused, published because history says so, and the only
+  honest thing a simulation can do with that is **watch harder there**. Inside a shared hot spot
+  traffic is called as converging at **3× the open-pavement distance** — a few hundred feet apart
+  rather than nose to nose, which is the difference between a warning you can act on and a
+  notification. `hotspotAt` takes the nearest centre where two overlap (so the answer does not
+  depend on the order the diagram listed them); `busyHotspots` reports only spots holding two or
+  more aircraft, because one aircraft in a hot spot is just an aircraft. The circle reads its
+  state from the sim — dashed and quiet by default, solid and washed when busy — and the conflict
+  line names the spot. A field charting no hot spots behaves exactly as before, with a test.
+  This became worth building only once the cargo/GA fleets shipped: HS1 sits at the GA/taxiway-H
+  junction **north of 09/27**, on the side the new traffic actually uses. _Next: HS1 is the only
+  charted spot at KSAN; the d-TPP diagram is the source if more are wanted._
 - ✅ **Runway incursion alerts** — the sim already *refuses* every clearance that would put two
   aircraft on one runway, which left a blind spot: the conflicts no single clearance was wrong
   for. `detectIncursions` (pure, deterministic) classifies each aircraft on the pavement by how
