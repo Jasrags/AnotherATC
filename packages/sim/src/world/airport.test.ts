@@ -90,6 +90,32 @@ const KTST: Airport = {
 const graph = buildTaxiGraph(surface)
 const guard = buildRunwayGuard(surface)
 
+describe('a misconfigured field fails loudly', () => {
+  // A bundle is data, and data arrives wrong. Each of these used to produce a *silently dead
+  // field* — no aircraft, no error, nothing to debug from — which is the worst of both.
+  const broken = (fleets: Airport['fleets']): Airport => ({ ...KTST, fleets })
+
+  it('refuses a field with no traffic at all', () => {
+    expect(() => createAirportGame(broken([]), 1)).toThrow(/fleet/i)
+  })
+
+  it('refuses a fleet with nowhere to park', () => {
+    expect(() => createAirportGame(broken([{ ...KTST.fleets[0]!, gates: [] }]), 1)).toThrow(/stand/i)
+  })
+
+  it('refuses a weight that is not a usable share', () => {
+    // NaN was the dangerous one: it poisons the total, slips past a `<= 0` guard, and pins
+    // every draw to the last fleet in the list without ever failing.
+    for (const weight of [Number.NaN, -1, Number.POSITIVE_INFINITY]) {
+      expect(() => createAirportGame(broken([{ ...KTST.fleets[0]!, weight }]), 1)).toThrow(/weight/i)
+    }
+  })
+
+  it('refuses a field whose fleets all have zero weight — nothing would ever spawn', () => {
+    expect(() => createAirportGame(broken([{ ...KTST.fleets[0]!, weight: 0 }]), 1)).toThrow(/weight/i)
+  })
+})
+
 describe('a second, made-up airport', () => {
   it('finds its own gates from its own surface', () => {
     expect(KTST.fleets[0]!.gates.map((g) => g.ref)).toEqual(['1', '2'])

@@ -2447,11 +2447,15 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
 
   /** Choose a traffic class by weight. Deterministic: one draw off the seeded stream. */
   function pickFleet(rng: Rng, fleets: readonly SpawnFleet[]): SpawnFleet | undefined {
-    const total = fleets.reduce((sum, f) => sum + Math.max(0, f.weight), 0)
+    // `Number.isFinite` rather than a bare `Math.max`: NaN would survive the `<= 0` guard
+    // below, make every `roll < 0` comparison false, and pin the draw to the last fleet
+    // forever. A weight that is not a number is no share at all.
+    const share = (f: SpawnFleet): number => (Number.isFinite(f.weight) ? Math.max(0, f.weight) : 0)
+    const total = fleets.reduce((sum, f) => sum + share(f), 0)
     if (total <= 0) return undefined
     let roll = rng.next() * total
     for (const f of fleets) {
-      roll -= Math.max(0, f.weight)
+      roll -= share(f)
       if (roll < 0) return f
     }
     return fleets[fleets.length - 1]

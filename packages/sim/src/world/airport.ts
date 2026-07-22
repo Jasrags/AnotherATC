@@ -106,6 +106,21 @@ export function createAirportGame(airport: Airport, seed = 1, runwayIdent?: stri
   if (!runway) {
     throw new Error(`${airport.icao}: no runway configuration for "${runwayIdent ?? airport.defaultRunway}"`)
   }
+  // A bundle is data, and data arrives wrong. Every one of these produced a silently dead field
+  // — no traffic, no error, nothing to debug from — which is worse than a crash on line one.
+  if (airport.fleets.length === 0) throw new Error(`${airport.icao}: no traffic fleets`)
+  for (const f of airport.fleets) {
+    if (f.gates.length === 0) throw new Error(`${airport.icao}: fleet "${f.kind}" has no stands`)
+    // Finiteness matters more than it looks: NaN survives a `<= 0` check, poisons the weighted
+    // total, and silently pins every draw to the last fleet in the list.
+    if (!Number.isFinite(f.weight) || f.weight < 0) {
+      throw new Error(`${airport.icao}: fleet "${f.kind}" has weight ${f.weight}, expected a finite share ≥ 0`)
+    }
+  }
+  if (airport.fleets.reduce((sum, f) => sum + f.weight, 0) <= 0) {
+    throw new Error(`${airport.icao}: every fleet has weight 0 — nothing would ever spawn`)
+  }
+
   // Departures roll from the pavement end behind the threshold — the displaced portion is
   // theirs to use, it is only landings that may not touch down on it.
   const departureTarget = runway.departureStart
@@ -129,12 +144,12 @@ export function createAirportGame(airport: Airport, seed = 1, runwayIdent?: stri
   // The initial fill is scene-setting, and it comes from the first fleet: a field that opens
   // with its freight apron full and its gates empty is not the picture. The spawner mixes the
   // rest in from the first interval onward.
-  const home = airport.fleets[0]
-  const inits: AircraftInit[] = (home?.gates ?? [])
+  const home = airport.fleets[0]!
+  const inits: AircraftInit[] = home.gates
     .slice(0, airport.traffic.initialDepartures)
     .map((slot, i) => {
       // Deterministic initial identities, independent of the spawner's stream.
-      const { callsign, type, wake } = home!.identity(createRng(seed + i + 1))
+      const { callsign, type, wake } = home.identity(createRng(seed + i + 1))
       return {
         id: `init${i}`,
         callsign,
