@@ -105,8 +105,35 @@ body {
   color: #7fbfa4;
 }
 
-.hud-alert {
+/* Runway incursion — the top of the alert stack, and the only one that pulses. Each alert
+   keeps a fixed slot even when the ones above it are empty: a line that moves depending on
+   what else is wrong is a line you have to find before you can read it. */
+.hud-incursion {
   top: 44px;
+  right: 18px;
+  max-width: 46ch;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-align: right;
+  color: #ff2d2d;
+  animation: incursion-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes incursion-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hud-incursion {
+    animation: none;
+  }
+}
+
+.hud-alert {
+  top: 86px;
   right: 18px;
   font-size: 13px;
   font-weight: 600;
@@ -117,7 +144,7 @@ body {
 /* A gate conflict has not happened yet — amber and a step quieter than the separation alert
    it sits under, which is happening now. */
 .hud-gate-alert {
-  top: 64px;
+  top: 106px;
   right: 18px;
   font-size: 11px;
   font-weight: 600;

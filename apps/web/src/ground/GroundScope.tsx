@@ -26,6 +26,7 @@ import {
 import { COLORS, DIMS } from './palette'
 import { isTypingTarget } from './keyboard'
 import { FIXED_DT, tick } from './simClock'
+import { incursionBanner } from './alerts'
 import type { GroundAircraft } from '@anotheratc/sim'
 
 /** Click must land within this many px of a target to select it. */
@@ -50,6 +51,7 @@ export function GroundScope({ controller }: { controller: GroundController }) {
   const hintRef = useRef<HTMLDivElement>(null)
   const alertRef = useRef<HTMLDivElement>(null)
   const gateAlertRef = useRef<HTMLDivElement>(null)
+  const incursionRef = useRef<HTMLDivElement>(null)
   const devRef = useRef<HTMLDivElement>(null)
 
   // Admin routing-graph overlay. The render loop reads a ref (no effect re-run); the state
@@ -443,6 +445,11 @@ export function GroundScope({ controller }: { controller: GroundController }) {
           const rate = speedRef.current === 0 ? ' · PAUSED' : speedRef.current === 1 ? '' : ` · ${speedRef.current}\u00d7`
           setText(statusRef.current, `${moving} taxiing · ${surface} on surface${final} · dep ${snap.departed} · arr ${snap.arrived} · T+${mm}:${ss}${rate}`)
         }
+        // Runway incursions top the alert stack: a conflict is two aircraft too close, this is
+        // two aircraft on a runway, which is the one that ends the game rather than the shift.
+        if (incursionRef.current) {
+          setText(incursionRef.current, incursionBanner(snap.incursions))
+        }
         if (alertRef.current) {
           const inConflict = snap.aircraft.filter((a) => a.conflict).length
           setText(alertRef.current, inConflict > 0 ? `⚠ CONFLICT` : '')
@@ -631,6 +638,7 @@ export function GroundScope({ controller }: { controller: GroundController }) {
       </div>
       {controller.dev && <div ref={devRef} className="hud hud-dev mono" aria-live="polite" />}
       <div ref={statusRef} className="hud hud-tr mono" />
+      <div ref={incursionRef} className="hud hud-incursion mono" role="alert" />
       <div ref={alertRef} className="hud hud-alert mono" role="alert" />
       {/* Advisory, not an alarm: polite rather than role="alert", so it never cuts across the
           separation conflict above it. */}

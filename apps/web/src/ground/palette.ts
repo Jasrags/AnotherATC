@@ -23,6 +23,8 @@ export const COLORS = {
   target: '#f2f9ff',
   targetHalo: '#7fd4ff',
   conflict: '#ff5a4d', // separation conflict alert
+  incursion: '#ff2d2d', // runway incursion — the loudest thing on the scope, and dashed as well
+  //                       as red, so it is distinguishable from the conflict ring by shape
   targetHold: '#9aacbd',
   airborneTarget: '#7fd4ff', // traffic on final — hollow, to read as "not on the surface"
   approachCourse: '#2f5d72', // the extended runway centerline arrivals fly in on

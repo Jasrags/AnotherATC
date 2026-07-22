@@ -1019,6 +1019,20 @@ export function drawAircraft(ctx: Ctx, v: View, aircraft: GroundAircraft[]): voi
       ctx.stroke()
     }
 
+    // Runway incursion: a wider dashed ring, outside any conflict ring. Two aircraft in an
+    // incursion can be a mile apart, so unlike the conflict ring this can be the only mark on
+    // the target — it has to read on its own, by shape as well as by colour.
+    if (ac.incursion) {
+      ctx.save()
+      ctx.strokeStyle = COLORS.incursion
+      ctx.lineWidth = 2
+      ctx.setLineDash([4, 3])
+      ctx.beginPath()
+      ctx.arc(sx, sy, r + 8, 0, Math.PI * 2)
+      ctx.stroke()
+      ctx.restore()
+    }
+
     drawDataBlock(ctx, ac, sx, sy)
   }
 }

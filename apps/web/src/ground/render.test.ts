@@ -499,3 +499,62 @@ describe('drawStandHighlight', () => {
     expect(texts.map((t) => t.text)).toContain('41')
   })
 })
+
+describe('runway incursion ring', () => {
+  /** Records every stroked arc with the style, width and dash pattern in force at the time. */
+  function tracing() {
+    const arcs: { r: number; style: string; dash: number[] }[] = []
+    let pending: { r: number } | null = null
+    let dash: number[] = []
+    const ctx = {
+      canvas: { width: 400, height: 400 },
+      save() {}, restore() {}, translate() {}, rotate() {},
+      setLineDash(d: number[]) { dash = d },
+      beginPath() { pending = null },
+      closePath() {},
+      moveTo() {}, lineTo() {},
+      arc(_x: number, _y: number, r: number) { pending = { r } },
+      rect() {}, fillText() {}, measureText: () => ({ width: 10 }),
+      fill() {},
+      stroke() {
+        if (pending) arcs.push({ r: pending.r, style: ctx.strokeStyle, dash: [...dash] })
+      },
+      fillStyle: '', strokeStyle: '', lineWidth: 0, font: '', textAlign: '', textBaseline: '',
+      shadowColor: '', shadowBlur: 0, lineJoin: '', lineCap: '',
+    }
+    return { ctx: ctx as unknown as CanvasRenderingContext2D, arcs }
+  }
+
+  const target = (over: { conflict?: boolean; incursion?: boolean }) =>
+    [{
+      id: 'a', callsign: 'AAL1', type: 'B738', wake: 'M', x: 0, y: 0, heading: 0, altitude: 0,
+      finalNm: 0, groundspeed: 0, holding: true, holdShort: false,
+      holdingForTakeoff: false, status: 'holding', controlledBy: 'ground', intent: 'departure',
+      gate: null, onRunway: true, blocksTakeoff: true, onShortFinal: false, exitRef: null,
+      vacated: false, handoffPending: false, conflict: false, incursion: false, giveWayTo: null,
+      waitingForStand: null, squawk: null, hasInstruction: false, wakeHoldSec: 0,
+      services: [], serviceSec: 0, ...over,
+    }] as unknown as Parameters<typeof drawAircraft>[2]
+
+  const view = fitView({ minX: -1, minY: -1, maxX: 1, maxY: 1 }, 400, 400)
+
+  it('is not drawn for an aircraft that is simply on the runway as cleared', () => {
+    const { ctx, arcs } = tracing()
+    drawAircraft(ctx, view, target({}))
+    expect(arcs.some((a) => a.style === COLORS.incursion)).toBe(false)
+  })
+
+  it('rings the target in dashed red, outside any separation-conflict ring', () => {
+    const { ctx, arcs } = tracing()
+    drawAircraft(ctx, view, target({ conflict: true, incursion: true }))
+    const inc = arcs.find((a) => a.style === COLORS.incursion)
+    const conf = arcs.find((a) => a.style === COLORS.conflict)
+    expect(inc).toBeDefined()
+    expect(conf).toBeDefined()
+    // Distinguishable by shape as well as hue: an incursion pair can be a mile apart, so the
+    // ring often has to read on its own with no conflict ring beside it for comparison.
+    expect(inc!.dash.length).toBeGreaterThan(0)
+    expect(conf!.dash).toEqual([])
+    expect(inc!.r).toBeGreaterThan(conf!.r)
+  })
+})
