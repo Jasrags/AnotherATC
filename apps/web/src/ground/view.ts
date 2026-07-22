@@ -7,6 +7,24 @@ export interface View {
   offY: number
 }
 
+/** Aiming tolerance (px) for reading a click as a taxi clearance rather than a deselect. */
+const CLEARANCE_HIT_PX = 44
+/**
+ * …and the world-space ceiling on it (nm ≈ 240 ft, about two taxiway widths).
+ *
+ * The pixel term alone is wrong, and was: at whole-airport zoom the field is only a few hundred
+ * pixels across, so 44 px reached 345 ft on a desktop and **1,530 ft on a phone** — a quarter of
+ * a mile from any pavement, which is to say anywhere. Pavement is a world-space thing, so what
+ * counts as *on* it has to be bounded in world space; the pixels only make it clickable once you
+ * are zoomed in far enough for the question to be meaningful.
+ */
+const CLEARANCE_MAX_NM = 0.04
+
+/** How far from routable pavement (nm) a click may land and still be read as a taxi clearance. */
+export function clearanceRangeNm(scale: number): number {
+  return Math.min(CLEARANCE_HIT_PX / scale, CLEARANCE_MAX_NM)
+}
+
 export function fitView(bounds: Bounds, width: number, height: number, pad = 48): View {
   const w = Math.max(bounds.maxX - bounds.minX, 1e-6)
   const h = Math.max(bounds.maxY - bounds.minY, 1e-6)

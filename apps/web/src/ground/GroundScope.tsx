@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { GroundController } from './controller'
-import { centerOn, fitPoints, fitView, pan, reframe, toWorld, zoomAt, type View } from './view'
+import { centerOn, clearanceRangeNm, fitPoints, fitView, pan, reframe, toWorld, zoomAt, type View } from './view'
 import {
   drawAircraft,
   drawApproachCourse,
@@ -37,10 +37,6 @@ const HIT_PX = 14
 const TAXI_HIT_PX = 26
 /** Pointer movement beyond this (px) counts as a pan, not a click. */
 const DRAG_PX = 4
-/** How near the routable network (px) a click has to land to be read as a taxi clearance rather
- *  than a deselect. Measured in pixels, not nm, because it is an aiming tolerance: what counts
- *  as "on the pavement" is what looks like it on screen, at whatever zoom you are working at. */
-const CLEARANCE_HIT_PX = 44
 
 /** Set an element's text only when it changed — avoids re-announcing aria-live regions. */
 function setText(el: HTMLElement, text: string): void {
@@ -330,7 +326,7 @@ export function GroundScope({ controller }: { controller: GroundController }) {
         // its mind on its own. Off the network, a click means what it means with nothing
         // selected: deselect.
         const [wx, wy] = toWorld(view, sx, sy)
-        if (distanceToNetworkNm(controller.topology, [wx, wy]) <= CLEARANCE_HIT_PX / view.scale) {
+        if (distanceToNetworkNm(controller.topology, [wx, wy]) <= clearanceRangeNm(view.scale)) {
           controller.dispatch({ type: 'taxiTo', aircraftId: selectedId, dest: [wx, wy] })
         } else {
           controller.select(null)

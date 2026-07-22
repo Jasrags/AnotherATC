@@ -436,8 +436,14 @@ is switched on.
   a destination further than `MAX_GOAL_SNAP_NM` (0.25 nm) from the network at all — a backstop
   deliberately looser than any aiming tolerance, since a stand's stop mark legitimately sits a
   lead-in line off the nearest node, so no caller can turn a point over the water into a
-  clearance. _Not done: a hover preview of where the clearance would go, the way the route
-  builder previews the taxiway a click would pick._
+  clearance. **Follow-up (reported in play):** the first fix used a pure *pixel* tolerance, which
+  is right for aiming at something you can see and wrong at whole-airport zoom, where the field
+  is only a few hundred pixels across — 44 px reached 345 ft on a desktop and **1,530 ft on a
+  phone**, against a taxiway half-width of ~75 ft. So a tap well off the pavement still counted.
+  Pavement is a world-space thing, so the tolerance is now capped in world space
+  (`clearanceRangeNm` = min(44 px, 0.04 nm ≈ 240 ft)); the pixels only make it clickable once you
+  are zoomed in far enough for the question to be meaningful. _Not done: a hover preview of where
+  the clearance would go, the way the route builder previews the taxiway a click would pick._
 - ⬜ Scale bar / range rings
 - ⬜ Pan/zoom clamping (don't lose the airport off-screen)
 - ✅ Runway turnoffs drawn along their real geometry for the selected arrival, assigned one emphasized

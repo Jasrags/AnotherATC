@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { centerOn, fitPoints, fitView, toScreen, toWorld, zoomAt, pan, reframe, MIN_SCALE, MAX_SCALE } from './view'
+import { centerOn, clearanceRangeNm, fitPoints, fitView, toScreen, toWorld, zoomAt, pan, reframe, MIN_SCALE, MAX_SCALE } from './view'
 import type { Bounds } from '@anotheratc/sim'
 
 const bounds: Bounds = { minX: -1, minY: -0.5, maxX: 1, maxY: 0.5 }
@@ -127,5 +127,33 @@ describe('centerOn', () => {
     const [wx, wy] = toWorld(c, 512, 384)
     expect(wx).toBeCloseTo(-0.75, 9)
     expect(wy).toBeCloseTo(0.33, 9)
+  })
+})
+
+describe('clearanceRangeNm', () => {
+  // The bug this exists to prevent: a pure pixel tolerance, converted to world units at
+  // whole-airport zoom, reached a quarter of a mile from any pavement — so a tap on the bay
+  // re-cleared the selected aircraft. Pavement is a world-space thing; the bound has to be too.
+  const FT = (nm: number) => nm * 6076
+
+  it('never reaches further than about two taxiway widths, however far out you are zoomed', () => {
+    // KSAN fit-zoom scales: ~775 px/nm desktop, ~537 laptop, ~175 on a phone.
+    for (const scale of [175, 537, 775]) {
+      expect(FT(clearanceRangeNm(scale))).toBeLessThanOrEqual(250)
+    }
+    // The phone case is the one that was 1,530 ft.
+    expect(FT(clearanceRangeNm(175))).toBeLessThan(300)
+  })
+
+  it('tightens as you zoom in, where pixels are the honest limit', () => {
+    // Zoomed right in, 44 px is a comfortable target and far *less* than the cap.
+    expect(clearanceRangeNm(5000)).toBeCloseTo(44 / 5000, 9)
+    expect(clearanceRangeNm(5000)).toBeLessThan(clearanceRangeNm(775))
+  })
+
+  it('is monotonic — zooming in never widens the tolerance', () => {
+    const scales = [100, 300, 775, 2000, 8000]
+    const ranges = scales.map(clearanceRangeNm)
+    expect(ranges).toEqual([...ranges].sort((a, b) => b - a))
   })
 })
