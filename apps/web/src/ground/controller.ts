@@ -56,10 +56,20 @@ export function trafficLevelFor(rate: number): (typeof TRAFFIC_LEVELS)[number] |
   return TRAFFIC_LEVELS.find((l) => l.rate === rate)
 }
 
-// Read-back errors are built and tested in the sim (`readback: { errorRate, seed }`) but are
-// deliberately NOT enabled here: the base loop gets proven first, and a mechanic that makes
-// clearances silently take effect wrong is exactly the kind of thing that hides a real bug
-// behind "the pilot misheard it". Turned on when we game the game — see backlog.md.
+/**
+ * Read-back errors: how often a pilot mishears the beacon code in an IFR clearance, and the
+ * seed that makes it reproducible.
+ *
+ * Held off until the base loop was proven, on the grounds that a mechanic making clearances
+ * silently take effect wrong is exactly what hides a real bug behind "the pilot misheard it".
+ * That is why it is *this* rate: about one clearance in seven, which is far more often than
+ * real life and often enough that a session contains a few — and why the error has one
+ * consequence rather than many, at the Tower handoff, where the refusal names itself. A bug
+ * that looks like a mishearing still has one place to hide, and that place says so out loud.
+ *
+ * Its own stream, so turning it on does not shift the spawner's traffic by a single aircraft.
+ */
+const READBACK = { errorRate: 0.15, seed: 7919 }
 
 /** What a flight strip shows — deliberately excludes fast-changing fields (position,
  *  speed) so the strip bay only re-renders when phase or selection changes. */
@@ -306,6 +316,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
         // Arrivals become the next departure off the same stand rather than vanishing, which is
         // what makes a gate a finite resource rather than a formality.
         turnaround: true,
+        readback: READBACK,
       })
   // A bad saved/URL value must not take the field down with it — fall back to the field's rate.
   if (opts.trafficRate !== undefined && Number.isFinite(opts.trafficRate) && opts.trafficRate >= 0) {

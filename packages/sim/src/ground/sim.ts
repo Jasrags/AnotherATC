@@ -437,9 +437,18 @@ interface Internal
   incursion: boolean
   /** The last clearance transmitted to this aircraft — what "say again" repeats. */
   lastClearance: GroundCommand | null
-  /** What the controller actually said, when the pilot read it back wrong. Null when the last
-   *  read-back was correct (which is indistinguishable from the outside — deliberately). */
-  misheard: { squawk: string } | null
+  /**
+   * The beacon code the controller *issued*, as against {@link squawk}, which is the code the
+   * aircraft is actually squawking. The two differ exactly when a read-back was misheard and
+   * never verified.
+   *
+   * Durable, and deliberately not tied to the last clearance: a transponder set to the wrong
+   * code stays wrong through every instruction that follows, because nothing in a pushback or
+   * a taxi clearance touches it. The mishearing used to be forgotten the moment any other
+   * clearance was issued, which made an uncaught error both untraceable and uncorrectable —
+   * so it could never cost anything, and the whole mechanic was decorative.
+   */
+  issuedSquawk: string | null
 }
 
 /**
@@ -568,8 +577,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     if (!readbackRng || !readback || cmd.type !== 'clearance' || !ac.squawk) return false
     if (readbackRng.next() >= readback.errorRate) return false
     const wrong = misheardSquawk(ac.squawk, readbackRng.next(), readbackRng.next())
-    ac.misheard = { squawk: ac.squawk }
-    ac.squawk = wrong
+    ac.squawk = wrong // `issuedSquawk` still holds what was said; the two now disagree
     readbackErrors += 1
     return true
   }
@@ -585,14 +593,17 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
   function voidClearance(ac: Internal, only?: GroundCommand['type']): void {
     if (only && ac.lastClearance?.type !== only) return
     ac.lastClearance = null
-    ac.misheard = null
   }
 
-  /** Undo a misheard clearance: the aircraft acts on what the controller actually said. */
+  /** Whether this aircraft is squawking a code nobody issued it. */
+  function squawkUnverified(ac: Internal): boolean {
+    return ac.issuedSquawk !== null && ac.squawk !== ac.issuedSquawk
+  }
+
+  /** Undo a misheard clearance: the aircraft sets what the controller actually said. */
   function correctMishearing(ac: Internal): boolean {
-    if (!ac.misheard) return false
-    ac.squawk = ac.misheard.squawk
-    ac.misheard = null
+    if (!squawkUnverified(ac)) return false
+    ac.squawk = ac.issuedSquawk
     readbackCaught += 1
     return true
   }
@@ -618,10 +629,10 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     // pilot heard it. When nothing is misheard the two are the same context.
     const ex = phraseFor(cmd, { ...phraseContext(ac), ...before })
     if (!ex) return
-    // A new clearance supersedes the last one — including a mishearing of it, which is now
-    // beyond correcting: "say again" repeats what was said *most recently*, not a stale code.
+    // A new clearance supersedes the last one for the purposes of "say again", which repeats
+    // what was said most recently. A wrong *code* is not superseded by anything — the
+    // transponder is still set wrong — so it outlives this; see `issuedSquawk`.
     ac.lastClearance = cmd
-    ac.misheard = null
     const readbackText = maybeMishear(cmd, ac)
       ? (phraseFor(cmd, { ...phraseContext(ac), ...before })?.readback ?? ex.readback)
       : ex.readback
@@ -732,7 +743,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       facingCommitted: null,
       rollWhenLinedUp: false,
       lastClearance: null,
-      misheard: null,
+      issuedSquawk: null,
     }
   }
 
@@ -2158,6 +2169,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         if (ac.intent !== 'departure') return refused('only departures receive IFR clearance')
         if (ac.squawk) return refused('already cleared')
         ac.squawk = nextSquawk()
+        ac.issuedSquawk = ac.squawk
         return ACCEPTED
       case 'contactTower': {
         // Ground → Tower handoff: transfer a departure holding short of its own runway to
@@ -2172,6 +2184,15 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         // An arrival crosses to reach its gate, so this is deliberately not departures-only.
         if (!holdingForTakeoff(ac) && !heldRouteCrosses(ac))
           return refused('nothing to hand off for — not a takeoff or a crossing')
+        // What a missed read-back finally costs. The aircraft is squawking a code the
+        // controller never issued, and this is the last moment Ground owns it: handing it on is
+        // handing the next position an aircraft it cannot identify. Deliberately not a gate on
+        // the *clearance* — that would catch the error for you, and noticing it in the
+        // transcript is the whole game (see `maybeMishear`). It is also not a gate on a
+        // crossing: a transit is coming straight back, and nothing is about to look for it on
+        // radar. "Say again" is the fix, and the delay is the price of not having noticed.
+        if (squawkUnverified(ac) && holdingForTakeoff(ac))
+          return refused('verify transponder code — the read-back was never checked')
         ac.controlledBy = 'tower'
         return ACCEPTED
       }
@@ -2530,8 +2551,8 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     // A new flight: the previous clearance and its beacon code do not carry over, and neither
     // does anything left from the arrival — the landing, its turnoff, or its read-back state.
     ac.squawk = null
+    ac.issuedSquawk = null
     ac.lastClearance = null
-    ac.misheard = null
     ac.exit = null
     ac.assignedExitRef = null
     ac.rollingOut = false

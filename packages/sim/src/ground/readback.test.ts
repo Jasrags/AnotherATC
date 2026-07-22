@@ -86,15 +86,23 @@ describe('read-back verification', () => {
     expect(sim.dispatch({ type: 'sayAgain', aircraftId: 'a' }).ok).toBe(false)
   })
 
-  it('a second clearance replaces what "say again" would correct', () => {
+  it('repeats the latest instruction — and still puts a stale wrong code right', () => {
     const sim = createGroundSim([parked('a')], always)
     sim.dispatch({ type: 'clearance', aircraftId: 'a' })
     sim.dispatch({ type: 'hold', aircraftId: 'a' }) // a new clearance, correctly read back or not
-    // Correcting now repeats the *latest* instruction, not the stale one — and the earlier
-    // mishearing is beyond correcting, because that is no longer what was said.
     sim.dispatch({ type: 'sayAgain', aircraftId: 'a' })
+
+    // What is *said* is the latest instruction: "say again" repeats what was said most
+    // recently, not a stale one.
     expect(sim.snapshot().comms.at(-2)!.text).toContain('hold position')
-    expect(sim.snapshot().readbackCaught).toBe(0)
+    // The code, though, is not a thing that was said — it is a thing the transponder is set
+    // to, and it stays set wrong through every instruction that follows. It used to be
+    // treated as superseded, which made an uncaught error permanent *and* invisible: nothing
+    // could correct it and nothing could tell it had happened.
+    expect(sim.snapshot().readbackCaught).toBe(1)
+    expect(sim.snapshot().aircraft[0]!.squawk).toBe(
+      /squawk ([0-7]{4})/.exec(sim.snapshot().comms[0]!.text)![1]!,
+    )
   })
 
   it('is deterministic: the same seed mishears the same clearances', () => {
@@ -141,15 +149,25 @@ describe('read-back through a whole KSAN departure', () => {
   const issued = (sim: ReturnType<typeof createGroundSim>) =>
     /squawk ([0-7]{4})/.exec(sim.snapshot().comms.find((t) => t.from === 'controller')!.text)![1]!
 
-  it('an uncaught error follows the aircraft to the runway', () => {
+  it('an uncaught error follows the aircraft to the runway, and stops it there', () => {
     const { sim, id } = build(1)
     const ac = fly(sim, id, false)
     expect(ac.holdShort).toBe(true)
     expect(ac.squawk).not.toBe(issued(sim))
     expect(sim.snapshot().readbackErrors).toBe(1)
     expect(sim.snapshot().readbackCaught).toBe(0)
-    // It is legal in every other respect — a wrong squawk is a quiet error, not a blocked one.
-    expect(sim.dispatch({ type: 'clearedForTakeoff', aircraftId: id })).toEqual({ ok: true })
+    // Nothing on the way stops it: pushback, taxi and the hold-short line are all indifferent
+    // to what it is squawking, which is what gives the controller the whole taxi to notice.
+    // The handoff is where it finally costs something — Ground does not hand the next position
+    // an aircraft it cannot identify.
+    expect(ac.controlledBy).toBe('ground') // `fly` tried the handoff; it was refused
+    expect(sim.dispatch({ type: 'contactTower', aircraftId: id })).toEqual({
+      ok: false,
+      reason: 'verify transponder code — the read-back was never checked',
+    })
+    // …and the fix is the one the controller should have used a taxi ago.
+    expect(sim.dispatch({ type: 'sayAgain', aircraftId: id })).toEqual({ ok: true })
+    expect(sim.dispatch({ type: 'contactTower', aircraftId: id })).toEqual({ ok: true })
   })
 
   it('catching it at the gate puts the right code on the aircraft for the rest of the flight', () => {
@@ -222,5 +240,89 @@ describe('clearances the sim voids on its own are no longer repeatable', () => {
     expect(sim.snapshot().comms.at(-1)!.text).toContain('going around')
     expect(sim.snapshot().aircraft[0]!.status).toBe('onFinal') // clearance voided by the sim
     expect(sim.dispatch({ type: 'sayAgain', aircraftId: 'r' }).ok).toBe(false)
+  })
+})
+
+describe('an unverified read-back bites at the handoff', () => {
+  const graph = buildTaxiGraph(KSAN.surface)
+  const guard = buildRunwayGuard(KSAN.surface)
+
+  /** A KSAN departure cleared, pushed back and taxied to hold short of the runway. */
+  function heldShort(opts: GroundSimOptions) {
+    const game = createAirportGame(KSAN, 1)
+    const slot = KSAN.fleets[0]!.gates[0]!
+    const sim = createGroundSim(
+      [{
+        id: 'd', callsign: 'SKW412', type: 'B738', wake: 'M',
+        path: [slot.point], targetSpeed: 0,
+        ...(slot.headingDeg !== undefined ? { heading: slot.headingDeg } : {}),
+        intent: 'departure', gate: slot.ref, goalPoint: game.runway.departureStart,
+      }],
+      { graph, guard, runway: game.runway, stands: game.stands, ...opts },
+    )
+    const D = () => sim.snapshot().aircraft.find((a) => a.id === 'd')!
+    sim.dispatch({ type: 'clearance', aircraftId: 'd' })
+    sim.dispatch({ type: 'pushback', aircraftId: 'd' })
+    for (let i = 0; i < 2000 && D().status === 'pushback'; i += 1) sim.step(0.1)
+    sim.dispatch({ type: 'taxiToGoal', aircraftId: 'd' })
+    for (let i = 0; i < 30000 && D().status !== 'holdShort'; i += 1) sim.step(0.1)
+    expect(D().status).toBe('holdShort')
+    return { sim, D }
+  }
+
+  it('refuses to hand on an aircraft squawking a code nobody issued', () => {
+    // The point at which a missed read-back has to cost something. Ground owns this aircraft
+    // until the handoff and has had the whole taxi to notice; handing it on with the wrong code
+    // is handing the next position an aircraft it cannot identify.
+    const { sim } = heldShort(always)
+    expect(sim.dispatch({ type: 'contactTower', aircraftId: 'd' })).toEqual({
+      ok: false,
+      reason: 'verify transponder code — the read-back was never checked',
+    })
+  })
+
+  it('lets it go once "say again" has put the code right', () => {
+    const { sim, D } = heldShort(always)
+    const issued = sim.snapshot().comms.find((c) => c.text.includes('squawk'))!.text
+    expect(issued).not.toContain(D().squawk!) // it is squawking what it misheard
+
+    expect(sim.dispatch({ type: 'sayAgain', aircraftId: 'd' })).toEqual({ ok: true })
+    expect(issued).toContain(D().squawk!) // …and now what it was told
+    expect(sim.dispatch({ type: 'contactTower', aircraftId: 'd' })).toEqual({ ok: true })
+    expect(sim.snapshot().readbackCaught).toBe(1)
+  })
+
+  it('never gets in the way when the read-back was right', () => {
+    const { sim } = heldShort(never)
+    expect(sim.dispatch({ type: 'contactTower', aircraftId: 'd' })).toEqual({ ok: true })
+  })
+
+  it('does not gate a crossing — a transit is not being identified by anybody', () => {
+    // The code matters because the position taking the aircraft has to find it on radar. An
+    // aircraft handed to Tower to *cross* the runway is coming straight back to Ground;
+    // refusing that would strand it at a hold-short line over a code nothing is about to use.
+    const game = createAirportGame(KSAN, 1)
+    const slot = KSAN.fleets[0]!.gates[0]! // a terminal stand, south of the runway
+    const northRamp = KSAN.fleets.find((f) => f.kind === 'cargo')!.gates[0]! // …and across it
+    const sim = createGroundSim(
+      [{
+        id: 'x', callsign: 'SKW9', type: 'B738', wake: 'M',
+        path: [slot.point], targetSpeed: 0,
+        ...(slot.headingDeg !== undefined ? { heading: slot.headingDeg } : {}),
+        // Its goal is the far side of the field, not the runway: "where is it going" is what
+        // makes the runway something to cross rather than something to use.
+        intent: 'departure', gate: slot.ref, goalPoint: northRamp.point,
+      }],
+      { graph, guard, runway: game.runway, stands: game.stands, ...always },
+    )
+    const X = () => sim.snapshot().aircraft.find((a) => a.id === 'x')!
+    sim.dispatch({ type: 'clearance', aircraftId: 'x' })
+    sim.dispatch({ type: 'pushback', aircraftId: 'x' })
+    for (let i = 0; i < 2000 && X().status === 'pushback'; i += 1) sim.step(0.1)
+    expect(sim.dispatch({ type: 'taxiToGoal', aircraftId: 'x' }).ok).toBe(true)
+    for (let i = 0; i < 40000 && X().status !== 'holdShort'; i += 1) sim.step(0.1)
+    expect(X().status).toBe('holdShort')
+    expect(X().holdingForTakeoff).toBe(false) // holding to cross, not to depart
+    expect(sim.dispatch({ type: 'contactTower', aircraftId: 'x' }).ok).toBe(true)
   })
 })

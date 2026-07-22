@@ -19,6 +19,22 @@ Complete operational sequence for departure and arrival phases, mapped to ATC co
 - Pilot reads back the clearance in full — controller must verify accuracy before approving
 - Gameplay: read-back verification, slot time management at busy airports
 
+**As implemented (read-back verification).** Of the clearance above only the squawk exists yet,
+so the squawk is what can be misheard: the pilot reads back a code one octal digit out and
+*sets that code*, because a pilot flies what they read back. Nothing marks it. The transcript
+and the strip both show the code the aircraft is squawking — they always agree — so the only
+way to catch it is to compare the controller's own instruction, further up the log, against
+what came back. "Say again" is the catch, and it is offered on every aircraft at every phase:
+an always-available correction is a judgement, one that appears only when needed is a prompt.
+
+The code is **not** superseded by later clearances. A transponder set wrong stays wrong through
+pushback and taxi, because nothing in those touches it — which is why the sim keeps what was
+issued (`issuedSquawk`) alongside what is being squawked, rather than treating the mishearing
+as a property of the last thing said. An uncaught error therefore reaches the runway, where
+**Ground refuses the handoff to Tower**: the receiving position has to be able to identify the
+aircraft, and the whole taxi was the window to notice. A crossing is not gated — a transit is
+coming straight back and nothing is about to look for it on radar.
+
 #### Ground Servicing (Concurrent with clearance and boarding)
 All of the following happen in parallel — the aircraft cannot push until all are complete:
 

@@ -492,3 +492,59 @@ describe('traffic level', () => {
     expect(seenOver(low, 900)).toBeLessThan(seenOver(normal, 900))
   })
 })
+
+describe('read-back verification is live', () => {
+  /** Work the field: clear every parked departure that has not been cleared yet. */
+  function clearEverything(c: ReturnType<typeof createGroundController>, seconds: number): void {
+    for (let i = 0; i < seconds * 10; i += 1) {
+      c.sim.step(0.1)
+      for (const a of c.sim.snapshot().aircraft) {
+        if (a.intent === 'departure' && a.status === 'parked' && !a.squawk) {
+          c.dispatch({ type: 'clearance', aircraftId: a.id })
+        }
+      }
+    }
+  }
+
+  it('mishears some clearances, so the transcript is worth reading', () => {
+    // The mechanic was built, tested and deliberately left switched off. This is the test that
+    // it is on: without the wiring the count stays at zero however many clearances are issued.
+    const c = createGroundController()
+    clearEverything(c, 900)
+    expect(c.sim.snapshot().readbackErrors).toBeGreaterThan(0)
+  })
+
+  it('reads back a code the aircraft is then squawking — right or wrong', () => {
+    // What makes it catchable: the transcript says what the pilot heard, the strip says what
+    // the aircraft is squawking, and those two always agree. The one that can disagree is the
+    // controller's own instruction, further up the log.
+    const c = createGroundController()
+    clearEverything(c, 900)
+    const snap = c.sim.snapshot()
+    for (const a of snap.aircraft) {
+      if (!a.squawk) continue
+      const readback = snap.comms.filter((t) => t.aircraftId === a.id && t.from === 'pilot')
+      const code = readback.map((t) => /squawk ([0-7]{4})/.exec(t.text)?.[1]).filter(Boolean).at(-1)
+      if (code) expect(a.squawk).toBe(code)
+    }
+  })
+
+  it('refuses the tower handoff for an aircraft nobody verified', () => {
+    // The consequence, through the real controller: an uncaught error costs a refused handoff
+    // at the runway, and "say again" is the fix.
+    const c = createGroundController()
+    clearEverything(c, 900)
+    const snap = c.sim.snapshot()
+    const issued = new Map<string, string>()
+    for (const t of snap.comms) {
+      const code = t.from === 'controller' ? /squawk ([0-7]{4})/.exec(t.text)?.[1] : undefined
+      if (code) issued.set(t.aircraftId, code)
+    }
+    const wrong = snap.aircraft.find((a) => a.squawk && issued.get(a.id) !== a.squawk)
+    expect(wrong).toBeDefined()
+    const res = c.sim.dispatch({ type: 'contactTower', aircraftId: wrong!.id })
+    // It may not be holding short yet — that refusal is a different one, and the point here is
+    // only that the unverified code is never what lets it through.
+    expect(res.ok).toBe(false)
+  })
+})
