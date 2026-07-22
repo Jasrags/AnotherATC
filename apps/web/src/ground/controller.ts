@@ -26,6 +26,7 @@ import type {
   Transmission,
   WakeCategory,
 } from '@anotheratc/sim'
+import { AWAITING_ADVISORY_SEC } from './alerts'
 
 /** How many alternative stands the reassign menu offers. The field has 51; the nearest handful
  *  is a decision, the whole list is just a list. */
@@ -48,6 +49,14 @@ export const TRAFFIC_LEVELS = [
   { label: 'MOD', rate: 1 },
   { label: 'HIGH', rate: 1.75 },
 ] as const
+
+/** The wait as the strip renders it: one bucket for everything below the threshold, where the
+ *  strip shows nothing at all, and the live second only once it is on screen. Every arrival
+ *  spends a few seconds waiting between check-in and its taxi clearance, and re-rendering the
+ *  whole bay once a second for a number nobody can see is the cost of not doing this. */
+function awaitingSig(sec: number): number {
+  return sec < AWAITING_ADVISORY_SEC ? 0 : sec
+}
 
 /** The level a rate corresponds to, or undefined for a rate no button offers. The toolbar shows
  *  a rate by pressing its button, so a rate outside this list would run with nothing pressed —
@@ -413,7 +422,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
     // Range-to-threshold is continuous, so it enters the signature at display precision
     // (0.1 nm ≈ one re-render every ~2.5 s on final) rather than every frame.
     for (const a of acs)
-      nextSig += `|${a.id}:${a.status}:${a.controlledBy}:${a.onRunway ? 'R' : ''}${a.blocksTakeoff ? 'B' : ''}${a.onShortFinal ? 'F' : ''}${a.vacated ? 'V' : ''}${a.handoffPending ? 'H' : ''}${a.incursion ? 'X' : ''}${a.expedite ? 'E' : ''}${a.canExpedite ? 'C' : ''}${a.canHoldShort ? 'S' : ''}:${a.exitRef ?? ''}:${(exitOpts.get(a.id) ?? []).map((e) => e.ref).join('+')}:${vias.get(a.id)!.join('.')}:${a.giveWayTo ?? ''}:${a.waitingForStand ?? ''}:${a.gateBlocked ? 'O' : ''}:${a.squawk ?? ''}:${a.hasInstruction ? 'I' : ''}:${a.wakeHoldSec}:${a.awaitingSec}:${a.serviceSec}:${a.finalNm.toFixed(1)}`
+      nextSig += `|${a.id}:${a.status}:${a.controlledBy}:${a.onRunway ? 'R' : ''}${a.blocksTakeoff ? 'B' : ''}${a.onShortFinal ? 'F' : ''}${a.vacated ? 'V' : ''}${a.handoffPending ? 'H' : ''}${a.incursion ? 'X' : ''}${a.expedite ? 'E' : ''}${a.canExpedite ? 'C' : ''}${a.canHoldShort ? 'S' : ''}:${a.exitRef ?? ''}:${(exitOpts.get(a.id) ?? []).map((e) => e.ref).join('+')}:${vias.get(a.id)!.join('.')}:${a.giveWayTo ?? ''}:${a.waitingForStand ?? ''}:${a.gateBlocked ? 'O' : ''}:${a.squawk ?? ''}:${a.hasInstruction ? 'I' : ''}:${a.wakeHoldSec}:${awaitingSig(a.awaitingSec)}:${a.serviceSec}:${a.finalNm.toFixed(1)}`
     if (nextSig === sig) return
     sig = nextSig
     snapshot = {

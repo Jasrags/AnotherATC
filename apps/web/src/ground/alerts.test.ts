@@ -72,27 +72,42 @@ describe('incursionAlert', () => {
 })
 
 describe('awaitingAlert', () => {
-  const wait = (callsign: string, awaitingSec: number, intent: 'arrival' | 'departure' = 'arrival') =>
-    ({ callsign, awaitingSec, intent }) as AwaitingItem
+  const wait = (callsign: string, awaitingSec: number) => ({ callsign, awaitingSec }) as AwaitingItem
 
-  it('is empty when nobody has been left waiting long enough to mention', () => {
-    expect(awaitingAlert([])).toBe('')
-    expect(awaitingAlert([wait('AAL1', AWAITING_ADVISORY_SEC - 1)])).toBe('')
+  it('says nothing when nobody has been left waiting long enough to mention', () => {
+    expect(awaitingAlert([])).toEqual({ text: '', announcement: '' })
+    expect(awaitingAlert([wait('AAL1', AWAITING_ADVISORY_SEC - 1)]).text).toBe('')
   })
 
   it('names who is waiting and for how long, once it is worth saying', () => {
-    expect(awaitingAlert([wait('AAL1', 45)])).toBe('⧗ AAL1 AWAITING TAXI 0:45')
+    expect(awaitingAlert([wait('AAL1', 45)]).text).toBe('⧗ AAL1 AWAITING TAXI 0:45')
   })
 
   it('leads with whoever has waited longest — that is the one to answer first', () => {
-    const line = awaitingAlert([wait('AAL1', 40), wait('DAL2', 130), wait('SWA3', 65)])
-    expect(line).toBe('⧗ DAL2 AWAITING TAXI 2:10 · SWA3 1:05 · AAL1 0:40')
+    const { text } = awaitingAlert([wait('AAL1', 40), wait('DAL2', 130), wait('SWA3', 65)])
+    expect(text).toBe('⧗ DAL2 AWAITING TAXI 2:10 · SWA3 1:05 · AAL1 0:40')
   })
 
   it('counts the rest rather than listing a whole bay of them', () => {
     // Past a handful this is no longer a list of aircraft to act on, it is a statement about
     // how the session is going — and a HUD line that wraps is one nobody reads.
     const many = [140, 130, 120, 110, 100, 90].map((s, i) => wait(`AAL${i}`, s))
-    expect(awaitingAlert(many)).toBe('⧗ AAL0 AWAITING TAXI 2:20 · AAL1 2:10 · AAL2 2:00 · +3 more')
+    expect(awaitingAlert(many).text).toBe('⧗ AAL0 AWAITING TAXI 2:20 · AAL1 2:10 · AAL2 2:00 · +3 more')
+  })
+
+  it('keeps the ticking clocks out of what is announced, so it is not spoken every second', () => {
+    // A live region re-announces whenever its text changes. The visible line changes every
+    // second; this must not, or the quietest advisory on the scope becomes the loudest.
+    const at = (sec: number) => awaitingAlert([wait('AAL1', sec), wait('DAL2', 40)]).announcement
+    expect(at(45)).toBe('AAL1 awaiting taxi, and 1 other aircraft waiting.')
+    expect(at(46)).toBe(at(45))
+    expect(at(300)).toBe(at(45))
+  })
+
+  it('announces again when a different aircraft becomes the one to answer', () => {
+    const one = awaitingAlert([wait('AAL1', 45)]).announcement
+    const two = awaitingAlert([wait('DAL2', 90), wait('AAL1', 45)]).announcement
+    expect(two).not.toBe(one)
+    expect(two).toBe('DAL2 awaiting taxi, and 1 other aircraft waiting.')
   })
 })

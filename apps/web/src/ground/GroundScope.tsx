@@ -54,6 +54,7 @@ export function GroundScope({ controller }: { controller: GroundController }) {
   const alertRef = useRef<HTMLDivElement>(null)
   const gateAlertRef = useRef<HTMLDivElement>(null)
   const awaitingRef = useRef<HTMLDivElement>(null)
+  const awaitingSrRef = useRef<HTMLDivElement>(null)
   const incursionRef = useRef<HTMLButtonElement>(null)
   const incursionMarkRef = useRef<HTMLSpanElement>(null)
   const incursionTextRef = useRef<HTMLSpanElement>(null)
@@ -520,7 +521,14 @@ export function GroundScope({ controller }: { controller: GroundController }) {
         }
         // Aircraft you have left with nothing to do. The quietest line on the scope: nothing is
         // wrong yet, and an arrival sitting in its turnoff is a mistake still in the making.
-        if (awaitingRef.current) setText(awaitingRef.current, awaitingAlert(snap.aircraft))
+        // Two nodes, for the same reason the incursion banner has two: the visible line carries
+        // running clocks and changes every second, and a live region fed that would speak every
+        // second. Only the announcement — who, not how long — reaches the live region.
+        if (awaitingRef.current && awaitingSrRef.current) {
+          const awaiting = awaitingAlert(snap.aircraft)
+          setText(awaitingRef.current, awaiting.text)
+          setText(awaitingSrRef.current, awaiting.announcement)
+        }
         if (devRef.current && controller.dev) {
           let t = ''
           if (devToolRef.current === 'spawn') {
@@ -748,7 +756,8 @@ export function GroundScope({ controller }: { controller: GroundController }) {
       {/* Advisory, not an alarm: polite rather than role="alert", so it never cuts across the
           separation conflict above it. */}
       <div ref={gateAlertRef} className="hud hud-gate-alert mono" aria-live="polite" />
-      <div ref={awaitingRef} className="hud hud-awaiting mono" aria-live="polite" />
+      <div ref={awaitingRef} className="hud hud-awaiting mono" aria-hidden="true" />
+      <div ref={awaitingSrRef} className="sr-only" aria-live="polite" />
     </div>
   )
 }

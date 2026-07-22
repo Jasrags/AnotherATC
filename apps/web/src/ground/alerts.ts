@@ -62,6 +62,22 @@ export interface AwaitingItem {
   awaitingSec: number
 }
 
+export interface AwaitingAlert {
+  /** What the controller reads. Carries the running clocks, so it changes every second. */
+  text: string
+  /**
+   * What a screen reader is told — the same news without the clocks.
+   *
+   * Same reasoning as {@link IncursionAlert.announcement}, and the same trap: a live region is
+   * re-announced whenever its text changes, so announcing the visible line would speak once a
+   * second for as long as anyone was waiting. This changes only when *who* is waiting does,
+   * which is the part that is news. Empty when there is nothing to say.
+   */
+  announcement: string
+}
+
+const NOTHING: AwaitingAlert = { text: '', announcement: '' }
+
 /** How many are named before the rest become a count. */
 const AWAITING_NAMED = 3
 
@@ -79,14 +95,21 @@ export function awaitingClock(sec: number): string {
  * instruction it is missing ("awaiting taxi") only once: the repeat for each further aircraft
  * would treble the length of a line whose whole job is to be read in a glance.
  */
-export function awaitingAlert(aircraft: readonly AwaitingItem[]): string {
+export function awaitingAlert(aircraft: readonly AwaitingItem[]): AwaitingAlert {
   const waiting = aircraft
     .filter((a) => a.awaitingSec >= AWAITING_ADVISORY_SEC)
     .sort((p, q) => q.awaitingSec - p.awaitingSec || (p.callsign < q.callsign ? -1 : 1))
-  if (waiting.length === 0) return ''
+  const lead = waiting[0]
+  if (!lead) return NOTHING
   const named = waiting.slice(0, AWAITING_NAMED)
-  const head = `${named[0]!.callsign} AWAITING TAXI ${awaitingClock(named[0]!.awaitingSec)}`
+  const head = `${lead.callsign} AWAITING TAXI ${awaitingClock(lead.awaitingSec)}`
   const rest = named.slice(1).map((a) => `${a.callsign} ${awaitingClock(a.awaitingSec)}`)
   const more = waiting.length > named.length ? [`+${waiting.length - named.length} more`] : []
-  return `⧗ ${[head, ...rest, ...more].join(' · ')}`
+  const others = waiting.length - 1
+  return {
+    text: `⧗ ${[head, ...rest, ...more].join(' · ')}`,
+    // Named, not counted, for the one you should answer first — and a plain count for the rest,
+    // because a list of callsigns read aloud is not something anyone acts on.
+    announcement: `${lead.callsign} awaiting taxi${others > 0 ? `, and ${others} other aircraft waiting` : ''}.`,
+  }
 }
