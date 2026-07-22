@@ -20,6 +20,14 @@ export type TransmissionFrom = 'controller' | 'pilot'
 export const COMMS_LOG_LIMIT = 200
 
 /** One radio call, timestamped in simulated seconds. */
+/** Sim-clock time as the scope shows it (mm:ss) — what an EDCT is quoted against, since the
+ *  sim has no wall clock and the header already counts in this. */
+export function clockTime(sec: number): string {
+  const m = Math.floor(Math.max(0, sec) / 60)
+  const s = Math.floor(Math.max(0, sec) % 60)
+  return `${m}:${String(s).padStart(2, '0')}`
+}
+
 export interface Transmission {
   /** Monotonic sequence number — stable ordering independent of equal timestamps. */
   seq: number
@@ -80,6 +88,9 @@ export interface PhraseContext {
   /** Active runway designator without a leading zero, e.g. "27" or "9". */
   runway: string | null
   squawk: string | null
+  /** The wheels-up time this clearance carries, already formatted (see {@link clockTime}), or
+   *  null when the flight is unconstrained. */
+  edct: string | null
   /** Named taxiways of the current route, in order. */
   taxiways: readonly string[]
   /** Where the clearance ends, already worded: "runway 27", "gate 39". */
@@ -147,7 +158,13 @@ export function phraseFor(cmd: GroundCommand, ctx: PhraseContext): Exchange | nu
   switch (cmd.type) {
     case 'clearance': {
       const code = ctx.squawk ?? 'standby'
-      return say(`cleared to destination as filed, squawk ${code}`, `Cleared as filed, squawk ${code}`)
+      // The slot rides on the clearance because that is where flow puts it — the aircraft is
+      // told when it must be airborne before it has been told it may move.
+      const edct = ctx.edct ? `, EDCT ${ctx.edct}` : ''
+      return say(
+        `cleared to destination as filed, squawk ${code}${edct}`,
+        `Cleared as filed, squawk ${code}${edct}`,
+      )
     }
     case 'assignStand':
       return say(`gate ${cmd.ref}`, `Gate ${cmd.ref}`)

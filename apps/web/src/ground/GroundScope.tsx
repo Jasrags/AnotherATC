@@ -481,7 +481,11 @@ export function GroundScope({ controller }: { controller: GroundController }) {
           // would be a line about nothing. It is also the only place an *uncaught* one is
           // ever counted: catching it is silent by design, so this is the reckoning.
           const rb = snap.readbackErrors > 0 ? ` · R/B ${snap.readbackCaught}/${snap.readbackErrors}` : ''
-          setText(statusRef.current, `${moving} taxiing · ${surface} on surface${final} · dep ${snap.departed} · arr ${snap.arrived} · T+${mm}:${ss}${rate}${rb}`)
+          // Slots met, out of slots that mattered. Same rule as the read-back score beside it:
+          // shown only once the mechanic has actually fired, so it is never a line about nothing.
+          const slots = snap.slotsMet + snap.slotsMissed
+          const edct = slots > 0 ? ` · EDCT ${snap.slotsMet}/${slots}` : ''
+          setText(statusRef.current, `${moving} taxiing · ${surface} on surface${final} · dep ${snap.departed} · arr ${snap.arrived} · T+${mm}:${ss}${rate}${rb}${edct}`)
         }
         // Runway incursions top the alert stack: a conflict is two aircraft too close, this is
         // two aircraft on a runway, which is the one that ends the game rather than the shift.

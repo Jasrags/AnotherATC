@@ -71,6 +71,11 @@ export function trafficLevelFor(rate: number): (typeof TRAFFIC_LEVELS)[number] |
  */
 const READBACK = { errorRate: 0.15, seed: 7919 }
 
+/** How early a slot may be used, mirrored from the sim's own window so the strip's countdown
+ *  reaches zero exactly when the takeoff clearance starts being accepted. The sim is the
+ *  authority; this is the display's copy of one number, not a second rule. */
+const EDCT_WINDOW_SEC = 120
+
 /** What a flight strip shows — deliberately excludes fast-changing fields (position,
  *  speed) so the strip bay only re-renders when phase or selection changes. */
 export interface StripItem {
@@ -147,6 +152,12 @@ export interface StripItem {
   /** Whole seconds this aircraft has been stopped with nothing to run — waiting on *you*, not
    *  on traffic or a gate. 0 when it isn't. Drives the strip's clock and the HUD advisory. */
   awaitingSec: number
+  /** Sim time (s) this departure must be airborne at — its wheels-up slot — or null. */
+  edctSec: number | null
+  /** Seconds until that slot's window opens: 0 once it is open, negative once it has passed.
+   *  Derived at publish time so the strip has a countdown without doing arithmetic on a clock
+   *  it does not hold. */
+  edctInSec: number
   /** Parallel ground services still running before pushback unlocks; empty when ready/none. */
   services: readonly ServiceProgress[]
   /** Seconds until the long-pole service finishes and pushback unlocks; 0 when ready/none. */
@@ -317,6 +328,9 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
         // what makes a gate a finite resource rather than a formality.
         turnaround: true,
         readback: READBACK,
+        // Wheels-up windows, if this field's flow is constrained — the lead is the airport's
+        // number, so it arrives with the game rather than being chosen here.
+        ...(game.slots ? { slots: game.slots } : {}),
       })
   // A bad saved/URL value must not take the field down with it — fall back to the field's rate.
   if (opts.trafficRate !== undefined && Number.isFinite(opts.trafficRate) && opts.trafficRate >= 0) {
@@ -424,7 +438,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
     // Range-to-threshold is continuous, so it enters the signature at display precision
     // (0.1 nm ≈ one re-render every ~2.5 s on final) rather than every frame.
     for (const a of acs)
-      nextSig += `|${a.id}:${a.status}:${a.controlledBy}:${a.onRunway ? 'R' : ''}${a.blocksTakeoff ? 'B' : ''}${a.onShortFinal ? 'F' : ''}${a.vacated ? 'V' : ''}${a.handoffPending ? 'H' : ''}${a.incursion ? 'X' : ''}${a.expedite ? 'E' : ''}${a.canExpedite ? 'C' : ''}${a.canHoldShort ? 'S' : ''}:${a.exitRef ?? ''}:${(exitOpts.get(a.id) ?? []).map((e) => e.ref).join('+')}:${vias.get(a.id)!.join('.')}:${a.giveWayTo ?? ''}:${a.waitingForStand ?? ''}:${a.gateBlocked ? 'O' : ''}:${a.squawk ?? ''}:${a.hasInstruction ? 'I' : ''}:${a.wakeHoldSec}:${a.awaitingSec}:${a.serviceSec}:${a.finalNm.toFixed(1)}`
+      nextSig += `|${a.id}:${a.status}:${a.controlledBy}:${a.onRunway ? 'R' : ''}${a.blocksTakeoff ? 'B' : ''}${a.onShortFinal ? 'F' : ''}${a.vacated ? 'V' : ''}${a.handoffPending ? 'H' : ''}${a.incursion ? 'X' : ''}${a.expedite ? 'E' : ''}${a.canExpedite ? 'C' : ''}${a.canHoldShort ? 'S' : ''}:${a.exitRef ?? ''}:${(exitOpts.get(a.id) ?? []).map((e) => e.ref).join('+')}:${vias.get(a.id)!.join('.')}:${a.giveWayTo ?? ''}:${a.waitingForStand ?? ''}:${a.gateBlocked ? 'O' : ''}:${a.squawk ?? ''}:${a.hasInstruction ? 'I' : ''}:${a.wakeHoldSec}:${a.awaitingSec}:${a.edctSec ?? ''}:${a.serviceSec}:${a.finalNm.toFixed(1)}`
     if (nextSig === sig) return
     sig = nextSig
     snapshot = {
@@ -466,6 +480,8 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
         hasInstruction: a.hasInstruction,
         wakeHoldSec: a.wakeHoldSec,
         awaitingSec: a.awaitingSec,
+        edctSec: a.edctSec,
+        edctInSec: a.edctSec === null ? 0 : Math.ceil(a.edctSec - EDCT_WINDOW_SEC - simSnap.time),
         services: a.services,
         serviceSec: a.serviceSec,
       })),

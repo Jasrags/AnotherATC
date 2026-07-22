@@ -347,6 +347,24 @@ Ground servicing runs in parallel but each service has its own completion time. 
 ### Wheels-Up Time Windows
 Center issues these to manage en-route flow. Tower receives them via TRACON. The aircraft must be airborne within a narrow window — miss it and a new slot must be negotiated, which may push the aircraft to the back of the departure queue. This is a natural source of cascading delay.
 
+**As implemented (wheels-up windows).** There is no TRACON to negotiate with yet, so the
+*release* is deferred (backlog) and only the **time** is modelled — which needs no facility,
+because a slot time is data on the flight and the constraint is entirely Ground's and Tower's to
+plan around.
+
+- About a third of departures are given an **EDCT** with their IFR clearance, read out with the
+  squawk and shown on the strip. It is a sim-clock time, 8–14 minutes out; a KSAN departure takes
+  about 7 minutes from clearance to the hold-short line, so the slot is makeable but not idly.
+- The window is **±2 minutes**. Tower may line the aircraft up and hold inside it, but a takeoff
+  clearance before it opens is refused — which is the tension the docs above describe, since an
+  aircraft held at the runway is an aircraft in everyone else's way.
+- Miss it and a **new slot is issued 6–10 minutes out**: the negotiation the real thing requires,
+  as a penalty rather than a dialogue, and the source of the cascading delay.
+- Compliance is judged at the **takeoff clearance**, not at wheels-up. The roll is seconds and
+  the clearance is the commitment; measuring at liftoff would mean refusing a clearance for a
+  window the aircraft would have missed by a few seconds, which is a rule about arithmetic
+  rather than about control.
+
 ### The Go-Around Cascade
 A single go-around ripples through the entire system: the aircraft re-enters TRACON sequencing, displacing the next 2–3 arrivals, which may push some below minimum fuel, which may require priority handling, which affects the departure release schedule. Building this cascade correctly makes TRACON the most interesting and high-stakes mode in the game.
 

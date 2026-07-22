@@ -4,6 +4,7 @@ import type { GroundController, RouteDraft, StripItem } from './controller'
 import { StripCommandMenu } from './StripCommandMenu'
 import { CommsLog } from './CommsLog'
 import { awaitingClock, awaitingLabel } from './alerts'
+import { clock } from './commands'
 
 /** Takeoff-queue sequence numbers: rank the departures awaiting takeoff (Tower-owned, holding
  *  short or lined up) in fleet order, so each strip can show its place in line. Deterministic. */
@@ -216,6 +217,15 @@ export function StripBay({ controller }: { controller: GroundController }) {
                   <div className="strip-giveway">⧗ GATE {a.waitingForStand} OCCUPIED</div>
                 )}
                 {a.wakeHoldSec > 0 && <div className="strip-wake">⚠ WAKE HOLD {a.wakeHoldSec}s</div>}
+                {/* The wheels-up slot. Shown from the clearance onward, not just at the runway:
+                    the whole point is that it is a promise made before the aircraft has moved,
+                    and the taxi has to be planned around it. */}
+                {a.edctSec !== null && (
+                  <div className={`strip-edct${a.edctInSec > 0 ? '' : ' strip-edct-open'}`}>
+                    ⧗ EDCT {clock(a.edctSec)}
+                    {a.edctInSec > 0 ? ` · in ${clock(a.edctInSec)}` : ' · WINDOW OPEN'}
+                  </div>
+                )}
                 {/* Waiting on the controller: it has been told nothing and cannot move until it
                     is. Shown from the first second, unlike the HUD advisory — on a strip this is
                     the aircraft's state, not a nag, and "what does this one need" is the whole

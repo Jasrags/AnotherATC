@@ -72,6 +72,29 @@ These are called out repeatedly as the interesting/hard parts and should be firs
 KSAN is the first airport. It is now expressed as data (`world/ksanAirport.ts`) behind the
 generic `Airport` bundle, so the engine and the web layer carry no airport specifics.
 
+### The airport/engine split
+
+Every number has an owner, and the question that decides it is: **would this value be wrong at a
+different airport?** If yes it is the field's — it belongs on the `Airport` bundle, and the
+engine takes it as a parameter and owns none of it. If it would be identical at every airport,
+it is the engine's (or the rulebook's) and belongs in the sim.
+
+Two things make this harder than it sounds, so check for them by name:
+
+- **Anything derived from the field's geometry is the field's, even when it looks like a tuning
+  knob.** A wheels-up slot issued "eight minutes out" is a lead that has to clear that field's
+  taxi time: generous where you cross the field in three minutes, a guaranteed miss where you
+  cross it in twelve. Measure the field and put the number on the bundle.
+- **A rule that applies wherever the rule applies is the engine's**, however arbitrary the
+  constant looks. EDCT compliance is ±2 minutes at every airport the flow system touches, so it
+  is a constant in the sim, not a field property — the same file, deliberately, as the lead it
+  sits beside.
+
+The test that catches a mistake is `packages/sim/src/world/airport.test.ts`, which builds a
+fictional field from scratch and plays it: a value that should have been the field's but was
+baked into the engine makes the made-up airport play like KSAN. When you add a constant, ask
+whether KTST would still be right.
+
 ## Working with Claude (development harness)
 
 How we collaborate here (defaults — override any time with a one-off instruction):
@@ -85,7 +108,7 @@ How we collaborate here (defaults — override any time with a one-off instructi
 
 **Steering vocabulary** (cheap mid-flight redirects): *"plan this"* = plan-mode, no code till approved · *"continue"/"keep going"* = execute autonomously, commit per green step · *"review X"* = code-review pass · *"fan out"/"ultracode"* = multi-agent breadth · *"checkpoint"* = stop and summarize state.
 
-**Always-on guardrails** (enforced without asking): determinism (seeded `Rng`, never `Math.random`/`Date.now`), immutability, sim headless boundary, supply-chain vetting before any dep, `make check` green before every commit, a code-review pass + an end-to-end scenario test per slice, docs-win-over-realism.
+**Always-on guardrails** (enforced without asking): determinism (seeded `Rng`, never `Math.random`/`Date.now`), immutability, sim headless boundary, the airport/engine split (above — field data on the `Airport` bundle, rules in the sim), supply-chain vetting before any dep, `make check` green before every commit, a code-review pass + an end-to-end scenario test per slice, docs-win-over-realism.
 
 ### Model selection
 

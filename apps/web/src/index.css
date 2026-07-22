@@ -587,6 +587,20 @@ body {
   color: #ff8a5c;
 }
 
+/* The wheels-up slot: a promise with a clock on it. Amber while it is still ahead — this is a
+   constraint you are working toward — and green once the window is open and the aircraft may go. */
+.strip-edct {
+  margin-top: 5px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #d8a648;
+}
+
+.strip-edct-open {
+  color: #6fcf97;
+}
+
 /* Waiting on the controller: the same muted slate as its HUD line, so the strip and the scope
    are recognisably saying one thing. Not a warning colour — nothing is wrong yet. */
 .strip-awaiting {

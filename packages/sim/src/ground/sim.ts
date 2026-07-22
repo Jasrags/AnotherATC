@@ -17,6 +17,7 @@ import { edgeKey, type TaxiGraph } from './taxiGraph'
 import { distToSegment, findStand, type Stand } from './stands'
 import { MAX_TURN_DEG } from './taxiGraph'
 import {
+  clockTime,
   COMMS_LOG_LIMIT,
   misheardSquawk,
   negative,
@@ -129,6 +130,24 @@ export interface ServiceSpec {
   sec: number
 }
 
+/**
+ * Wheels-up time windows, as a property of the field.
+ *
+ * The lead is airfield-specific and cannot sensibly be an engine constant: a slot has to clear
+ * the field's own taxi time, and "eight minutes out" is generous at a field you cross in three
+ * and unmakeable at one you cross in twelve. Measure the field (clearance → hold-short line)
+ * and set the lead above it — a slot inside the taxi time is not a constraint, it is a
+ * guaranteed miss. The *window* and the penalty are not here for the same reason in reverse:
+ * they are the flow system's rules and do not vary by airport.
+ */
+export interface SlotConfig {
+  /** Share of departures whose clearance carries an EDCT, 0–1. */
+  rate: number
+  /** How far out (s) a slot is issued — drawn between these. */
+  leadMinSec: number
+  leadMaxSec: number
+}
+
 /** Ground-servicing model: the parallel services a parked departure must complete before it
  *  may push back (fueling is usually the long pole). Omit to disable servicing entirely. */
 export interface ServicingConfig {
@@ -158,11 +177,29 @@ export interface GroundSimOptions {
    *  makes it reproducible. Omit (the default) and every read-back is correct — which is why
    *  every test written before this mechanic still holds. */
   readback?: { errorRate: number; seed: number }
+  /** Wheels-up time windows: how often a departure's IFR clearance carries an EDCT, how far out
+   *  this field's slots are issued, and the seed that makes it reproducible. Omit and no flight
+   *  is slot-constrained. See docs/atc-flight-cycle.md for the window and the penalty, which are
+   *  the flow system's rules rather than the field's. */
+  slots?: SlotConfig & { seed: number }
   /** The runway direction in use. Supplies the real landing threshold (which is *not* the end
    *  of the pavement where the threshold is displaced) and the far end a takeoff rolls toward,
    *  instead of guessing both from the polyline endpoints. */
   runway?: ActiveRunway
 }
+
+// ─── Wheels-up time windows (EDCT) ───────────────────────────────────────────
+// How far out a slot is issued is *the field's* number — it has to clear that field's taxi
+// time, which is why the lead comes in on the airport bundle rather than living here. What is
+// here is the part that is not the field's: the compliance window and what a miss costs are
+// flow-management rules, the same at every airport the flow system touches.
+/** How early, and how late (s), a takeoff clearance still meets the slot. Narrow on purpose:
+ *  a window wide enough to hit by accident is not a constraint. */
+const EDCT_EARLY_SEC = 120
+const EDCT_LATE_SEC = 120
+/** A missed slot is re-issued this far out (s) — the negotiation, as a penalty. */
+const EDCT_PENALTY_MIN_SEC = 6 * 60
+const EDCT_PENALTY_MAX_SEC = 10 * 60
 
 const TAXI_ACCEL = 4
 /** How far (nm) from the taxi network a requested destination may be and still be snapped onto
@@ -449,6 +486,10 @@ interface Internal
    * so it could never cost anything, and the whole mechanic was decorative.
    */
   issuedSquawk: string | null
+  /** Sim time (s) this departure is required to be airborne at, or null when unconstrained.
+   *  Re-issued further out when the window is missed — the slot is a standing constraint on the
+   *  flight, not a one-shot that expires. */
+  edctSec: number | null
 }
 
 /**
@@ -458,7 +499,7 @@ interface Internal
  * in place each tick; {@link GroundSim.snapshot} hands out fresh immutable objects.
  */
 export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimOptions = {}): GroundSim {
-  const { graph, guard, spawn, servicing, frequencies, readback, turnaround } = opts
+  const { graph, guard, spawn, servicing, frequencies, readback, slots, turnaround } = opts
   const hotspots = opts.hotspots ?? []
   const stands = opts.stands ?? []
   /** The runway direction in use. Mutable: an airport changes configuration. */
@@ -538,6 +579,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       callsign: ac.callsign,
       runway: rwy,
       squawk: ac.squawk,
+      edct: ac.edctSec === null ? null : clockTime(ac.edctSec),
       taxiways: taxiwaysFor(ac),
       destination:
         ac.intent === 'departure' ? (rwy ? `runway ${rwy}` : null) : ac.gate ? `gate ${ac.gate}` : null,
@@ -569,6 +611,35 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
   const readbackRng = readback ? createRng(readback.seed) : null
   let readbackErrors = 0
   let readbackCaught = 0
+
+  // ─── Wheels-up time windows ────────────────────────────────────────────────
+  // A slot is a promise made on the aircraft's behalf before it has moved, and everything
+  // between here and the runway is the controller's problem. See docs/atc-flight-cycle.md.
+  const slotRng = slots ? createRng(slots.seed) : null
+  let slotsMet = 0
+  let slotsMissed = 0
+
+  /** A wheels-up time `lead` out from now, drawn on the slot stream. */
+  function nextSlot(minSec: number, maxSec: number): number {
+    const spread = Math.max(0, Math.round(maxSec - minSec))
+    return time + minSec + (slotRng ? slotRng.int(0, spread) : 0)
+  }
+
+  /** Give this departure a slot, if the field issues them and this flight draws one. */
+  function maybeSlot(ac: Internal): void {
+    if (!slots || !slotRng || ac.intent !== 'departure') return
+    if (slotRng.next() >= slots.rate) return
+    ac.edctSec = nextSlot(slots.leadMinSec, slots.leadMaxSec)
+  }
+
+  /** Whether a takeoff clearance now would meet this aircraft's slot: inside the window, or
+   *  unconstrained. `null` when there is no slot at all. */
+  function slotState(ac: Internal): 'early' | 'open' | 'late' | null {
+    if (ac.edctSec === null) return null
+    if (time < ac.edctSec - EDCT_EARLY_SEC) return 'early'
+    if (time > ac.edctSec + EDCT_LATE_SEC) return 'late'
+    return 'open'
+  }
 
   /** Corrupt what the pilot heard, saving the correct value for a later correction. Returns
    *  whether anything was misheard. Only clearances carrying a discrete value can be misheard;
@@ -754,6 +825,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       rollWhenLinedUp: false,
       lastClearance: null,
       issuedSquawk: null,
+      edctSec: null,
     }
   }
 
@@ -2190,6 +2262,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         if (ac.squawk) return refused('already cleared')
         ac.squawk = nextSquawk()
         ac.issuedSquawk = ac.squawk
+        maybeSlot(ac)
         return ACCEPTED
       case 'contactTower': {
         // Ground → Tower handoff: transfer a departure holding short of its own runway to
@@ -2278,6 +2351,30 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
             const category = lastDeparture.wake === 'J' ? 'Super' : 'Heavy'
             return refused(`wake turbulence — ${Math.ceil(remaining)}s behind ${category}`)
           }
+        }
+        // The wheels-up window, checked last of the gates: it is the only one that is about the
+        // clock rather than about the runway, so an aircraft refused for it is otherwise ready
+        // to go — which is exactly the hold the docs describe, and exactly why it is expensive.
+        const slot = slotState(ac)
+        if (slot === 'early') {
+          return refused(`EDCT ${clockTime(ac.edctSec!)} — ${Math.ceil(ac.edctSec! - EDCT_EARLY_SEC - time)}s to the window`)
+        }
+        if (slot === 'late') {
+          // Missed. The real answer is a new time negotiated with flow; here it is issued, and
+          // the aircraft goes on sitting at the runway in everyone else's way. Counted once —
+          // the second attempt is the same missed slot, not a second one.
+          slotsMissed += 1
+          ac.edctSec = nextSlot(EDCT_PENALTY_MIN_SEC, EDCT_PENALTY_MAX_SEC)
+          transmit('controller', ac.controlledBy, ac, `${ac.callsign}, slot missed, new EDCT ${clockTime(ac.edctSec)}.`)
+          transmit('pilot', ac.controlledBy, ac, `New EDCT ${clockTime(ac.edctSec)}, ${ac.callsign}.`)
+          return refused(`slot missed — new EDCT ${clockTime(ac.edctSec)}`)
+        }
+        if (slot === 'open') {
+          // Met at the clearance rather than at wheels-up: the roll is seconds, the clearance is
+          // the commitment, and refusing one for a window the aircraft would miss by four
+          // seconds is a rule about arithmetic (docs/atc-flight-cycle.md).
+          slotsMet += 1
+          ac.edctSec = null
         }
         // Already lined up: apply power now. Still holding short: this is "taxi into position
         // and roll" — it taxis onto the centerline first and the roll starts on arrival. The
@@ -2578,6 +2675,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     // does anything left from the arrival — the landing, its turnoff, or its read-back state.
     ac.squawk = null
     ac.issuedSquawk = null
+    ac.edctSec = null
     ac.lastClearance = null
     ac.exit = null
     ac.assignedExitRef = null
@@ -2740,6 +2838,8 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         comms: commsSnapshot(),
         readbackErrors,
         readbackCaught,
+        slotsMet,
+        slotsMissed,
         incursions,
         conflicts,
         busyHotspots: busyHotspots(fleet.map((a) => a.hotspot), hotspots),
@@ -2791,6 +2891,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
           hasInstruction: ac.lastClearance !== null,
           wakeHoldSec: wakeHoldFor(ac),
           awaitingSec: Math.floor(ac.awaitingSec),
+          edctSec: ac.edctSec,
           services: ac.services.map((s) => ({ kind: s.kind, total: s.total, remaining: s.remaining })),
           serviceSec: Math.ceil(serviceRemaining(ac)),
         })),

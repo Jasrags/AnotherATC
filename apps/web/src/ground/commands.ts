@@ -99,6 +99,11 @@ function crossRunway(controller: GroundController, item: StripItem, runwayBusy: 
   }
 }
 
+/** m:ss — a wait is read as a duration. Shared with the strip's own EDCT line. */
+export function clock(sec: number): string {
+  return `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`
+}
+
 export function commandsFor(controller: GroundController, item: StripItem, aircraft: StripItem[]): MenuCommand[] {
   const cmds = [...phaseCommandsFor(controller, item, aircraft)]
   const stand = reassignStand(controller, item)
@@ -198,7 +203,13 @@ function phaseCommandsFor(controller: GroundController, item: StripItem, aircraf
       ? { key: 'takeoff', label: 'Cleared for takeoff — runway busy', action: { kind: 'soon' } }
       : item.wakeHoldSec > 0
         ? { key: 'takeoff', label: `Cleared for takeoff — wake ${item.wakeHoldSec}s`, action: { kind: 'soon' } }
-        : { key: 'takeoff', label: 'Cleared for takeoff', action: { kind: 'run', run: () => send({ type: 'clearedForTakeoff', aircraftId: id }) } }
+        : // The wheels-up window, in the same voice as the wake hold beside it: the sim would
+          // refuse this clearance, so the menu names the reason rather than offering a button
+          // that fails. It goes last because it is the only one of the three the controller
+          // cannot do anything about — the aircraft is ready, the runway is free, and it waits.
+          item.edctSec !== null && item.edctInSec > 0
+          ? { key: 'takeoff', label: `Cleared for takeoff — EDCT ${clock(item.edctInSec)}`, action: { kind: 'soon' } }
+          : { key: 'takeoff', label: 'Cleared for takeoff', action: { kind: 'run', run: () => send({ type: 'clearedForTakeoff', aircraftId: id }) } }
 
     if (item.status === 'lineUpWait') {
       return [takeoff, holdPosition]

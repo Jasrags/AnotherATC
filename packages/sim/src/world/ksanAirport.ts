@@ -169,6 +169,10 @@ export const KSAN: Airport = {
   servicing: SERVICING,
   comms: { ground: '123.9', tower: '118.3', atis: '134.8' },
   traffic: { intervalSec: 22, maxAircraft: 12, initialDepartures: 3 },
+  // Measured on this field: clearance → hold-short line is about seven minutes for a terminal
+  // departure, servicing and pushback included. A slot inside that is not a constraint, it is a
+  // guaranteed miss — so the lead starts above it and leaves room to be worked well or badly.
+  slots: { rate: 0.35, leadMinSec: 8 * 60, leadMaxSec: 14 * 60 },
   // Terminal 2's centroid sits over its own stands; nudge the label clear of them.
   areaLabelOffsetsNm: {
     'Terminal 2 West': [0, -0.05],

@@ -214,6 +214,18 @@ export interface GroundAircraft {
    *  departure can be released for takeoff; 0 when none applies. */
   wakeHoldSec: number
   /**
+   * Sim time (s) this departure is required to be airborne at — its wheels-up slot — or null
+   * when the flight carries none. An absolute time rather than a countdown, deliberately: it is
+   * a fact about the flight that does not change every tick, and a consumer that wants "how
+   * long" subtracts {@link GroundSnapshot.time} itself.
+   *
+   * The window either side of it, and what a miss costs, are the flow system's rules and live
+   * in the sim; how far out slots are issued is the *field's* and comes off the airport bundle
+   * (see `SlotConfig`). Compliance is judged at the takeoff clearance — see
+   * docs/atc-flight-cycle.md.
+   */
+  edctSec: number | null
+  /**
    * Whole seconds this aircraft has been stopped with no clearance to run — waiting on the
    * controller, not on traffic, a gate or a runway. 0 when it is not.
    *
@@ -252,6 +264,10 @@ export interface GroundSnapshot {
   readbackErrors: number
   /** How many of those the controller caught with a "say again" before they mattered. */
   readbackCaught: number
+  /** Wheels-up slots met, and missed — a missed one is re-issued further out, so a flight can
+   *  contribute more than once to the second of these. */
+  slotsMet: number
+  slotsMissed: number
   /** Runway conflicts developing right now, most severe first. Empty is the normal case. */
   incursions: readonly RunwayIncursion[]
   /** Taxi conflicts, worst first: happening now ahead of developing, then soonest. The surface

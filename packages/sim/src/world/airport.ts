@@ -1,6 +1,13 @@
 import { createRng } from '../random'
 import { finalFix, FINAL_APPROACH_NM, type ActiveRunway, type RunwayLayout } from '../ground/runway'
-import type { AircraftInit, GateSlot, ServicingConfig, SpawnConfig, SpawnFleet } from '../ground/sim'
+import type {
+  AircraftInit,
+  GateSlot,
+  ServicingConfig,
+  SlotConfig,
+  SpawnConfig,
+  SpawnFleet,
+} from '../ground/sim'
 import type { NamedDestination } from '../ground/types'
 import { buildStands, type Stand } from '../ground/stands'
 import type { AirportSurface, Point } from './types'
@@ -56,6 +63,10 @@ export interface Airport {
   fleets: readonly SpawnFleet[]
   /** Pre-departure ground services; omit for a field that doesn't model them. */
   servicing: ServicingConfig
+  /** Wheels-up time windows. The lead has to clear *this field's* taxi time, which is why it is
+   *  stated here rather than in the engine — measure the field (clearance → hold-short line) and
+   *  set it above that. Omit for a field the flow system does not constrain. */
+  slots?: SlotConfig
   comms: AirportComms
   traffic: TrafficConfig
   /** Nudges (nm) for area labels whose centroid sits over pavement, keyed by label. */
@@ -93,6 +104,8 @@ export interface AirportGame {
   spawn: SpawnConfig
   destinations: NamedDestination[]
   servicing: ServicingConfig
+  /** The field's slot policy, if it has one, with the game's seed folded in. */
+  slots?: SlotConfig & { seed: number }
   runway: ActiveRunway
 }
 
@@ -169,6 +182,7 @@ export function createAirportGame(airport: Airport, seed = 1, runwayIdent?: stri
     spawn,
     destinations,
     servicing: airport.servicing,
+    ...(airport.slots ? { slots: { ...airport.slots, seed } } : {}),
     runway,
     stands: buildStands(airport.surface),
   }

@@ -5,6 +5,7 @@ const ctx = (over: Partial<PhraseContext> = {}): PhraseContext => ({
   callsign: 'SKW412',
   runway: '27',
   squawk: null,
+  edct: null,
   taxiways: [],
   destination: null,
   giveWayTo: null,

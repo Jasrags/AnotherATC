@@ -37,6 +37,8 @@ function strip(over: Partial<StripItem> = {}): StripItem {
     pushbackOptions: [],
     wakeHoldSec: 0,
     awaitingSec: 0,
+    edctSec: null,
+    edctInSec: 0,
     services: [],
     serviceSec: 0,
     ...over,
@@ -717,5 +719,48 @@ describe('an arrival that has just checked in with Ground', () => {
     const { controller } = fakeController()
     const held = checkedIn({ intent: 'departure', gate: null, canExpedite: true })
     expect(commandsFor(controller, held, []).map((c) => c.label)).toContain('Continue taxi')
+  })
+})
+
+describe('a departure holding a wheels-up slot', () => {
+  const holding = (over: Partial<StripItem> = {}) =>
+    strip({
+      status: 'holdShort',
+      controlledBy: 'tower',
+      intent: 'departure',
+      holdingForTakeoff: true,
+      edctSec: 900,
+      ...over,
+    })
+
+  it('says how long until the window, instead of offering a clearance that would be refused', () => {
+    // Same discipline as the wake hold beside it: the sim would refuse this, so the menu says
+    // the reason rather than offering a button that fails.
+    const { controller } = fakeController()
+    const cmds = commandsFor(controller, holding({ edctInSec: 135 }), [])
+    const takeoff = cmds.find((c) => c.key === 'takeoff')!
+    expect(takeoff.label).toBe('Cleared for takeoff — EDCT 2:15')
+    expect(takeoff.action.kind).toBe('soon')
+  })
+
+  it('offers the clearance once the window is open', () => {
+    const { controller, dispatched } = fakeController()
+    const cmds = commandsFor(controller, holding({ edctInSec: 0 }), [])
+    const takeoff = cmds.find((c) => c.key === 'takeoff')!
+    expect(takeoff.label).toBe('Cleared for takeoff')
+    if (takeoff.action.kind === 'run') takeoff.action.run()
+    expect(dispatched).toContainEqual({ type: 'clearedForTakeoff', aircraftId: 'a' })
+  })
+
+  it('still lets Tower line it up while it waits — that is how it holds at the runway', () => {
+    const { controller } = fakeController()
+    const cmds = commandsFor(controller, holding({ edctInSec: 135 }), [])
+    expect(cmds.find((c) => c.key === 'lineup')!.action.kind).toBe('run')
+  })
+
+  it('leaves an unconstrained departure exactly as it was', () => {
+    const { controller } = fakeController()
+    const cmds = commandsFor(controller, holding({ edctSec: null, edctInSec: 0 }), [])
+    expect(cmds.find((c) => c.key === 'takeoff')!.label).toBe('Cleared for takeoff')
   })
 })
