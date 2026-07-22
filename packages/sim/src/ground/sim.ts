@@ -242,10 +242,12 @@ const GATE_EPS = 0.02
 const GATE_DWELL_SEC = 8
 
 // ─── Separation ─────────────────────────────────────────────────────────────
-/** How far ahead (nm) an aircraft watches for traffic. */
 /** How close (nm ≈ 240 ft) another aircraft has to be to a turnoff before a landing may no
  *  longer be planned onto it: a plane's length, plus room to stop behind it. */
 const EXIT_BLOCKED_NM = 0.04
+/** How far ahead (nm) an aircraft watches for traffic. Sized for taxi speeds: 0.06 nm is ~9 s
+ *  at 25 kt but ~1.5 s at 140 kt, which is why a landing rollout is kept out of an occupied
+ *  turnoff at planning time rather than relying on this to stop it. */
 const LOOK_AHEAD_NM = 0.06
 /** Half-width (nm) of the path corridor: traffic outside it is off to the side. */
 const CORRIDOR_HALF_NM = 0.012

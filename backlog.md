@@ -140,6 +140,14 @@ The core ground-control loop. Ordered roughly by priority.
 - ⬜ **Converging-traffic prediction** (incursion follow-up) — the `conflict` flag is still pure
   proximity. Project both aircraft forward and warn on time-to-conflict, so taxiway conflicts get
   the same "developing → happening" ladder the runway ones now have.
+- ⬜ **Separation at rollout speed** (separation follow-up) — `LOOK_AHEAD_NM` (0.06 nm) is sized
+  for taxi: ~9 s of warning at 25 kt but ~1.5 s at 140 kt, so a landing rollout capped by
+  `separationCap` cannot actually stop for anything it meets. Currently mitigated at *planning*
+  time — a landing is not sent to a turnoff another aircraft is standing in (`exitBlocked`) —
+  which covers the case that made it reachable (an arrival now parks in its turnoff awaiting a
+  taxi clearance). The physics backstop is still nearly useless above taxi speed: a speed-scaled
+  look-ahead would make it real. _Found while fixing the contact-ground handoff; reproduced as
+  two 737s at identical coordinates on B7 before `exitBlocked` existed._
 - 🚧 **Handoff to/from Tower** — **Contact tower** now performs a real Ground→Tower control transfer (`controlledBy` flips; the strip moves to the TWR bay). Tower then issues **line up and wait** and an explicit **cleared for takeoff** (full-power accel to 140 kt, exempt from taxi caps/conflict; lifts off the far end, counted `departed`). Runway single-occupancy + wake separation gate the takeoff clearance. Cross runway is only for transiting traffic. **Tower→Ground on arrival** also works now: a landed aircraft flips back to Ground once it has rolled out to taxi speed and can leave the runway (Slice 2). See **Tower (Local Control)** epic + `docs/atc-tower.md`. _Next: refuse a handoff when Tower is overloaded._
 - 💭 Multiple ground frequencies (N/S) — not needed at KSAN's scale
 - 💭 Progressive taxi / follow-the-greens visualization
