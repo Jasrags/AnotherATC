@@ -85,6 +85,23 @@ describe('runway incursion detection', () => {
     expect(found[0]!.conflictId).toBe('zulu')
   })
 
+  it('reports an uncleared occupant once, not again for each aircraft beside it', () => {
+    // Two aircraft on the pavement, neither holding a clearance for the runway itself. The
+    // ghost already raises its own alert naming itself — the aircraft to move — so pairing it
+    // with the crossing would repeat that in different words and cost a line of a HUD that
+    // shows one sentence and a count.
+    const found = detectIncursions([view('ghost', { use: 'unauthorized' }), view('x', { use: 'crossing' })])
+    expect(found).toHaveLength(1)
+    expect(found[0]!.kind).toBe('unauthorized')
+    expect(found[0]!.occupantId).toBe('ghost')
+  })
+
+  it('still reports each uncleared occupant when there are several', () => {
+    const found = detectIncursions([view('g1', { use: 'unauthorized' }), view('g2', { use: 'unauthorized' })])
+    expect(found.map((i) => i.occupantId)).toEqual(['g1', 'g2'])
+    expect(found.every((i) => i.kind === 'unauthorized')).toBe(true)
+  })
+
   it('orders alerts ahead of advisories, and is stable within a severity', () => {
     const found = detectIncursions([
       view('x', { use: 'crossing' }),

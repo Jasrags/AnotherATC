@@ -10,6 +10,7 @@
  *
  * Pure and total over its input, so it is deterministic and testable without a sim.
  */
+import { SHORT_FINAL_NM } from './runway'
 
 /** How an aircraft on the runway surface came to be there. */
 export type RunwayUse =
@@ -62,9 +63,11 @@ export interface IncursionView {
   finalNm: number
 }
 
-/** Inside this distance (nm) an inbound over an occupied runway is an alert, not an advisory.
- *  Matches the sim's short-final band: the point past which nothing may be cleared underneath. */
-const ALERT_FINAL_NM = 1.5
+/** An inbound inside the short-final band over an occupied runway is an alert, not an advisory:
+ *  it is past the point where the sim would let anything be cleared onto the surface, so it is
+ *  also past the point where the occupant clearing normally can be assumed. Imported rather
+ *  than restated so the two can never drift. */
+const ALERT_FINAL_NM = SHORT_FINAL_NM
 /** Beyond this distance (nm) an inbound is far enough out that the occupant is expected to
  *  clear normally, and saying so every time would train the controller to ignore the alert. */
 const ADVISORY_FINAL_NM = 3
@@ -117,7 +120,12 @@ export function detectIncursions(fleet: readonly IncursionView[]): RunwayIncursi
       const b = occupants[j]!
       const aUser = RUNWAY_USER.includes(a.use!)
       const bUser = RUNWAY_USER.includes(b.use!)
-      if (!aUser && !bUser) continue // two crossings at different points is not a conflict
+      // Neither holds a clearance for the runway itself. Two crossings at different points is
+      // genuinely not a conflict; a pair involving an *unauthorized* occupant is, but it is
+      // already reported — every uncleared occupant raises its own alert naming itself, which
+      // is the aircraft to move. Pairing them as well would say the same thing a second time,
+      // and the HUD shows one sentence and a count.
+      if (!aUser && !bUser) continue
       const [occ, other] = aUser === bUser ? (a.id < b.id ? [a, b] : [b, a]) : aUser ? [b, a] : [a, b]
       found.push({
         kind: 'sharedRunway',

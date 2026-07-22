@@ -7,6 +7,17 @@ export const FT_PER_NM = 6076.12
 export const FINAL_APPROACH_NM = 4
 
 /**
+ * Inside this distance (nm) from the threshold, an arrival on final owns the runway: nothing
+ * may be cleared onto the surface underneath it (7110.65 "anticipated separation" has limits).
+ *
+ * It lives here, in the module neither the sim nor incursion detection can do without, because
+ * both need it and neither may import the other. It is the band the clearance gates refuse on
+ * *and* the band an occupied-runway advisory escalates to an alert at — the same line drawn
+ * twice, which is exactly the kind of pair that drifts apart when it is written down twice.
+ */
+export const SHORT_FINAL_NM = 1.5
+
+/**
  * The runway direction currently in use — the airport's *configuration*.
  *
  * A single-runway field has one of these active at a time and **both arrivals and departures use

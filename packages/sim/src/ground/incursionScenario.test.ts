@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { createGroundSim } from './sim'
 import type { AircraftInit } from './sim'
 import { buildRunwayGuard } from './runwayGuard'
+import { buildTaxiGraph } from './taxiGraph'
 import type { AirportSurface, Point } from '../world/types'
 
 // A single runway with a connector crossing it mid-field — the minimum geometry for the
@@ -13,9 +14,17 @@ const surface: AirportSurface = {
   units: 'nm',
   source: 'synthetic',
   bounds: { minX: -0.5, minY: -0.5, maxX: 2, maxY: 0.5 },
-  features: [{ kind: 'runway', points: [[0, 0], [2, 0]] }],
+  features: [
+    { kind: 'runway', points: [[0, 0], [2, 0]] },
+    // A connector crossing the runway at mid-field, with a parallel either side, so a taxi
+    // clearance can actually be re-issued to an aircraft standing on the pavement.
+    { kind: 'taxiway', ref: 'C1', points: [[1, -0.3], [1, -0.05], [1, 0.05], [1, 0.3]] },
+    { kind: 'taxiway', ref: 'A', points: [[0.4, -0.3], [1, -0.3], [1.6, -0.3]] },
+    { kind: 'taxiway', ref: 'B', points: [[0.4, 0.3], [1, 0.3], [1.6, 0.3]] },
+  ],
 }
 const guard = buildRunwayGuard(surface)
+const graph = buildTaxiGraph(surface)
 
 const THRESHOLD: Point = [0, 0] // RWY 9, landing east
 const FIX: Point = [-4, 0] // 4 nm final on the extended centerline
@@ -106,6 +115,26 @@ describe('runway incursion — end to end', () => {
     expect(sim.snapshot().incursions).toEqual([])
     expect(A(sim, 'x').incursion).toBe(false)
     expect(A(sim, 'inb').incursion).toBe(false)
+  })
+
+  it('does not strip a crossing aircraft of its authority when it is rerouted mid-crossing', () => {
+    // A reroute issued while the aircraft is on the pavement is still the crossing — it was
+    // put there by us, and taking its permission away would ring it red for obeying.
+    const sim = createGroundSim([crosser('x')], { guard, graph })
+    expect(until(sim, () => A(sim, 'x').holdShort)).toBe(true)
+    expect(sim.dispatch({ type: 'crossRunway', aircraftId: 'x' }).ok).toBe(true)
+    expect(until(sim, () => A(sim, 'x').onRunway)).toBe(true)
+
+    expect(sim.dispatch({ type: 'taxiTo', aircraftId: 'x', dest: [1.6, 0.3] }).ok).toBe(true)
+    run(sim, 1)
+    expect(A(sim, 'x').onRunway).toBe(true) // still on it, so the question is live
+    expect(sim.snapshot().incursions).toEqual([])
+    expect(A(sim, 'x').incursion).toBe(false)
+
+    // …and it is spent once it is off, exactly as if it had never been rerouted.
+    expect(until(sim, () => !A(sim, 'x').onRunway)).toBe(true)
+    run(sim, 1)
+    expect(sim.snapshot().incursions).toEqual([])
   })
 
   it('flags an aircraft sitting on the runway that was never cleared onto it', () => {

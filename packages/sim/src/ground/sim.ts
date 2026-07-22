@@ -35,6 +35,7 @@ import {
   reciprocalIdent,
   takeoffEnd,
   FINAL_APPROACH_NM,
+  SHORT_FINAL_NM,
   type ActiveRunway,
 } from './runway'
 import {
@@ -188,11 +189,6 @@ export const APPROACH_SPEED_KT = 140
  *  exit assigned the rate is solved per rollout instead, so it arrives at the turnoff at the
  *  turnoff's speed (see runwayExits.ts). */
 const ROLLOUT_DECEL = MAX_BRAKE_KT_S
-/** Inside this distance (nm) from the threshold, an arrival on final owns the runway:
- *  no takeoff clearance and no line-up may be issued underneath it. Exported so the UI can
- *  gate the same clearances the sim would refuse — but they read the `onShortFinal` flag off
- *  the snapshot rather than re-deriving this comparison from a rounded display distance. */
-const SHORT_FINAL_NM = 1.5
 /** How often (s) a rolled-out arrival retries routing off the runway when routing fails. */
 const EXIT_RETRY_SEC = 1
 /** How far (nm ≈ 180 ft) up the runway a lining-up aircraft rolls past the point it entered, so
@@ -385,7 +381,14 @@ interface Internal
   /** Permission to be on the runway surface without a takeoff or landing clearance: a crossing
    *  clearance, or a rollout that has been released to taxi off. `'issued'` until the aircraft
    *  actually reaches the pavement, `'on'` while it is there, then dropped — so the permission
-   *  is spent by the movement it was given for and a second, uncleared entry is an incursion. */
+   *  is spent by the movement it was given for and a second, uncleared entry is an incursion.
+   *
+   *  The invariant, because a stale value here would silently mask a real incursion: it is
+   *  *granted* only by `crossRunway` and by `handOffToGround` (a landing still clearing the
+   *  pavement), and *revoked* by the latch in {@link detectRunwayIncursions} when the aircraft
+   *  leaves the runway, by `applyRoute` when a new clearance supersedes an unused one, and by
+   *  `turnRound`. A new way of getting an aircraft onto the runway must grant it explicitly —
+   *  do not rely on some other path having left the right value behind. */
   runwayAuth: 'issued' | 'on' | null
   /** On the runway in a way {@link detectIncursions} has flagged — a red ring, not a refusal. */
   incursion: boolean
@@ -1246,6 +1249,12 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     ac.holdShort = false
     ac.heldSec = 0
     ac.blockedEdge = null
+    // A crossing clearance the aircraft never used is spent by the clearance that replaced it:
+    // otherwise "cross, belay that, taxi elsewhere" leaves permission latched at 'issued'
+    // forever, and a later uncleared entry would inherit it and never be flagged. Guarded on
+    // *not* being on the pavement, because a reroute issued mid-crossing is still the crossing
+    // — taking its authority away would ring the aircraft red for obeying us.
+    if (!onRunwayNow(ac)) ac.runwayAuth = null
   }
 
   /** Forget accumulated diversion state — a fresh player clearance supersedes it. */
@@ -2122,6 +2131,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     ac.intent = 'departure'
     ac.goalPoint = target
     ac.dwell = -1
+    ac.runwayAuth = null // the landing that earned it is over; the departure starts with none
     ac.path = [[ac.x, ac.y]]
     ac.leg = 0
     ac.targetSpeed = 0
