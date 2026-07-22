@@ -12,7 +12,41 @@ const ctx = (over: Partial<PhraseContext> = {}): PhraseContext => ({
   groundFreq: null,
   vacated: false,
   pushFacing: null,
+  position: 'ground',
+  crossing: false,
+  onRunway: false,
   ...over,
+})
+
+describe('phraseFor — crossings', () => {
+  const cross = { type: 'crossRunway', aircraftId: 'a' } as const
+
+  it("carries 'no delay' from Tower and not from Ground", () => {
+    expect(phraseFor(cross, ctx({ position: 'ground' }))?.instruction).toBe('SKW412, cross runway 27.')
+    expect(phraseFor(cross, ctx({ position: 'tower' }))?.instruction).toBe(
+      'SKW412, cross runway 27, no delay.',
+    )
+  })
+
+  it('names what a handoff to Tower is for, so a crossing is not read as a takeoff', () => {
+    const toTower = { type: 'contactTower', aircraftId: 'a' } as const
+    expect(phraseFor(toTower, ctx({ towerFreq: '118.3', crossing: true }))?.instruction).toBe(
+      'SKW412, contact tower 118.3 for runway 27 crossing.',
+    )
+    expect(phraseFor(toTower, ctx({ towerFreq: '118.3' }))?.instruction).toBe(
+      'SKW412, contact tower 118.3.',
+    )
+  })
+
+  it('defers the handoff back to Ground while the aircraft is still on the pavement', () => {
+    const toGround = { type: 'contactGround', aircraftId: 'a' } as const
+    const on = ctx({ groundFreq: '121.9', crossing: true, onRunway: true })
+    const off = ctx({ groundFreq: '121.9', crossing: true, onRunway: false })
+    expect(phraseFor(toGround, on)?.instruction).toBe(
+      'SKW412, when clear of the runway, contact ground 121.9.',
+    )
+    expect(phraseFor(toGround, off)?.instruction).toBe('SKW412, runway 27 clear, contact ground 121.9.')
+  })
 })
 
 describe('phonetic', () => {

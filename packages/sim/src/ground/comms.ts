@@ -92,6 +92,14 @@ export interface PhraseContext {
   vacated: boolean
   /** Compass point the aircraft is being pushed back to face, when one applies. */
   pushFacing: string | null
+  /** Which position is transmitting. Local Control and Ground say some of the same things
+   *  differently — a crossing Tower issues carries "no delay", Ground's does not. */
+  position: ControllerPosition
+  /** This aircraft is holding short to *cross* rather than to depart, which changes what a
+   *  handoff to Tower is for and what handing it back to Ground means. */
+  crossing: boolean
+  /** Still physically on the runway — a handoff issued now is "when clear of the runway…". */
+  onRunway: boolean
 }
 
 /** A controller instruction and the pilot's correct read-back of it. */
@@ -151,8 +159,12 @@ export function phraseFor(cmd: GroundCommand, ctx: PhraseContext): Exchange | nu
       return say('hold position', 'Hold position')
     case 'resume':
       return say('continue taxi', 'Continue taxi')
-    case 'crossRunway':
-      return say(`cross ${rwy}`, `Cross ${rwy}`)
+    case 'crossRunway': {
+      // Local Control owns the runway, and its crossing clearance carries the instruction that
+      // says so: get across and get off. "No delay" is phraseology, not emphasis.
+      const delay = ctx.position === 'tower' ? ', no delay' : ''
+      return say(`cross ${rwy}${delay}`, `Cross ${rwy}${delay}`)
+    }
     case 'giveWay': {
       const traffic = ctx.giveWayTo ?? 'the traffic'
       return say(`give way to ${traffic}`, `Give way to ${traffic}`)
@@ -175,10 +187,19 @@ export function phraseFor(cmd: GroundCommand, ctx: PhraseContext): Exchange | nu
     }
     case 'contactTower': {
       const freq = ctx.towerFreq ? ` ${ctx.towerFreq}` : ''
-      return say(`contact tower${freq}`, `Contact tower${freq}`)
+      // The handoff names its purpose, because the two are different operations: a departure is
+      // going to use the runway, a transit is going to cross it.
+      const why = ctx.crossing ? ` for ${rwy} crossing` : ''
+      return say(`contact tower${freq}${why}`, `Contact tower${freq}${why}`)
     }
     case 'contactGround': {
       const freq = ctx.groundFreq ? ` ${ctx.groundFreq}` : ''
+      // Three shapes, because the aircraft is in one of three states: mid-crossing (not off the
+      // pavement yet), across (Tower says so as it hands back), or a landing rollout.
+      if (ctx.crossing) {
+        const when = ctx.onRunway ? 'when clear of the runway, ' : `${rwy} clear, `
+        return say(`${when}contact ground${freq}`, `${cap(when)}contact ground${freq}`)
+      }
       const when = ctx.vacated ? '' : 'when vacated, '
       return say(`${when}contact ground${freq}`, `${when ? 'When vacated, ' : ''}contact ground${freq}`)
     }

@@ -319,9 +319,11 @@ describe('tower — departures', () => {
     expect(sim.snapshot().aircraft).toHaveLength(0)
   })
 
-  it('refuses to hand off a crossing aircraft, and cross-runway still releases it', () => {
+  it('never turns a crossing into a departure, whoever runs it', () => {
     // A departure whose route continues past the runway to the far side — a crossing, not a
-    // takeoff. contactTower must not take it; the controller clears it across instead.
+    // takeoff. It may now be handed to Tower *for the crossing* (docs/atc-runway-crossing.md
+    // §5 option B; this test previously asserted the handoff was refused outright), but the
+    // handoff must not turn it into a departure: it is cleared across, and never counted.
     const crossing: AircraftInit = {
       id: 'x',
       callsign: 'X',
@@ -335,11 +337,17 @@ describe('tower — departures', () => {
     const sim = createGroundSim([crossing], { guard })
     taxiToHoldShort(sim)
     expect(A(sim, 'x').holdShort).toBe(true)
+    expect(A(sim, 'x').holdingForTakeoff).toBe(false) // the strip knows it is not a departure
 
-    const res = sim.dispatch({ type: 'contactTower', aircraftId: 'x' })
-    expect(res.ok).toBe(false)
-    if (!res.ok) expect(res.reason).toMatch(/cross/i)
-    expect(A(sim, 'x').controlledBy).toBe('ground') // never handed off
+    expect(sim.dispatch({ type: 'contactTower', aircraftId: 'x' }).ok).toBe(true)
+    expect(A(sim, 'x').controlledBy).toBe('tower')
+
+    // Tower's runway clearances stay closed to it: it has no business departing.
+    const lineup = sim.dispatch({ type: 'lineUpAndWait', aircraftId: 'x' })
+    expect(lineup.ok).toBe(false)
+    if (!lineup.ok) expect(lineup.reason).toMatch(/cross/i)
+    const takeoff = sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'x' })
+    expect(takeoff.ok).toBe(false)
 
     expect(sim.dispatch({ type: 'crossRunway', aircraftId: 'x' }).ok).toBe(true)
     for (let i = 0; i < 1600; i += 1) sim.step(0.1) // ~0.5 nm across at 15 kt

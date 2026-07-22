@@ -491,6 +491,18 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       groundFreq: frequencies?.ground ?? null,
       vacated: ac.rollingOut ? ac.vacated : true,
       pushFacing: ac.pushFacingLabel,
+      position: ac.controlledBy,
+      // A transit either way: holding short with a far side to reach, or already across and
+      // being handed back. Keyed off the *destination* first — an aircraft whose goal is the
+      // runway is departing, however far its route happens to be drawn past it — then the
+      // route, then a crossing already under way. `rollingOut` is the landing case, which words
+      // itself differently.
+      crossing:
+        !ac.rollingOut &&
+        !ac.airborne &&
+        !holdingForTakeoff(ac) &&
+        (heldRouteCrosses(ac) || ac.runwayAuth !== null),
+      onRunway: onRunwayNow(ac),
     }
   }
 
@@ -840,6 +852,22 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
   function canExpedite(ac: Internal): boolean {
     if (ac.airborne || ac.rollingOut || ac.departing || ac.pushingBack || ac.lineUpWait) return false
     return ac.leg < ac.path.length - 1
+  }
+
+  /**
+   * Whether this aircraft is holding short in order to **cross** — its route continues to the
+   * far side — rather than to depart from the runway it is holding at.
+   *
+   * The discriminator is where the held portion *ends*. A transit's ends off the pavement; a
+   * departure cleared to the runway (or to an intersection on it) ends on it, and "crossing"
+   * such an aircraft would drive it onto the runway and park it there unaligned with no takeoff
+   * clearance — a runway incursion issued by the controller.
+   */
+  function heldRouteCrosses(ac: Internal): boolean {
+    if (!ac.held || ac.held.length < 2) return false
+    if (!guard) return true // no runway model → nothing to be on the far side of
+    const end = ac.held[ac.held.length - 1]
+    return end !== undefined && !onRunway(end, guard)
   }
 
   /** What an aircraft on the runway is doing there, or null when it isn't on it. Ordered by
@@ -1808,6 +1836,10 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       }
       case 'crossRunway':
         if (!ac.held || ac.held.length < 2) return refused('not holding short of a runway')
+        // A clearance to cross has to have a far side to reach. Without this an aircraft cleared
+        // *to* the runway would be driven onto it and parked there — see `heldRouteCrosses`.
+        if (!heldRouteCrosses(ac))
+          return refused('that route does not cross the runway — it ends on it')
         // Don't clear onto an occupied runway.
         if (guard && fleet.some((o) => o !== ac && blocksRunway(o))) return refused('runway occupied')
         clearDiversion(ac)
@@ -1882,13 +1914,14 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         // Local Control (Tower). A frequency change only — it stays holding short, and Tower
         // then issues line-up-and-wait / takeoff clearance. No runway or wake gate here; those
         // gate the takeoff clearance itself (see docs/atc-tower.md).
-        if (ac.intent !== 'departure') return refused('only departures contact tower for takeoff')
         if (ac.controlledBy === 'tower') return refused('already on tower frequency')
         if (!ac.holdShort) return refused('not holding short of the runway')
-        // A departure merely holding short to *cross* the runway (its route continues past it,
-        // so it has no goal on it) is not a takeoff — the controller clears it across instead.
-        if (guard && (!ac.goalPoint || !onRunway(ac.goalPoint, guard)))
-          return refused('route crosses the runway — clear it to cross, not for takeoff')
+        // Two reasons to be handed off from a hold-short line, and Local Control owns the runway
+        // for both of them: a departure about to use the runway, or a transit about to cross it
+        // ("contact Tower for runway 27 crossing" — docs/atc-runway-crossing.md §5, option B).
+        // An arrival crosses to reach its gate, so this is deliberately not departures-only.
+        if (!holdingForTakeoff(ac) && !heldRouteCrosses(ac))
+          return refused('nothing to hand off for — not a takeoff or a crossing')
         ac.controlledBy = 'tower'
         return ACCEPTED
       }
@@ -1975,14 +2008,26 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         return ACCEPTED
       }
       case 'contactGround': {
-        // Tower → Ground. Issued during the rollout it is the real-world "when vacated,
-        // contact ground": it arms the change, which takes effect the moment the aircraft is
-        // actually clear. A pilot never switches frequency unprompted, so nothing else does.
-        if (ac.intent !== 'arrival') return refused('only arrivals are handed to ground after landing')
+        // Tower → Ground. Issued before the aircraft is clear it is the real-world "when
+        // vacated / when clear of the runway, contact ground": it arms the change, which takes
+        // effect the moment the aircraft actually is clear. A pilot never switches frequency
+        // unprompted, so nothing else does.
         if (ac.controlledBy !== 'tower') return refused('not on tower frequency')
         if (ac.airborne) return refused('still airborne')
-        if (!ac.rollingOut) return refused('not on the landing roll')
         if (ac.groundPending) return refused('already sent to ground')
+        // The other way Tower holds a surface aircraft: it took the handoff for a crossing and
+        // gives it back once the aircraft is across. Nothing is re-routed — unlike an arrival
+        // off the runway, a transit is already taxiing the clearance it was given.
+        if (!ac.rollingOut) {
+          if (onRunwayNow(ac)) {
+            ac.groundPending = true // still on the pavement: "when clear of the runway…"
+            return ACCEPTED
+          }
+          ac.controlledBy = 'ground'
+          voidClearance(ac)
+          return ACCEPTED
+        }
+        if (ac.intent !== 'arrival') return refused('only arrivals are handed to ground after landing')
         // Arm the change only if it isn't applicable yet; a failed immediate handoff must not
         // leave the aircraft looking "already sent" when it was actually refused.
         if (ac.vacated) return handOffToGround(ac) ? ACCEPTED : refused('no taxi route to the gate')
@@ -2147,6 +2192,20 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       if (ac.speedLimits.length === 0) return Infinity
     }
     return profileCap([ac.x, ac.y], ac.path, ac.speedLimits, ac.leg, ac.brakeRate)
+  }
+
+  /**
+   * Apply a "when clear of the runway, contact ground" issued to a **crossing** aircraft, the
+   * moment it is actually clear. The landing rollout has its own version of this inside
+   * {@link resolveApproach}, which never runs for an aircraft that is only taxiing.
+   */
+  function resolveCrossingHandoff(ac: Internal): void {
+    if (!ac.groundPending || ac.rollingOut || ac.airborne) return
+    if (ac.controlledBy !== 'tower' || onRunwayNow(ac)) return
+    ac.controlledBy = 'ground'
+    ac.groundPending = false
+    voidClearance(ac) // Tower's business with it is finished; Ground has issued it nothing
+    checkIn(ac)
   }
 
   /** Post-motion airborne bookkeeping: descend the final, touch down or go around at the
@@ -2329,6 +2388,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       }
       fleet.forEach((ac, i) => advance(ac, dt, caps[i] ?? Infinity))
       for (const ac of fleet) resolveApproach(ac, dt)
+      for (const ac of fleet) resolveCrossingHandoff(ac)
       for (const ac of fleet) resolveLineUp(ac)
       for (const id of resolveGoals(dt)) {
         const i = fleet.findIndex((a) => a.id === id)
