@@ -1,5 +1,5 @@
 import { KSAN_SURFACE } from './ksan'
-import { gatesFromSurface, type Airport } from './airport'
+import { gatesFromSurface, standsAsGates, type Airport } from './airport'
 import type { Point } from './types'
 import type { Rng } from '../random'
 import type { ServicingConfig } from '../ground/sim'
@@ -35,6 +35,47 @@ function identity(rng: Rng): { callsign: string; type: string; wake: WakeCategor
   const [type, wake] = TYPES[rng.int(0, TYPES.length - 1)] ?? ['B738', 'M']
   return { callsign: `${airline}${rng.int(100, 1899)}`, type, wake }
 }
+
+/** The freight operators that serve SAN, and what they bring. Heavier on average than the
+ *  airline fleet — which is the point: a Heavy on the North Ramp puts a real wake interval
+ *  behind it, and the aircraft behind it is often a Light off the GA ramp. */
+const CARGO_OPERATORS = ['FDX', 'UPS', 'GTI', 'CLX']
+const CARGO_TYPES: readonly [string, WakeCategory][] = [
+  ['B763', 'H'],
+  ['A306', 'H'],
+  ['B752', 'M'],
+  ['AT76', 'M'],
+  ['C208', 'L'],
+]
+
+function cargoIdentity(rng: Rng): { callsign: string; type: string; wake: WakeCategory } {
+  const operator = CARGO_OPERATORS[rng.int(0, CARGO_OPERATORS.length - 1)] ?? 'FDX'
+  const [type, wake] = CARGO_TYPES[rng.int(0, CARGO_TYPES.length - 1)] ?? ['B763', 'H']
+  return { callsign: `${operator}${rng.int(100, 1899)}`, type, wake }
+}
+
+/** General aviation: N-numbers rather than an operator code, and light types. */
+const GA_TYPES: readonly [string, WakeCategory][] = [
+  ['C172', 'L'],
+  ['SR22', 'L'],
+  ['PC12', 'L'],
+  ['BE20', 'L'],
+  ['C560', 'L'],
+]
+const GA_SUFFIX = 'ABCDEFGHJKLMNPQRSTUVWXYZ' // no I or O — they read as 1 and 0
+
+function gaIdentity(rng: Rng): { callsign: string; type: string; wake: WakeCategory } {
+  const [type, wake] = GA_TYPES[rng.int(0, GA_TYPES.length - 1)] ?? ['C172', 'L']
+  const letter = (i: number): string => GA_SUFFIX[i] ?? 'A'
+  const tail = `N${rng.int(100, 999)}${letter(rng.int(0, GA_SUFFIX.length - 1))}${letter(rng.int(0, GA_SUFFIX.length - 1))}`
+  return { callsign: tail, type, wake }
+}
+
+/** The North Ramp — cargo and FBO parking, and the reason this field has runway crossings at
+ *  all: it is on the far side of 09/27 from every passenger gate. */
+const NORTH_RAMP = new Set(['N1', 'N2', 'N3', 'N4', 'N5', 'N6', 'N7', 'N8', 'N9', 'N10'])
+/** The east-side GA stands, also north of the runway. */
+const GA_RAMP = new Set(['1', '2', '3', '4', '5'])
 
 /**
  * Runway 09/27, from the FAA survey rather than from the pavement polyline — see
@@ -105,13 +146,29 @@ export const KSAN: Airport = {
   runways: [KSAN_RUNWAYS['27'], KSAN_RUNWAYS['09']],
   defaultRunway: '27',
   layout: KSAN_RUNWAY_LAYOUT,
-  // Passenger terminal gates from OSM gate nodes (Terminal 2 = 20–51, Terminal 1 = 101–119).
-  // Cargo and remote stands are not tagged as gates, so they are excluded from spawning.
-  gates: gatesFromSurface(KSAN_SURFACE),
+  // Three classes of traffic, and the parking each of them uses. The weights are movements,
+  // not stands: the North Ramp and the GA apron are a good share of the field's parking and a
+  // small share of its day. Both sit **north of runway 09/27**, while every passenger gate is
+  // south of it — so this is also what makes a runway crossing an ordinary event here rather
+  // than something you have to contrive. See docs/atc-runway-crossing.md.
+  fleets: [
+    { kind: 'airline', weight: 10, gates: gatesFromSurface(KSAN_SURFACE), identity },
+    {
+      kind: 'cargo',
+      weight: 2,
+      gates: standsAsGates(KSAN_SURFACE, (s) => NORTH_RAMP.has(s.ref)),
+      identity: cargoIdentity,
+    },
+    {
+      kind: 'ga',
+      weight: 2,
+      gates: standsAsGates(KSAN_SURFACE, (s) => GA_RAMP.has(s.ref)),
+      identity: gaIdentity,
+    },
+  ],
   servicing: SERVICING,
   comms: { ground: '123.9', tower: '118.3', atis: '134.8' },
   traffic: { intervalSec: 22, maxAircraft: 12, initialDepartures: 3 },
-  identity,
   // Terminal 2's centroid sits over its own stands; nudge the label clear of them.
   areaLabelOffsetsNm: {
     'Terminal 2 West': [0, -0.05],

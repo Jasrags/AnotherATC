@@ -1,7 +1,7 @@
-import { createRng, type Rng } from '../random'
+import { createRng } from '../random'
 import { finalFix, FINAL_APPROACH_NM, type ActiveRunway, type RunwayLayout } from '../ground/runway'
-import type { AircraftInit, GateSlot, ServicingConfig, SpawnConfig } from '../ground/sim'
-import type { NamedDestination, WakeCategory } from '../ground/types'
+import type { AircraftInit, GateSlot, ServicingConfig, SpawnConfig, SpawnFleet } from '../ground/sim'
+import type { NamedDestination } from '../ground/types'
 import { buildStands, type Stand } from '../ground/stands'
 import type { AirportSurface, Point } from './types'
 
@@ -51,14 +51,13 @@ export interface Airport {
   defaultRunway: string
   /** Both runway ends as painted, for the markings. */
   layout: RunwayLayout
-  /** Stands the spawner may use. */
-  gates: GateSlot[]
+  /** The classes of traffic this field generates, and where each of them parks. The first is
+   *  used for the initial fill — the aircraft already on stand at t=0. */
+  fleets: readonly SpawnFleet[]
   /** Pre-departure ground services; omit for a field that doesn't model them. */
   servicing: ServicingConfig
   comms: AirportComms
   traffic: TrafficConfig
-  /** Deterministic identity for spawned traffic — the airlines and types that serve the field. */
-  identity: (rng: Rng) => { callsign: string; type: string; wake: WakeCategory }
   /** Nudges (nm) for area labels whose centroid sits over pavement, keyed by label. */
   areaLabelOffsetsNm?: Record<string, Point>
 }
@@ -73,12 +72,16 @@ export function findRunway(airport: Airport, ident: string): ActiveRunway | unde
  *  heading it parks on, taken from the painted lead-in line where the field has one — not the
  *  gate label node, which sits at the terminal a plane's length further in. */
 export function gatesFromSurface(surface: AirportSurface): GateSlot[] {
-  // Terminal gates only. Remote stands — cargo, GA, commuter — are real parking and the sim
-  // knows them, so traffic can be *sent* there; but seeding scheduled airline traffic onto a
-  // freight apron would be wrong, and choosing which traffic belongs where is a scenario
-  // question rather than a geometry one.
+  // Terminal gates — the airline fleet's stands. Remote parking is reached through
+  // `standsAsGates`, because which traffic belongs on a freight apron is a scenario question
+  // rather than a geometry one, and the answer is stated per fleet.
+  return standsAsGates(surface, (s) => s.kind === 'terminal')
+}
+
+/** The stands matching `pick`, as spawn slots. How a fleet names the parking it uses. */
+export function standsAsGates(surface: AirportSurface, pick: (stand: Stand) => boolean): GateSlot[] {
   return buildStands(surface)
-    .filter((s) => s.kind === 'terminal')
+    .filter(pick)
     .map((s) => ({ ref: s.ref, point: s.stop, headingDeg: s.headingDeg }))
 }
 
@@ -115,20 +118,23 @@ export function createAirportGame(airport: Airport, seed = 1, runwayIdent?: stri
   }))
 
   const spawn: SpawnConfig = {
-    gates: airport.gates,
+    fleets: airport.fleets,
     departureTarget,
     approach: { fix: finalFix(runway, FINAL_APPROACH_NM), threshold: runway.threshold },
     intervalSec: airport.traffic.intervalSec,
     maxAircraft: airport.traffic.maxAircraft,
     seed,
-    identity: (rng: Rng) => airport.identity(rng),
   }
 
-  const inits: AircraftInit[] = airport.gates
+  // The initial fill is scene-setting, and it comes from the first fleet: a field that opens
+  // with its freight apron full and its gates empty is not the picture. The spawner mixes the
+  // rest in from the first interval onward.
+  const home = airport.fleets[0]
+  const inits: AircraftInit[] = (home?.gates ?? [])
     .slice(0, airport.traffic.initialDepartures)
     .map((slot, i) => {
       // Deterministic initial identities, independent of the spawner's stream.
-      const { callsign, type, wake } = airport.identity(createRng(seed + i + 1))
+      const { callsign, type, wake } = home!.identity(createRng(seed + i + 1))
       return {
         id: `init${i}`,
         callsign,

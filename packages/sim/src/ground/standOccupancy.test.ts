@@ -375,11 +375,13 @@ describe('remote stands are real parking', () => {
   })
 
   it('is not seeded with scheduled airline traffic', () => {
-    // The spawner works terminal gates; which traffic belongs on a freight apron is a scenario
-    // question, not a geometry one.
+    // Remote parking now has traffic of its own (cargo and GA fleets), but it is *their*
+    // traffic: the airline fleet never parks on a freight apron, and the initial fill is
+    // airline only. Which traffic belongs where is a scenario question, not a geometry one.
     const { game } = field()
     const remoteRefs = new Set(stands.filter((s) => s.kind === 'remote').map((s) => s.ref))
-    expect(game.spawn.gates.some((g) => remoteRefs.has(g.ref))).toBe(false)
+    const airline = game.spawn.fleets.find((f) => f.kind === 'airline')!
+    expect(airline.gates.some((g) => remoteRefs.has(g.ref))).toBe(false)
     expect(game.inits.some((i) => i.gate !== undefined && remoteRefs.has(i.gate))).toBe(false)
   })
 })

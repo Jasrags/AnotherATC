@@ -186,8 +186,8 @@ describe('the sim honours the configuration', () => {
           targetSpeed: 140,
           airborne: true,
           intent: 'arrival',
-          goalPoint: game.spawn.gates[0]!.point,
-          gate: game.spawn.gates[0]!.ref,
+          goalPoint: game.spawn.fleets[0]!.gates[0]!.point,
+          gate: game.spawn.fleets[0]!.gates[0]!.ref,
         },
       ],
       { guard, graph, runway: r },
@@ -245,7 +245,7 @@ describe('EMAS and the pre-threshold pavement', () => {
           id: 'a', callsign: 'AAL1', type: 'B738', wake: 'M',
           path: [game.spawn.approach.fix, game.spawn.approach.threshold],
           targetSpeed: 140, airborne: true, intent: 'arrival',
-          goalPoint: game.spawn.gates[0]!.point, gate: game.spawn.gates[0]!.ref,
+          goalPoint: game.spawn.fleets[0]!.gates[0]!.point, gate: game.spawn.fleets[0]!.gates[0]!.ref,
         },
       ],
       { guard, graph, runway: r },
@@ -554,7 +554,7 @@ describe('runway-change cascade', () => {
           id: 'a', callsign: 'AAL1', type: 'B738', wake: 'M',
           path: [game.spawn.approach.fix, game.spawn.approach.threshold],
           targetSpeed: 140, airborne: true, intent: 'arrival',
-          goalPoint: game.spawn.gates[0]!.point, gate: game.spawn.gates[0]!.ref,
+          goalPoint: game.spawn.fleets[0]!.gates[0]!.point, gate: game.spawn.fleets[0]!.gates[0]!.ref,
         },
       ],
       { guard, graph, runway: game.runway },
@@ -606,7 +606,7 @@ describe('runway-change cascade', () => {
 
   it('retargets a departure that has not rolled to the new departure end', () => {
     const game = buildKsanGroundGame(1, '27')
-    const gate = game.spawn.gates[0]!
+    const gate = game.spawn.fleets[0]!.gates[0]!
     const sim = createGroundSim(
       [
         {
@@ -682,7 +682,7 @@ describe('runway intersections (for intersection departures)', () => {
     const graphFull = buildTaxiGraph(KSAN_SURFACE)
     const r = game.runway
     const b4 = buildRunwayIntersections(topo, guard, r.departureStart, r.farEnd).find((i) => i.ref === 'B4')!
-    const gate = game.spawn.gates[0]!
+    const gate = game.spawn.fleets[0]!.gates[0]!
     const sim = createGroundSim(
       [
         {

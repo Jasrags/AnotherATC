@@ -80,11 +80,11 @@ const KTST: Airport = {
       { ident: '18', pavementEnd: [0, 2], threshold: [0, 2], emas: { lengthFt: 400, widthFt: 170 } },
     ],
   },
-  gates: gatesFromSurface(surface),
+  // One fleet is enough to be an airport: a field with a single class of traffic states one.
+  fleets: [{ kind: 'airline', weight: 1, gates: gatesFromSurface(surface), identity }],
   servicing: { services: [{ kind: 'fuel', sec: 20 }] },
   comms: { ground: '121.7', tower: '119.1', atis: '127.4' },
   traffic: { intervalSec: 15, maxAircraft: 4, initialDepartures: 2 },
-  identity,
 }
 
 const graph = buildTaxiGraph(surface)
@@ -92,9 +92,9 @@ const guard = buildRunwayGuard(surface)
 
 describe('a second, made-up airport', () => {
   it('finds its own gates from its own surface', () => {
-    expect(KTST.gates.map((g) => g.ref)).toEqual(['1', '2'])
+    expect(KTST.fleets[0]!.gates.map((g) => g.ref)).toEqual(['1', '2'])
     // …and nothing leaked from the one real airport.
-    expect(KTST.gates.length).toBeLessThan(KSAN.gates.length)
+    expect(KTST.fleets[0]!.gates.length).toBeLessThan(KSAN.fleets[0]!.gates.length)
   })
 
   it('builds a game with its own traffic, stands and runway', () => {
@@ -130,7 +130,7 @@ describe('a second, made-up airport', () => {
 
   it('plays: an arrival flies its final, lands, exits and reaches a gate', () => {
     const game = createAirportGame(KTST, 3)
-    const gate = KTST.gates[0]!
+    const gate = KTST.fleets[0]!.gates[0]!
     const sim = createGroundSim(
       [
         {

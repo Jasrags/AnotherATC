@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { buildStands } from '@anotheratc/sim'
 import { createGroundController } from './controller'
-import type { Airport, AirportSurface } from '@anotheratc/sim'
+import type { Airport, AirportSurface, Point, Rng } from '@anotheratc/sim'
 import { visibleComms } from './CommsLog'
 
 describe('ground controller bridge', () => {
@@ -296,11 +296,17 @@ describe('the controller runs whatever airport it is given', () => {
         { ident: '18', pavementEnd: [0, 2], threshold: [0, 2], emas: null },
       ],
     },
-    gates: [{ ref: 'G1', point: [0.5, 1] }],
+    fleets: [
+      {
+        kind: 'airline',
+        weight: 1,
+        gates: [{ ref: 'G1', point: [0.5, 1] as Point }],
+        identity: (rng: Rng) => ({ callsign: `TW${rng.int(10, 99)}`, type: 'E75L', wake: 'M' as const }),
+      },
+    ],
     servicing: { services: [{ kind: 'fuel', sec: 10 }] },
     comms: { ground: '121.7', tower: '119.1', atis: '127.4' },
     traffic: { intervalSec: 15, maxAircraft: 3, initialDepartures: 1 },
-    identity: (rng) => ({ callsign: `TW${rng.int(10, 99)}`, type: 'E75L', wake: 'M' as const }),
   }
 
   it('adopts the field identity, comms, runways and stands', () => {

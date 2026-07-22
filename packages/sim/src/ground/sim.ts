@@ -87,8 +87,31 @@ export interface ApproachConfig {
 }
 
 /** Deterministic traffic generation. */
-export interface SpawnConfig {
+/**
+ * A class of traffic the field generates: who they are, where they park, and how much of the
+ * flow they are.
+ *
+ * Fleets exist because **what an aircraft is decides where it parks**, and the two cannot be
+ * chosen independently — a 737 does not park on a freight apron and a Cessna does not take a
+ * jet bridge. Weighting is the other half: a field's cargo ramp may hold a third of its stands
+ * and see a twentieth of its movements, so stand count is not traffic share. Which traffic
+ * belongs where is a scenario question, which is why it is stated here rather than derived
+ * from the geometry.
+ */
+export interface SpawnFleet {
+  /** What this traffic is — "airline", "cargo", "ga". */
+  kind: string
+  /** Relative share of spawn attempts. Summed across fleets, so they need not total anything. */
+  weight: number
+  /** The stands this fleet parks on. */
   gates: readonly GateSlot[]
+  /** Produces a callsign/type for one aircraft of this fleet. */
+  identity: (rng: Rng) => { callsign: string; type: string; wake: WakeCategory }
+}
+
+export interface SpawnConfig {
+  /** The traffic classes this field generates. Order is meaningful only for the initial fill. */
+  fleets: readonly SpawnFleet[]
   /** Where departures head to leave the surface (a runway point). */
   departureTarget: Point
   /** Where arrivals appear: established on final, inbound to the landing threshold. */
@@ -96,8 +119,6 @@ export interface SpawnConfig {
   intervalSec: number
   maxAircraft: number
   seed: number
-  /** Produces a callsign/type for each spawned aircraft. */
-  identity: (rng: Rng, intent: GroundIntent) => { callsign: string; type: string; wake: WakeCategory }
 }
 
 /** One parallel ground service and how long it takes (game seconds). */
@@ -2424,16 +2445,35 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     return remove
   }
 
+  /** Choose a traffic class by weight. Deterministic: one draw off the seeded stream. */
+  function pickFleet(rng: Rng, fleets: readonly SpawnFleet[]): SpawnFleet | undefined {
+    const total = fleets.reduce((sum, f) => sum + Math.max(0, f.weight), 0)
+    if (total <= 0) return undefined
+    let roll = rng.next() * total
+    for (const f of fleets) {
+      roll -= Math.max(0, f.weight)
+      if (roll < 0) return f
+    }
+    return fleets[fleets.length - 1]
+  }
+
   function trySpawn(): void {
     if (!spawn || !spawnRng) return
     if (fleet.length >= spawn.maxAircraft) return
+    // The class is chosen before the stand, because what an aircraft is decides where it parks.
+    // Picking a stand first and then an identity would put freighters on jet bridges in
+    // proportion to how many jet bridges the field has.
+    const traffic = pickFleet(spawnRng, spawn.fleets)
+    if (!traffic) return
     const occupied = new Set(fleet.map((a) => a.gate).filter((g): g is string => g !== null))
-    const free = spawn.gates.filter((g) => !occupied.has(g.ref))
+    const free = traffic.gates.filter((g) => !occupied.has(g.ref))
+    // A full apron simply means no spawn this attempt — this fleet's traffic backs up rather
+    // than spilling onto another fleet's stands.
     if (free.length === 0) return
     const slot = free[spawnRng.int(0, free.length - 1)]
     if (!slot) return
     const intent: GroundIntent = spawnRng.next() < 0.5 ? 'departure' : 'arrival'
-    const { callsign, type, wake } = spawn.identity(spawnRng, intent)
+    const { callsign, type, wake } = traffic.identity(spawnRng)
     fleet.push(
       makeInternal({
         id: `sp${seq++}`,

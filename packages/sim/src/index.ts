@@ -4,6 +4,7 @@ export type { Rng } from './random'
 export { KSAN_SURFACE } from './world/ksan'
 export { KSAN, KSAN_RUNWAYS, KSAN_RUNWAY_LAYOUT } from './world/ksanAirport'
 export { createAirportGame, findRunway, gatesFromSurface } from './world/airport'
+export { standsAsGates } from './world/airport'
 export type { Airport, AirportComms, AirportGame, TrafficConfig } from './world/airport'
 export type {
   AirportSurface,
@@ -20,6 +21,7 @@ export type {
   ApproachConfig,
   GateSlot,
   SpawnConfig,
+  SpawnFleet,
   GroundSimOptions,
   ServiceSpec,
   ServicingConfig,

@@ -33,13 +33,19 @@ const graph = buildTaxiGraph(surface)
 const guard = buildRunwayGuard(surface)
 
 const spawn: SpawnConfig = {
-  gates: [{ ref: 'A1', point: [0.2, -0.2] }],
+  fleets: [
+    {
+      kind: 'airline',
+      weight: 1,
+      gates: [{ ref: 'A1', point: [0.2, -0.2] }],
+      identity: () => ({ callsign: 'TST1', type: 'B738', wake: 'M' }),
+    },
+  ],
   departureTarget: [1.8, -0.02],
   approach: { fix: [-4, 0], threshold: [0, 0] },
   intervalSec: 5,
   maxAircraft: 3,
   seed: 1,
-  identity: () => ({ callsign: 'TST1', type: 'B738', wake: 'M' }),
 }
 
 describe('traffic flow', () => {

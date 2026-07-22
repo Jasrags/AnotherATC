@@ -9,7 +9,7 @@ describe('KSAN ground game', () => {
   it('provides the terminal gates and runway destinations', () => {
     const { spawn, destinations } = buildKsanGroundGame(1)
     // 32 (T2) + 19 (T1) passenger gates
-    expect(spawn.gates.length).toBeGreaterThanOrEqual(50)
+    expect(spawn.fleets[0]!.gates.length).toBeGreaterThanOrEqual(50)
     expect(destinations.map((d) => d.id)).toContain('rwy27')
   })
 
