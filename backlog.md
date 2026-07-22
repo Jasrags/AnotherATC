@@ -239,9 +239,9 @@ Design note: `docs/atc-tower.md` (one sim, two projections; Ground and Tower own
   at the line, the answer to a crossing request, and, before the aircraft is on the pavement, the
   way to **take a crossing clearance back**. That last one is the counterpart to "cancel takeoff
   clearance", and the lever the incursion alert most wants when an arrival appears on final in
-  the seconds after a crossing was cleared. _Next: the reason belongs on the air with it —
-  "hold short runway 27, traffic on a three mile final" — which needs refusals to become
-  transmissions rather than controller-facing notices._
+  the seconds after a crossing was cleared. _Next: the reason belongs on the air with it — "hold short runway 27,
+  traffic on a three mile final". Tracked under Cross-cutting systems as **"A refusal should be a
+  transmission, not a tooltip"**, since it is the same gap everywhere the sim says no._
 - 💭 **Ramp Control** — a third layer after Ground at large hubs (airline/airport-run, not FAA).
   Deferred: adds a frequency without adding a decision until gate conflicts + pushback contention
   exist (see Turnaround).
@@ -276,6 +276,20 @@ Design note: `docs/atc-tower.md` (one sim, two projections; Ground and Tower own
   (go-around, touchdown, handoff, expired give-way) stops being repeatable. Opt-in
   `readback: { errorRate, seed }`; **the running game passes no config, so nothing is ever
   misheard** — see *Gaming the game* below for why and what turning it on entails.
+- ⬜ **A refusal should be a transmission, not a tooltip.** The sim already knows *why* it says
+  no — every `DispatchResult` carries a controller-facing reason ("runway occupied", "wake
+  turbulence — 40s behind Heavy", "gate 39 occupied by SWA12"), and the HUD flashes it. But the
+  real exchange is on the air and *names the reason to the pilot*: "hold short runway 27,
+  **traffic on a three mile final**"; "cancel takeoff clearance, hold position". Today the pilot
+  is never told anything, so the transcript records a conversation with half of it missing, and
+  the reason is a UI affordance rather than something that happened in the world.
+  Needs: a refusal path through `phraseFor` (a refused command has no `Exchange` today — only
+  accepted ones are logged, deliberately, so this is a real change to that rule); a decision on
+  *which* refusals are spoken (a controller does not read the sim's internal reasons aloud —
+  "unknown aircraft" is a bug, not a transmission); and the reason attached to the instruction
+  that carries it rather than to the refusal, since "hold short, traffic on final" is an
+  *accepted* hold-short with a cause. Surfaced by the crossing work — see Tower Slice 3e and
+  `docs/atc-runway-crossing.md` §6, where Tower's denial is quoted with its reason.
 - 🚧 **Squawk / transponder codes** — beacon code assigned at clearance delivery (deterministic 4-digit octal), shown on the strip. Note the strip shows the code the aircraft is *squawking*, which is not the issued code when the pilot misheard it — comparing the two is the read-back game. _Next: link the code to a radar target once airborne (feeds TRACON radar contact)._
 - ✅ **Stand occupancy** — a stand is a resource, not a label. `standOccupied(ref)` reports who is
   physically on the mark; an aircraft cleared to an occupied stand is *not refused* — the
