@@ -1661,6 +1661,12 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     ac.held = held
     ac.dwell = -1
     ac.giveWayTo = null // a fresh clearance supersedes any give-way hold
+    // A conditional line-up is a clearance about where this aircraft will be in a minute; a
+    // taxi clearance is one about where it is going now, and the second supersedes the first.
+    // Left armed it would drive onto the runway some time after the controller had sent it
+    // somewhere else, off a route they had replaced. The new clearance is the announcement —
+    // it is in the transcript, where the old one was.
+    ac.lineUpBehind = null
     ac.pushingBack = false // …and aborts an in-progress pushback,
     ac.pushFacing = null // …including the direction it was being swung toward,
     ac.pushFacingLabel = null
@@ -2725,8 +2731,14 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
    * reading, which is that the traffic has left the runway altogether.
    */
   function hasPassed(ac: Internal, traffic: Internal): boolean {
+    // Off the runway entirely: there is nothing left to be behind, whatever the geometry says.
+    // This is not a shortcut — it is the case the comparison below cannot answer. An arrival
+    // that turns off *before* reaching the waiting aircraft never passes it, and a rule written
+    // only as a comparison of positions would leave the clearance armed for the rest of the
+    // session, waiting on something that has already finished happening.
+    if (!onRunwayNow(traffic)) return true
     const entry = nearestRunwayPoint([ac.x, ac.y])
-    if (!runway || !entry) return !onRunwayNow(traffic)
+    if (!runway || !entry) return false // no threshold to measure from; wait for it to vacate
     const from = runway.threshold
     return alongRunway(from, [traffic.x, traffic.y]) > alongRunway(from, entry)
   }

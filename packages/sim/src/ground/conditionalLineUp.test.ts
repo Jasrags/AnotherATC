@@ -230,3 +230,86 @@ describe('the condition that never comes true', () => {
     expect(A(sim, 'dep')!.onRunway).toBe(false)
   })
 })
+
+describe('an armed clearance and everything else that can happen to it', () => {
+  function armed(depX = 0.2) {
+    const sim = createGroundSim([arrival('arr'), departure('dep', depX)], { guard, graph, runway })
+    sim.dispatch({ type: 'clearedToLand', aircraftId: 'arr' })
+    for (let i = 0; i < 2000 && !A(sim, 'dep')?.holdShort; i += 1) sim.step(0.1)
+    sim.dispatch({ type: 'contactTower', aircraftId: 'dep' })
+    expect(sim.dispatch({ type: 'lineUpAndWait', aircraftId: 'dep', behind: 'arr' })).toEqual({ ok: true })
+    return sim
+  }
+
+  it('is superseded by a new taxi clearance, not left to fire later', () => {
+    // The armed clearance says where this aircraft will be in a minute. A taxi clearance says
+    // where it is going now. Leaving the first alive means the aircraft drives onto the runway
+    // some time after the controller sent it somewhere else — off a route they replaced.
+    const sim = armed()
+    expect(sim.dispatch({ type: 'taxiTo', aircraftId: 'dep', dest: GATE, exact: true })).toEqual({ ok: true })
+    expect(A(sim, 'dep')!.lineUpBehind).toBeNull()
+
+    for (let i = 0; i < 8000; i += 1) sim.step(0.1)
+    expect(A(sim, 'dep')?.onRunway ?? false).toBe(false) // it never enters on the spent condition
+  })
+
+  it('cannot be left measuring "behind" against a reversed runway', () => {
+    // Reversing the field does not merely move the threshold — it reverses the direction
+    // "behind" is measured in, so an armed clearance would be judged in a frame it was not
+    // issued in. Two things stop that, and neither is a special case for this clearance:
+    // while the traffic is on the pavement the configuration change is refused outright…
+    const sim = armed()
+    const other: ActiveRunway = {
+      ident: '27',
+      threshold: [2, 0],
+      departureStart: [2, 0],
+      farEnd: [0, 0],
+      toraFt: 12000,
+      ldaFt: 12000,
+      glidePathDeg: 3,
+      pattern: 'left',
+    }
+    for (let i = 0; i < 6000 && A(sim, 'arr')?.status !== 'rollout'; i += 1) sim.step(0.1)
+    expect(A(sim, 'arr')!.status).toBe('rollout')
+    expect(sim.setRunway(other).ok).toBe(false)
+    expect(A(sim, 'dep')!.lineUpBehind).toBe('ARR') // still armed, still in its own frame
+  })
+
+  it('…and is cancelled when the change sends its traffic around', () => {
+    // …while before touchdown the change is accepted, and every arrival on the old final goes
+    // around — which is exactly the fact that ends this clearance.
+    const sim = armed()
+    const other: ActiveRunway = {
+      ident: '27',
+      threshold: [2, 0],
+      departureStart: [2, 0],
+      farEnd: [0, 0],
+      toraFt: 12000,
+      ldaFt: 12000,
+      glidePathDeg: 3,
+      pattern: 'left',
+    }
+    expect(sim.setRunway(other).ok).toBe(true)
+    sim.step(0.1)
+    expect(A(sim, 'dep')!.lineUpBehind).toBeNull()
+    expect(say(sim).some((t) => t.includes('cancel line up and wait'))).toBe(true)
+  })
+
+  it('fires when the traffic leaves the runway without ever reaching the holding point', () => {
+    // The departure is holding at the *far* end and the arrival turns off before it. Nothing
+    // ever "passes" it, so a rule written only as a comparison of positions would leave this
+    // armed for the rest of the session. Off the runway is off the runway.
+    // Far enough down the runway that the arrival's turnoff comes first, but with runway enough
+    // left ahead of it to be a legal departure spot.
+    const sim = armed(1.5)
+    for (let i = 0; i < 12000 && A(sim, 'dep')?.status !== 'lineUpWait'; i += 1) {
+      sim.step(0.1)
+      const arr = A(sim, 'arr')
+      if (arr && !arr.onRunway && arr.altitude === 0 && A(sim, 'dep')?.status === 'holdShort') {
+        // vacated but not yet resolved — allowed for a tick, not forever
+      }
+    }
+    expect(A(sim, 'dep')!.status).toBe('lineUpWait')
+    expect(A(sim, 'dep')!.lineUpBehind).toBeNull()
+  })
+})

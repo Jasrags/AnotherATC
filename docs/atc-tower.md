@@ -161,7 +161,17 @@ to a **runway-clear predicate** consulted by every clearance:
   voids the landing clearance, which is exactly that fact) or leaves the sim, and when the
   runway is not usable at the moment the condition comes true. Never silently re-pointed at the
   next arrival: "the landing 737" is one aircraft. `holdShort` takes it back, the same way it
-  takes back a crossing the aircraft has not acted on.
+  takes back a crossing the aircraft has not acted on, and so does any **taxi clearance** — that
+  is a sentence about where the aircraft is going now, and it supersedes one about where it will
+  be in a minute.
+
+  "Passed the holding point" is measured along the runway from the threshold, but **off the
+  runway counts as passed** regardless: an arrival that turns off *before* reaching the waiting
+  aircraft never passes it, and a rule written only as a comparison of positions would leave the
+  clearance armed for the rest of the session, waiting on something that had already finished.
+  A runway-configuration change cannot strand one either — the change is refused while anything
+  is on the pavement, and before touchdown it sends the arrival around, which ends the clearance
+  by the ordinary route.
 - `clearedToLand` refused (or flagged as a conflict alert) if a departure occupies the runway
   or is lined up and waiting — the classic "go around, traffic on the runway."
 - An aircraft in **LUAW** counts as occupying, so you can't land over it.
