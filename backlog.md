@@ -77,8 +77,24 @@ The core ground-control loop. Ordered roughly by priority.
   pavement is the entry. `Stand.kind` separates `terminal` from `remote`; the spawner stays on
   terminal gates (what belongs on a freight apron is a scenario question), but everything else
   treats them the same — drawn, occupied, holding arrivals off, and offered by gate reassignment.
-  Refs are case-normalised (OSM had a lone lowercase `n6`). _Next: traffic that actually belongs
-  there — cargo/GA types with their own spawn rules — and the 17 untagged parking lines._
+  Refs are case-normalised (OSM had a lone lowercase `n6`). _Next: the 17 untagged parking lines._
+- ✅ **Traffic fleets — cargo and GA, and the crossings that come with them.** Runway 09/27
+  divides KSAN: every passenger gate is south of it, the **North Ramp (N1–N10)** and the
+  **east-side GA stands (1–5)** are north. The spawner only used terminal gates, so nothing ever
+  needed to cross — the whole crossing exchange, the Ground↔Tower handoff for it,
+  hold-short-with-a-reason and the incursion alerts were reachable only by contrivance.
+  Traffic is now generated per **fleet**: a class of traffic with its own stands, identities and
+  weight. Fleets exist because *what an aircraft is decides where it parks* — choose the stand
+  first and you put freighters on jet bridges in proportion to how many jet bridges the field
+  has. Weight is movements, not stands: those aprons are a good share of the parking and a small
+  share of the day. KSAN runs airline (10) / cargo (2) / GA (2); cargo brings **Heavies** to the
+  North Ramp and GA brings **Lights** to the east side, so the wake matrix finally sees the
+  pairing it was written for. `SpawnConfig.gates`/`identity` are *replaced* by `fleets`, not sat
+  beside them, so there is one source of truth for who parks where. End-to-end test flies the
+  whole thing: land → roll out → contact ground → taxi → hold short → cross → park.
+  _Next: play it. Also — commuter stands 11–14 and West/Island W2–W4 are south, so they carry no
+  crossing and have no fleet yet; and cargo/GA have no distinct servicing profile (a freighter
+  runs the same 45s fuel as a 737)._
 - ⬜ **HS1 hotspot** — render the KSAN hot spot; incursion-risk awareness. Now that generic
   incursion detection exists, this is the airport-specific flavour: HS1 as named geometry, warned
   on earlier and louder than open pavement.
