@@ -243,6 +243,9 @@ const GATE_DWELL_SEC = 8
 
 // ─── Separation ─────────────────────────────────────────────────────────────
 /** How far ahead (nm) an aircraft watches for traffic. */
+/** How close (nm ≈ 240 ft) another aircraft has to be to a turnoff before a landing may no
+ *  longer be planned onto it: a plane's length, plus room to stop behind it. */
+const EXIT_BLOCKED_NM = 0.04
 const LOOK_AHEAD_NM = 0.06
 /** Half-width (nm) of the path corridor: traffic outside it is off to the side. */
 const CORRIDOR_HALF_NM = 0.012
@@ -796,13 +799,34 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     return ((p[0] - threshold[0]) * dx + (p[1] - threshold[1]) * dy) / len
   }
   /** The turnoffs this arrival could still be assigned: ahead of it, and slow-downable for. */
+  /**
+   * Whether another aircraft is standing in this turnoff, or is already committed to taking it.
+   *
+   * A turnoff is a one-aircraft place. An arrival that has vacated and checked in with Ground
+   * sits at the far end of the connector until it is taxied, so a second landing sent to the
+   * same one would brake for a turn and find the pavement taken — and a rollout is the one
+   * movement separation cannot rescue, because it meets the aircraft ahead inside the curve at
+   * a speed it cannot stop from.
+   */
+  function exitBlocked(ac: Internal, e: RunwayExit): boolean {
+    return fleet.some((o) => {
+      if (o === ac || o.airborne) return false
+      const here: Point = [o.x, o.y]
+      for (let i = 1; i < e.geom.length; i += 1) {
+        if (distToSegment(here, e.geom[i - 1] as Point, e.geom[i] as Point) < EXIT_BLOCKED_NM) return true
+      }
+      return false
+    })
+  }
+
   function exitOptionsFor(ac: Internal): RunwayExit[] {
     if (ac.intent !== 'arrival' || !ac.threshold || ac.vacated) return []
     const at = ac.airborne ? 0 : alongRunway(ac.threshold, [ac.x, ac.y])
     const speed = ac.airborne ? ac.targetSpeed : ac.groundspeed
     return exitsForLanding(ac.threshold).filter((e) => {
       const remaining = e.distanceNm - at
-      return remaining > 0 && brakeRateFor(speed, e.speedKt, remaining) <= MAX_BRAKE_KT_S
+      if (remaining <= 0 || brakeRateFor(speed, e.speedKt, remaining) > MAX_BRAKE_KT_S) return false
+      return !exitBlocked(ac, e)
     })
   }
 
@@ -2545,7 +2569,12 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         ac.departing || ac.airborne
           ? Infinity // a takeoff roll and a final aren't taxi movements
           : ac.rollingOut
-            ? rolloutCap(ac) // …and a landing rollout follows its own turn-speed profile
+            ? // A landing rollout follows its own turn-speed profile — but not through another
+              // aircraft. The turnoff it is braking for can have someone stopped in it (an
+              // arrival awaiting a taxi clearance, most of all), and geometry alone would drive
+              // straight into them. Separation is the only cap that applies: a rollout owns the
+              // runway, so it yields to no reservation, no give-way and no stand.
+              Math.min(rolloutCap(ac), separationCap(ac))
             : Math.min(
                 separationCap(ac),
                 reservationCap(ac),
