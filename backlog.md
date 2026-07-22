@@ -93,8 +93,11 @@ The core ground-control loop. Ordered roughly by priority.
   beside them, so there is one source of truth for who parks where. End-to-end test flies the
   whole thing: land → roll out → contact ground → taxi → hold short → cross → park.
   _Next: play it. Also — commuter stands 11–14 and West/Island W2–W4 are south, so they carry no
-  crossing and have no fleet yet; and cargo/GA have no distinct servicing profile (a freighter
-  runs the same 45s fuel as a 737)._
+  crossing and have no fleet yet; and **servicing is still one global profile**, so a Cessna on
+  the GA ramp waits out a full airline turnaround — 45s fuel, catering, cabin — before it may
+  push. `SpawnFleet` has no servicing field; threading one through is the natural next step, and
+  the one place "what an aircraft is decides what happens to it" is not yet honoured. (Raised
+  independently in review, which is why it is written down rather than left as a nicety.)_
 - ⬜ **HS1 hotspot** — render the KSAN hot spot; incursion-risk awareness. Now that generic
   incursion detection exists, this is the airport-specific flavour: HS1 as named geometry, warned
   on earlier and louder than open pavement.
