@@ -116,3 +116,40 @@ describe('converging traffic on the real field', () => {
     }
   })
 })
+
+describe('one aircraft, one state — with more than two aircraft on the field', () => {
+  it('paints the worse of the two when an aircraft is in both at once', () => {
+    // Three aircraft: X is nose-to-nose with Y and, at the same instant, merely converging with
+    // Z. Per pair the severities are right; per *aircraft* both flags would be set, and the
+    // scope draws one ring. Two aircraft can never produce this, which is why it needs three.
+    // Out on the apron, well away from the runway: this is about the flags, and an aircraft
+    // parked on a runway would be answering a different question (and raising an incursion).
+    const [gx, gy] = gates[20]!.point
+    const near = 0.005 // inside the conflict distance
+    const sim = createGroundSim(
+      [
+        { id: 'x', callsign: 'X', type: 'B738', wake: 'M', path: [[gx, gy]], targetSpeed: 0 },
+        { id: 'y', callsign: 'Y', type: 'B738', wake: 'M', path: [[gx + near, gy]], targetSpeed: 0 },
+        // Closing on X from the west at taxi speed: developing, not happening. Across X's
+        // nose rather than behind it, or the queue exclusion would (rightly) drop the pair.
+        {
+          id: 'z',
+          callsign: 'Z',
+          type: 'B738',
+          wake: 'M',
+          path: [[gx - 0.05, gy], [gx, gy]],
+          targetSpeed: 15,
+          heading: 90,
+        },
+      ],
+      { graph, guard, runway: game.runway, stands: game.stands },
+    )
+    for (let i = 0; i < 20; i += 1) sim.step(0.1) // let Z get rolling — a stopped pair is neither
+    const snap = sim.snapshot()
+    const x = snap.aircraft.find((a) => a.id === 'x')!
+    expect(snap.conflicts.some((c) => c.severity === 'alert')).toBe(true)
+    expect(snap.conflicts.some((c) => c.severity === 'advisory')).toBe(true)
+    expect(x.conflict).toBe(true)
+    expect(x.converging).toBe(false) // the worse state won; it is not painted as both
+  })
+})

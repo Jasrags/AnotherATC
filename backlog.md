@@ -148,6 +148,10 @@ The core ground-control loop. Ordered roughly by priority.
   your way — following separation owns that) and a pair the **junction reservation has already
   resolved**. Both are about *predicting*: a pair actually nose-to-nose is always reported.
   Hot spots widen the distance (×3, as the proximity call always did) *and* double the horizon.
+  The sample step scales with closing speed, so a 140-kt rollout cannot step over the moment it
+  meets someone; a hold names *who* it is for, so it silences that pair and not the third
+  aircraft the held one is also closing on. Both were review findings, reproduced as tests
+  first.
 - ⬜ **Separation at rollout speed** (separation follow-up) — `LOOK_AHEAD_NM` (0.06 nm) is sized
   for taxi: ~9 s of warning at 25 kt but ~1.5 s at 140 kt, so a landing rollout capped by
   `separationCap` cannot actually stop for anything it meets. Currently mitigated at *planning*

@@ -398,6 +398,9 @@ interface Internal
   services: { kind: string; total: number; remaining: number }[]
   /** Undirected edge (key) the reservation is currently making this aircraft hold short of, or null. */
   blockedEdge: string | null
+  /** Id of the aircraft it is being held *for* — the contender that won the edge. Named as well
+   *  as counted because a hold resolves that pair and no other: see `ConflictView.yieldingTo`. */
+  blockedBy: string | null
   /** Seconds spent continuously reservation-held — once past a threshold, we try to divert. */
   heldSec: number
   /** Seconds spent continuously stopped with nothing left to run — see
@@ -719,6 +722,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       groundPending: false,
       services: (init.intent ?? 'departure') === 'departure' ? freshServices() : [],
       blockedEdge: null,
+      blockedBy: null,
       heldSec: 0,
       awaitingSec: 0,
       avoidEdges: new Set(),
@@ -1266,6 +1270,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
    */
   function reservationCap(ac: Internal): number {
     ac.blockedEdge = null
+    ac.blockedBy = null
     const ctx = edgeCtx(ac)
     if (!ctx || !ctx.next || !ctx.after) return Infinity
     if (ctx.distToNext > RESERVE_HORIZON_NM) return Infinity
@@ -1282,6 +1287,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       const contends = oc.next === to && oc.after === from
       if (occupies || (contends && outranks(o, ac))) {
         hold = true
+        ac.blockedBy = o.id
         break
       }
     }
@@ -1406,9 +1412,10 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         headingDeg: ac.heading,
         speedKt: ac.groundspeed,
         hotspot: ac.hotspot,
-        // Being held short of a contested edge, or told to give way: either way something is
-        // already stopping this aircraft for the traffic it would otherwise meet.
-        yielding: ac.blockedEdge !== null || ac.giveWayTo !== null,
+        // Who it is already being held for: the reservation's winner, the give-way target, or
+        // both. That hold resolves those pairs; it says nothing about anyone else this
+        // aircraft is closing on, which is why the ids travel rather than a flag.
+        yieldingTo: [ac.blockedBy, ac.giveWayTo].filter((id): id is string => id !== null),
       }))
 
     conflicts = detectConverging(views)
@@ -1421,6 +1428,10 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         else ac.converging = true
       }
     }
+    // One aircraft, one state. With three or more it is perfectly possible to be nose-to-nose
+    // with one and merely converging with another, and the scope draws a ring per aircraft —
+    // so the worse of the two wins rather than both being painted at once.
+    for (const ac of fleet) if (ac.conflict) ac.converging = false
   }
 
   function advance(ac: Internal, dt: number, cap: number): void {

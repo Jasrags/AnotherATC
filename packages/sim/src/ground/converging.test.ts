@@ -12,7 +12,7 @@ function view(id: string, at: Point, path: Point[], speedKt: number, over: Parti
     headingDeg: 0,
     speedKt,
     hotspot: null,
-    yielding: false,
+    yieldingTo: [],
     ...over,
   }
 }
@@ -106,7 +106,7 @@ describe('converging traffic', () => {
     // the field and train the controller to ignore the one that matters.
     const [a, b] = crossingPair(0.06) // close enough that it *would* be reported otherwise
     expect(detectConverging([a!, b!])).toHaveLength(1)
-    expect(detectConverging([{ ...a!, yielding: true }, b!])).toEqual([])
+    expect(detectConverging([{ ...a!, yieldingTo: [b!.id] }, b!])).toEqual([])
   })
 
   it('warns earlier inside a charted hot spot', () => {
@@ -172,5 +172,40 @@ describe('the charted hot spot widens the call as well as lengthening it', () =>
     const hot = detectConverging([a, b].map((v) => ({ ...v, hotspot: 'HS1' })))
     expect(hot).toHaveLength(1)
     expect(hot[0]!.severity).toBe('alert')
+  })
+})
+
+describe('the fast cases, where a fixed sample step would look straight past the conflict', () => {
+  it('finds a rollout-speed crossing whose closest approach falls between whole seconds', () => {
+    // 140 kt is 236 ft per second — sixteen times the conflict distance — so a one-second
+    // sample can step clean over the moment the two are on top of each other. The start
+    // position here is chosen so that it does exactly that: the samples land 118 ft either
+    // side of the meeting point. A landing rollout is in this list precisely because what it
+    // can run into is an aircraft sitting in its turnoff, so the fast case is the real case.
+    const rolling = view('r', [0, -0.525], [[0, 0.5]], 140, { headingDeg: 0 })
+    const sitting = view('s', [0, 0], [[0, 0]], 0, { headingDeg: 90 })
+    const found = detectConverging([rolling, sitting])
+    expect(found).toHaveLength(1)
+    expect(found[0]!.severity).toBe('advisory')
+    expect(found[0]!.secondsToConflict).toBeGreaterThan(12)
+    expect(found[0]!.secondsToConflict).toBeLessThan(14)
+  })
+})
+
+describe('a hold is a hold for the traffic it is for, not for everyone', () => {
+  it('still warns about a held aircraft converging with somebody else', () => {
+    // A is stopped short for C. That says nothing whatever about D, which A is also closing on
+    // — and dropping the pair because A happens to be holding for someone would lose a real
+    // developing conflict behind an unrelated resolution.
+    const [a, b] = crossingPair(0.06)
+    const held = { ...a!, yieldingTo: ['c'] }
+    expect(detectConverging([held, b!])).toHaveLength(1)
+  })
+
+  it('stays quiet about the pair the hold is actually for', () => {
+    const [a, b] = crossingPair(0.06)
+    expect(detectConverging([{ ...a!, yieldingTo: [b!.id] }, b!])).toEqual([])
+    // …and it does not matter which of the two is the one being held.
+    expect(detectConverging([a!, { ...b!, yieldingTo: [a!.id] }])).toEqual([])
   })
 })

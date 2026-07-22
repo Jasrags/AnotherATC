@@ -67,8 +67,10 @@ export interface ConflictView {
   speedKt: number
   /** The charted hot spot it is inside, or null. */
   hotspot: string | null
-  /** Already being held short for a contested edge — the automatic floor has this pair. */
-  yielding: boolean
+  /** The aircraft this one is already being held for — a junction reservation's contender, or
+   *  a give-way target. Named rather than a bare flag: a hold resolves the pair it is *for*,
+   *  and says nothing about the third aircraft this one may also be closing on. */
+  yieldingTo: readonly string[]
 }
 
 /** Two aircraft closer than this (nm ≈ 90 ft) are in conflict. The proximity call and the
@@ -87,9 +89,22 @@ export const CONVERGE_HORIZON_SEC = 20
 /** Inside a charted hot spot, look this much further ahead — the field's own diagram says to
  *  watch harder there, and watching harder is all the sim can do with that. */
 export const HOTSPOT_HORIZON_FACTOR = 2
-/** How often (s) the projection is sampled. At taxi speed one second is ~25 ft, comfortably
- *  finer than the conflict distance it is looking for. */
+/** Coarsest projection sample (s). At taxi speed one second is ~25 ft, comfortably finer than
+ *  the conflict distance — but a landing rollout is in this list too, and at 140 kt a second is
+ *  236 ft, several times the distance being looked for. {@link sampleStepFor} shortens the step
+ *  by closing speed so a fast pair can never step clean over the moment they meet. */
 const SAMPLE_SEC = 1
+/** Floor on that step (s), so a hypothetical very fast pair cannot ask for unbounded work. */
+const MIN_SAMPLE_SEC = 0.05
+
+/** Sample step (s) for a pair: short enough that they close at most half the conflict distance
+ *  between two samples, so the window can never fall entirely between them. Straight-line
+ *  closure bounds the real closure — a curved route covers less ground, never more. */
+function sampleStepFor(closingKt: number, limitNm: number): number {
+  if (closingKt <= 0) return SAMPLE_SEC
+  const step = (limitNm / 2) * (3600 / closingKt)
+  return Math.max(MIN_SAMPLE_SEC, Math.min(SAMPLE_SEC, step))
+}
 /** Heading difference (deg) under which two aircraft count as going the same way. Matches the
  *  separation model's own idea of a leader, so a queue is a queue to both. */
 const SAME_DIR_DEG = 60
@@ -121,7 +136,14 @@ function positionAfter(path: readonly Point[], distNm: number): Point {
   return (path[path.length - 1] ?? path[0]) as Point
 }
 
-/** Whether `b` is a leader for `a`: directly ahead in a's corridor, and going a's way. */
+/**
+ * Whether `b` is a leader for `a`: directly ahead in a's corridor, and going a's way.
+ *
+ * Judged where the two are *now*, not across the horizon — so a pair that is a queue at this
+ * instant and forks a few seconds later is skipped for this tick. That resolves itself on the
+ * next one (this runs every tick, and they stop reading as a queue the moment the leader turns
+ * off), so the cost is a tick or two of quiet right at a fork rather than a missed conflict.
+ */
 function isFollowing(a: ConflictView, b: ConflictView): boolean {
   if (angleDelta(a.headingDeg, b.headingDeg) >= SAME_DIR_DEG) return false
   const rad = (a.headingDeg * Math.PI) / 180
@@ -159,7 +181,7 @@ export function detectConverging(fleet: readonly ConflictView[]): TrafficConflic
         found.push(conflict(first, second, 'alert', 0, hotspot))
         continue
       }
-      if (a.yielding || b.yielding) continue
+      if (a.yieldingTo.includes(b.id) || b.yieldingTo.includes(a.id)) continue
       if (isFollowing(a, b) || isFollowing(b, a)) continue
       if (a.speedKt <= 0 && b.speedKt <= 0) continue // neither is going anywhere
 
@@ -167,7 +189,8 @@ export function detectConverging(fleet: readonly ConflictView[]): TrafficConflic
       // Cheap reject: not even both running flat at each other closes this gap in time.
       if (dist(a.at, b.at) - (a.speedKt + b.speedKt) * (horizon / 3600) > limit) continue
 
-      for (let t = SAMPLE_SEC; t <= horizon; t += SAMPLE_SEC) {
+      const step = sampleStepFor(a.speedKt + b.speedKt, limit)
+      for (let t = step; t <= horizon; t += step) {
         const pa = positionAfter(a.path, (a.speedKt * t) / 3600)
         const pb = positionAfter(b.path, (b.speedKt * t) / 3600)
         if (dist(pa, pb) < limit) {
