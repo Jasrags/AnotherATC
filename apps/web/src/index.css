@@ -189,6 +189,12 @@ body {
   color: #ff5a4d;
 }
 
+/* Developing rather than happening: the amber of the prediction ring, so the line and the
+   ring on the target are recognisably one alert. */
+.hud-alert.is-converging {
+  color: #ffc14d;
+}
+
 /* A gate conflict has not happened yet — amber and a step quieter than the separation alert
    it sits under, which is happening now. */
 .hud-gate-alert {

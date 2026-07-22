@@ -1,6 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import type { RunwayIncursion } from '@anotheratc/sim'
-import { AWAITING_ADVISORY_SEC, awaitingAlert, incursionAlert, type AwaitingItem } from './alerts'
+import type { RunwayIncursion, TrafficConflict } from '@anotheratc/sim'
+import {
+  AWAITING_ADVISORY_SEC,
+  awaitingAlert,
+  conflictAlert,
+  incursionAlert,
+  type AwaitingItem,
+} from './alerts'
 
 function inc(over: Partial<RunwayIncursion> = {}): RunwayIncursion {
   return {
@@ -120,5 +126,53 @@ describe('awaitingAlert', () => {
     const two = awaitingAlert([wait('DAL2', 90), wait('AAL1', 45)]).announcement
     expect(two).not.toBe(one)
     expect(two).toBe('DAL2 awaiting taxi, and 1 other aircraft waiting.')
+  })
+})
+
+describe('conflictAlert', () => {
+  const c = (over: Partial<TrafficConflict> = {}): TrafficConflict => ({
+    aircraftIds: ['a', 'b'],
+    severity: 'alert',
+    secondsToConflict: 0,
+    hotspot: null,
+    message: 'AAL1 and DAL2 converging',
+    ...over,
+  })
+
+  it('is empty when the surface is quiet', () => {
+    expect(conflictAlert([])).toEqual({ text: '', announcement: '', severity: null })
+  })
+
+  it('reads as happening when it is happening', () => {
+    const a = conflictAlert([c()])
+    expect(a.text).toBe('⚠ CONFLICT — AAL1 and DAL2 converging')
+    expect(a.severity).toBe('alert')
+  })
+
+  it('reads as developing, with the countdown, when it has not happened yet', () => {
+    // The whole point of the prediction: this is a warning while there is still time to act,
+    // where the old flag only ever reported two aircraft already too close.
+    const a = conflictAlert([c({ severity: 'advisory', secondsToConflict: 12 })])
+    expect(a.text).toBe('⚠ CONVERGING — AAL1 and DAL2 converging in 12s')
+    expect(a.severity).toBe('advisory')
+  })
+
+  it('names the hot spot when the sim did, since that is where to look', () => {
+    const a = conflictAlert([c({ message: 'AAL1 and DAL2 converging at HS1', hotspot: 'HS1' })])
+    expect(a.text).toBe('⚠ CONFLICT — AAL1 and DAL2 converging at HS1')
+  })
+
+  it('leads with the worst and counts the rest', () => {
+    const a = conflictAlert([c(), c({ aircraftIds: ['c', 'd'] }), c({ aircraftIds: ['e', 'f'] })])
+    expect(a.text).toBe('⚠ CONFLICT — AAL1 and DAL2 converging · +2 more')
+  })
+
+  it('keeps the countdown out of what is announced, so it is spoken once', () => {
+    // Same trap as the incursion range and the awaiting clock: a live region re-announces
+    // whenever its text changes, and a countdown changes every second.
+    const at = (sec: number) => conflictAlert([c({ severity: 'advisory', secondsToConflict: sec })]).announcement
+    expect(at(12)).toBe('Traffic advisory. AAL1 and DAL2 converging')
+    expect(at(11)).toBe(at(12))
+    expect(conflictAlert([c()]).announcement).toBe('Traffic conflict. AAL1 and DAL2 converging')
   })
 })

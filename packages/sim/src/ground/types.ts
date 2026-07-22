@@ -5,6 +5,7 @@ import type { ActiveRunway } from './runway'
 import type { ApproachConfig } from './sim'
 import type { Transmission } from './comms'
 import type { RunwayIncursion } from './incursion'
+import type { TrafficConflict } from './converging'
 
 /** ICAO wake turbulence category: Light / Medium / Heavy / Super. */
 export type WakeCategory = 'L' | 'M' | 'H' | 'J'
@@ -162,8 +163,13 @@ export interface GroundAircraft {
   /** Tower has issued the frequency change but the aircraft has not vacated yet, so it is
    *  still on Tower's frequency ("when vacated, contact ground"). */
   handoffPending: boolean
-  /** Too close to another aircraft — a separation conflict. */
+  /** Too close to another aircraft right now — a separation conflict that is happening. */
   conflict: boolean
+  /** Not too close yet, but predicted to be within the look-ahead: converging with somebody.
+   *  The developing half of the same ladder {@link RunwayIncursion} has for the runway — see
+   *  `converging.ts` for what is and is not counted (a taxi queue is not). Never true at the
+   *  same time as {@link conflict}: an aircraft is in one state or the other. */
+  converging: boolean
   /** Named in at least one entry of {@link GroundSnapshot.incursions}: on the runway uncleared,
    *  or sharing it with traffic that is landing, lining up or rolling. Unlike {@link conflict}
    *  this is about *authority*, not distance — the two aircraft may be a mile apart. */
@@ -248,6 +254,9 @@ export interface GroundSnapshot {
   readbackCaught: number
   /** Runway conflicts developing right now, most severe first. Empty is the normal case. */
   incursions: readonly RunwayIncursion[]
+  /** Taxi conflicts, worst first: happening now ahead of developing, then soonest. The surface
+   *  counterpart of {@link incursions} — see `converging.ts`. Empty is the normal case. */
+  conflicts: readonly TrafficConflict[]
   /** Charted hot spots holding two or more aircraft right now, in charted order. One aircraft
    *  in a hot spot is just an aircraft; two is the situation the chart is warning about. */
   busyHotspots: readonly string[]

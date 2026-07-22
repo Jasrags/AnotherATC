@@ -1,4 +1,10 @@
-import type { ControllerPosition, IncursionSeverity, RunwayIncursion } from '@anotheratc/sim'
+import type {
+  ConflictSeverity,
+  ControllerPosition,
+  IncursionSeverity,
+  RunwayIncursion,
+  TrafficConflict,
+} from '@anotheratc/sim'
 
 export interface IncursionAlert {
   /** Severity glyph, rendered decoratively (aria-hidden) so it is not read out as "no entry
@@ -119,5 +125,38 @@ export function awaitingAlert(aircraft: readonly AwaitingItem[]): AwaitingAlert 
     // Named, not counted, for the one you should answer first — and a plain count for the rest,
     // because a list of callsigns read aloud is not something anyone acts on.
     announcement: `${lead.callsign} ${awaitingLabel(lead).toLowerCase()}${others > 0 ? `, and ${others} other aircraft waiting` : ''}.`,
+  }
+}
+
+export interface ConflictAlert {
+  /** What the controller reads. Carries the countdown, so it changes every second. */
+  text: string
+  /** What a screen reader is told — the situation without the countdown, for the same reason
+   *  {@link IncursionAlert.announcement} drops the range. */
+  announcement: string
+  severity: ConflictSeverity | null
+}
+
+const NO_CONFLICT: ConflictAlert = { text: '', announcement: '', severity: null }
+
+/**
+ * The taxi-conflict line: one sentence and a count, worst first.
+ *
+ * Two voices, because the sim now distinguishes two things. CONFLICT is two aircraft too close
+ * *now* — the line this has always been. CONVERGING is the new half: they are not too close
+ * yet, and here is how long you have. A warning you can still act on is worth more than a
+ * report you cannot, and wording them the same would waste the distinction.
+ */
+export function conflictAlert(conflicts: readonly TrafficConflict[]): ConflictAlert {
+  const worst = conflicts[0]
+  if (!worst) return NO_CONFLICT
+  const rest = conflicts.length > 1 ? ` · +${conflicts.length - 1} more` : ''
+  const happening = worst.severity === 'alert'
+  // The countdown is display-only: it ticks, and an announcement that ticks is one nobody hears.
+  const when = happening ? '' : ` in ${worst.secondsToConflict}s`
+  return {
+    text: `⚠ ${happening ? 'CONFLICT' : 'CONVERGING'} — ${worst.message}${when}${rest}`,
+    announcement: `${happening ? 'Traffic conflict' : 'Traffic advisory'}. ${worst.message}${rest}`,
+    severity: worst.severity,
   }
 }

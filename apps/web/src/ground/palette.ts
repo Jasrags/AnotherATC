@@ -22,7 +22,8 @@ export const COLORS = {
   gateLabel: '#a9d0e2', // gate numbers (shown when zoomed in)
   target: '#f2f9ff',
   targetHalo: '#7fd4ff',
-  conflict: '#ff5a4d', // separation conflict alert
+  conflict: '#ff5a4d', // separation conflict — happening now
+  converging: '#ffc14d', // predicted into one — amber, and dashed, because there is still time
   incursion: '#ff2d2d', // runway incursion — the loudest thing on the scope, and dashed as well
   //                       as red, so it is distinguishable from the conflict ring by shape
   targetHold: '#9aacbd',

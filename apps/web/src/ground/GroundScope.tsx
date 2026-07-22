@@ -28,7 +28,7 @@ import {
 import { COLORS, DIMS } from './palette'
 import { isTypingTarget } from './keyboard'
 import { FIXED_DT, tick } from './simClock'
-import { awaitingAlert, incursionAlert } from './alerts'
+import { awaitingAlert, conflictAlert, incursionAlert } from './alerts'
 import type { GroundAircraft } from '@anotheratc/sim'
 
 /** Click must land within this many px of a target to select it. */
@@ -52,6 +52,7 @@ export function GroundScope({ controller }: { controller: GroundController }) {
   const statusRef = useRef<HTMLDivElement>(null)
   const hintRef = useRef<HTMLDivElement>(null)
   const alertRef = useRef<HTMLDivElement>(null)
+  const alertSrRef = useRef<HTMLDivElement>(null)
   const gateAlertRef = useRef<HTMLDivElement>(null)
   const awaitingRef = useRef<HTMLDivElement>(null)
   const awaitingSrRef = useRef<HTMLDivElement>(null)
@@ -502,13 +503,14 @@ export function GroundScope({ controller }: { controller: GroundController }) {
           if (hide && !el.hidden && el.contains(document.activeElement)) canvas.focus()
           el.hidden = hide
         }
-        if (alertRef.current) {
-          const inConflict = snap.aircraft.filter((a) => a.conflict)
-          // Name the hot spot when the conflict is in one. "Where" is most of what you need to
-          // act, and a charted hot spot is the one place the scope can say it in one token.
-          const where = [...new Set(inConflict.map((a) => a.hotspot).filter(Boolean))].sort()
-          const at = where.length > 0 ? ` · ${where.join(' ')}` : ''
-          setText(alertRef.current, inConflict.length > 0 ? `⚠ CONFLICT${at}` : '')
+        // Taxi conflicts: the pair, and — while it is still developing — how long you have.
+        // The sim names the hot spot in the message when there is one, because "where" is most
+        // of what you need to act on. Split visible/announced: the countdown ticks.
+        if (alertRef.current && alertSrRef.current) {
+          const conflict = conflictAlert(snap.conflicts)
+          setText(alertRef.current, conflict.text)
+          setText(alertSrRef.current, conflict.announcement)
+          alertRef.current.classList.toggle('is-converging', conflict.severity === 'advisory')
         }
         // Gate conflicts, field-wide: inbound arrivals heading for stands somebody is still
         // parked on. Deliberately a separate, quieter line — a separation conflict is happening
@@ -752,7 +754,8 @@ export function GroundScope({ controller }: { controller: GroundController }) {
         <span ref={incursionTextRef} />
       </button>
       <div ref={incursionSrRef} className="sr-only" role="alert" />
-      <div ref={alertRef} className="hud hud-alert mono" role="alert" />
+      <div ref={alertRef} className="hud hud-alert mono" aria-hidden="true" />
+      <div ref={alertSrRef} className="sr-only" role="alert" />
       {/* Advisory, not an alarm: polite rather than role="alert", so it never cuts across the
           separation conflict above it. */}
       <div ref={gateAlertRef} className="hud hud-gate-alert mono" aria-live="polite" />

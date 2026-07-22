@@ -28,7 +28,8 @@ import {
 import { wakeSeparationSec, WAKE_TIME_SCALE } from './wake'
 import { onRunway, splitRouteAtRunway, type RunwayGuard } from './runwayGuard'
 import { detectIncursions, type RunwayIncursion, type RunwayUse } from './incursion'
-import { busyHotspots, hotspotAt, HOTSPOT_CONFLICT_FACTOR } from './hotspot'
+import { busyHotspots, hotspotAt } from './hotspot'
+import { detectConverging, type ConflictView, type TrafficConflict } from './converging'
 import {
   finalFix,
   glideAltitudeFt,
@@ -253,8 +254,6 @@ const LOOK_AHEAD_NM = 0.06
 const CORRIDOR_HALF_NM = 0.012
 /** Minimum gap (nm) an aircraft keeps behind traffic ahead. */
 const MIN_GAP_NM = 0.022
-/** Two aircraft closer than this (nm) are in conflict. */
-const CONFLICT_NM = 0.015
 /** Heading difference (deg) under which traffic ahead counts as same-direction (a leader). */
 const SAME_DIR_DEG = 60
 /** Groundspeed (kt) above which an aircraft counts as "rolling" for right-of-way. */
@@ -463,6 +462,8 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
   /** Runway conflicts as of the last step, recomputed there rather than per snapshot — the
    *  canvas snapshots every frame and this is a fleet-squared scan. */
   let incursions: readonly RunwayIncursion[] = []
+  /** Taxi conflicts as of the last step — happening and developing, worst first. */
+  let conflicts: readonly TrafficConflict[] = []
   /** The most recent departure to begin its takeoff roll — the wake-separation leader. */
   let lastDeparture: { wake: WakeCategory; atTime: number } | null = null
   let seq = 0
@@ -689,6 +690,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       intent: init.intent ?? 'departure',
       gate: init.gate ?? null,
       conflict: false,
+      converging: false,
       runwayAuth: null,
       incursion: false,
       hotspot: null,
@@ -1377,26 +1379,46 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     return hotspots.length === 0 || ac.airborne ? null : hotspotAt([ac.x, ac.y], hotspots)
   }
 
+  /**
+   * Taxi conflicts, now and developing.
+   *
+   * Proximity alone was a report rather than a warning — see `converging.ts`, which owns the
+   * model. This sets the per-aircraft flags the scope draws rings from and keeps the pair list
+   * for the alert line, the same way `detectRunwayIncursions` does for the runway.
+   */
   function detectConflicts(): void {
     for (const ac of fleet) {
       ac.conflict = false
+      ac.converging = false
       ac.hotspot = hotspotOf(ac)
     }
-    for (let i = 0; i < fleet.length; i += 1) {
-      for (let j = i + 1; j < fleet.length; j += 1) {
-        const a = fleet[i]
-        const b = fleet[j]
-        // Neither a takeoff roll nor an aircraft on final is a surface (taxi) conflict.
-        if (a?.departing || b?.departing || a?.airborne || b?.airborne) continue
-        if (!a || !b) continue
-        // Inside a shared hot spot the call comes earlier — that is the entire behaviour a
-        // charted hot spot asks for. Elsewhere it is the ordinary nose-to-nose distance.
-        const shared = a.hotspot !== null && a.hotspot === b.hotspot
-        const limit = shared ? CONFLICT_NM * HOTSPOT_CONFLICT_FACTOR : CONFLICT_NM
-        if (Math.hypot(a.x - b.x, a.y - b.y) < limit) {
-          a.conflict = true
-          b.conflict = true
-        }
+    // Neither a takeoff roll nor an aircraft on final is a surface conflict. A landing rollout
+    // is: it is on the pavement, and what it can run into is the aircraft in its turnoff.
+    const views: ConflictView[] = fleet
+      .filter((ac) => !ac.departing && !ac.airborne)
+      .map((ac) => ({
+        id: ac.id,
+        callsign: ac.callsign,
+        at: [ac.x, ac.y] as Point,
+        // The route it has left to run, from where it is. Everything behind it is history, and
+        // a projection that started at the top of the clearance would predict the past.
+        path: [[ac.x, ac.y] as Point, ...ac.path.slice(ac.leg + 1)],
+        headingDeg: ac.heading,
+        speedKt: ac.groundspeed,
+        hotspot: ac.hotspot,
+        // Being held short of a contested edge, or told to give way: either way something is
+        // already stopping this aircraft for the traffic it would otherwise meet.
+        yielding: ac.blockedEdge !== null || ac.giveWayTo !== null,
+      }))
+
+    conflicts = detectConverging(views)
+    const byId = new Map(fleet.map((ac) => [ac.id, ac]))
+    for (const c of conflicts) {
+      for (const id of c.aircraftIds) {
+        const ac = byId.get(id)
+        if (!ac) continue
+        if (c.severity === 'alert') ac.conflict = true
+        else ac.converging = true
       }
     }
   }
@@ -2661,6 +2683,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         readbackErrors,
         readbackCaught,
         incursions,
+        conflicts,
         busyHotspots: busyHotspots(fleet.map((a) => a.hotspot), hotspots),
         aircraft: fleet.map((ac) => ({
           id: ac.id,
@@ -2689,6 +2712,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
           // has to stop offering to re-issue what has already been issued.
           handoffPending: ac.groundPending,
           conflict: ac.conflict,
+          converging: ac.converging,
           incursion: ac.incursion,
           hotspot: ac.hotspot,
           // Derived, never stored: "expediting" *is* "the target speed is the expedite speed".

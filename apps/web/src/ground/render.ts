@@ -1057,13 +1057,18 @@ export function drawAircraft(ctx: Ctx, v: View, aircraft: GroundAircraft[]): voi
     ctx.restore()
     drawHeadingPip(ctx, sx, sy, ac.heading, ctx.fillStyle as string)
 
-    // separation conflict alert
-    if (ac.conflict) {
-      ctx.strokeStyle = COLORS.conflict
+    // Separation conflict, in two voices. Solid red is two aircraft too close now; dashed amber
+    // is the prediction — same ring, so the eye reads it as the same thing developing, but it
+    // cannot be mistaken for the one that has already happened.
+    if (ac.conflict || ac.converging) {
+      ctx.save()
+      ctx.strokeStyle = ac.conflict ? COLORS.conflict : COLORS.converging
       ctx.lineWidth = 1.6
+      if (!ac.conflict) ctx.setLineDash([3, 3])
       ctx.beginPath()
       ctx.arc(sx, sy, r + 4, 0, Math.PI * 2)
       ctx.stroke()
+      ctx.restore()
     }
 
     // Runway incursion: a wider dashed ring, outside any conflict ring. Two aircraft in an

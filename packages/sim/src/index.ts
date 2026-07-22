@@ -54,6 +54,8 @@ export type { RunwayGuard } from './ground/runwayGuard'
 export { detectIncursions } from './ground/incursion'
 export { hotspotAt, busyHotspots, HOTSPOT_CONFLICT_FACTOR } from './ground/hotspot'
 export type { RunwayIncursion, IncursionKind, IncursionSeverity, RunwayUse } from './ground/incursion'
+export { detectConverging, CONVERGE_HORIZON_SEC } from './ground/converging'
+export type { TrafficConflict, ConflictSeverity, ConflictView } from './ground/converging'
 export type {
   GroundAircraft,
   GroundSnapshot,
