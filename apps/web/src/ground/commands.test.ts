@@ -218,6 +218,15 @@ describe('commandsFor (strip state machine)', () => {
     expect(cmds[0]!.action.kind).toBe('soon')
   })
 
+  it('hands a Tower-owned *arrival* crossing back too — it crossed to reach its gate', () => {
+    // An arrival takes the crossing handoff exactly as a departure does. If the Tower menu
+    // does not offer it Contact ground, it is stranded on Tower's frequency with no command
+    // that gives it back.
+    const { controller } = fakeController()
+    const arr = strip({ status: 'taxi', controlledBy: 'tower', intent: 'arrival', onRunway: false })
+    expect(labels(commandsFor(controller, arr, []))).toContain('Contact ground')
+  })
+
   it('hands a Tower-owned crossing back to Ground, deferring while it is still on the runway', () => {
     const { controller, dispatched } = fakeController()
     const onRwy = strip({ status: 'taxi', controlledBy: 'tower', onRunway: true })

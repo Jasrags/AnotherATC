@@ -204,22 +204,21 @@ function phaseCommandsFor(controller: GroundController, item: StripItem, aircraf
     // Tower-owned and no longer holding short: a crossing it cleared and now has to give back.
     // Offered while the aircraft is still on the runway too — that is the real "when clear of
     // the runway, contact ground", and issuing it early is what keeps the crossing moving.
-    if (item.intent !== 'arrival') {
-      return [
-        item.handoffPending
-          ? { key: 'gnd', label: 'Sent to ground — awaiting clear', action: { kind: 'soon' } }
-          : {
-              key: 'gnd',
-              label: item.onRunway ? 'When clear of the runway, contact ground' : 'Contact ground',
-              action: { kind: 'run', run: () => send({ type: 'contactGround', aircraftId: id }) },
-            },
-        expedite(controller, item),
-      ]
-    }
-    // Defensive net: today a Tower-owned aircraft is only ever holdShort / lineUpWait /
-    // departing (departing is handled above), so this is unreachable — but if the sim grows a
-    // new tower-owned status it degrades to a harmless disabled item instead of an empty menu.
-    return [{ label: 'With tower', action: { kind: 'soon' } }]
+    //
+    // Deliberately not restricted to departures. An arrival crosses to reach its gate, and the
+    // arrival branch above has already returned for every airborne and rollout phase, so an
+    // arrival reaching here is a surface transit like any other — gating this on intent left it
+    // stranded on Tower's frequency with no command that gave it back.
+    return [
+      item.handoffPending
+        ? { key: 'gnd', label: 'Sent to ground — awaiting clear', action: { kind: 'soon' } }
+        : {
+            key: 'gnd',
+            label: item.onRunway ? 'When clear of the runway, contact ground' : 'Contact ground',
+            action: { kind: 'run', run: () => send({ type: 'contactGround', aircraftId: id }) },
+          },
+      expedite(controller, item),
+    ]
   }
 
   if (item.status === 'holdShort') {
