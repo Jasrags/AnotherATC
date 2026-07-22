@@ -15,7 +15,27 @@ const ctx = (over: Partial<PhraseContext> = {}): PhraseContext => ({
   position: 'ground',
   crossing: false,
   onRunway: false,
+  holdingShortOf: null,
   ...over,
+})
+
+describe('phraseFor — hold short', () => {
+  it('names the runway both ways, because the read-back is the point', () => {
+    const ex = phraseFor({ type: 'holdShort', aircraftId: 'a' }, ctx())
+    expect(ex?.instruction).toBe('SKW412, hold short of runway 27.')
+    expect(ex?.readback).toBe('Hold short of runway 27, SKW412.')
+  })
+
+  it('puts the clause in the taxi clearance that creates the hold', () => {
+    const taxi = { type: 'taxiToGoal', aircraftId: 'a' } as const
+    const held = ctx({ destination: 'runway 27', taxiways: ['C'], holdingShortOf: '27' })
+    expect(phraseFor(taxi, held)?.instruction).toBe(
+      'SKW412, taxi to runway 27 via Charlie, hold short of runway 27.',
+    )
+    // A clearance that never reaches a runway does not carry it.
+    const free = ctx({ destination: 'gate 39', taxiways: ['C'] })
+    expect(phraseFor(taxi, free)?.instruction).toBe('SKW412, taxi to gate 39 via Charlie.')
+  })
 })
 
 describe('phraseFor — crossings', () => {

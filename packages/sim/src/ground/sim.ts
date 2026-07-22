@@ -309,6 +309,7 @@ interface Internal
     | 'onShortFinal'
     // Derived at snapshot time from the route position, not stored twice.
     | 'canExpedite'
+    | 'canHoldShort'
     // Derived at snapshot time from the target speed, which is what it means.
     | 'expedite'
     | 'finalNm'
@@ -498,6 +499,9 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       // route, then a crossing already under way. `rollingOut` is the landing case, which words
       // itself differently.
       crossing: onCrossing(ac),
+      // The runway this aircraft's clearance stops short of, if any — the clause that makes a
+      // taxi clearance readable back as the procedure requires.
+      holdingShortOf: ac.held !== null ? rwy : null,
       onRunway: onRunwayNow(ac),
     }
   }
@@ -898,6 +902,34 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     if (ac.airborne || ac.rollingOut || ac.lineUpWait || ac.departing || ac.rollWhenLinedUp) return false
     if (holdingForTakeoff(ac)) return false
     return ac.controlledBy === 'tower' || heldRouteCrosses(ac) || ac.runwayAuth !== null
+  }
+
+  /**
+   * Whether "hold short of runway N" has anything to act on: a runway ahead on the route, and an
+   * aircraft not already on it. True while taxiing toward the line (where it confirms what the
+   * route already does), at the line (where it is the answer to a crossing request), and after a
+   * crossing clearance that has not yet been acted on (where it takes that clearance back).
+   */
+  function canHoldShortNow(ac: Internal): boolean {
+    if (ac.airborne || ac.rollingOut || ac.lineUpWait || ac.departing) return false
+    if (onRunwayNow(ac)) return false
+    // Either the route still stops at a runway, or it did until a crossing clearance released
+    // it — and that clearance has not been used yet, since it is not on the pavement.
+    return ac.held !== null || ac.runwayAuth === 'issued'
+  }
+
+  /** Put a released crossing route back on hold at the runway, undoing a crossing clearance the
+   *  aircraft has not acted on. Returns false when there is no runway ahead to hold short of. */
+  function reholdAtRunway(ac: Internal): boolean {
+    const remaining: Point[] = [[ac.x, ac.y], ...ac.path.slice(ac.leg + 1)]
+    const { path, held } = plan(remaining)
+    if (!held) return false
+    ac.path = path
+    ac.leg = 0
+    ac.held = held
+    ac.targetSpeed = TAXI_SPEED_KT
+    ac.holding = false
+    return true
   }
 
   /** What an aircraft on the runway is doing there, or null when it isn't on it. Ordered by
@@ -1905,6 +1937,17 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         ac.holdShort = false
         return ACCEPTED
       }
+      case 'holdShort': {
+        if (onRunwayNow(ac)) return refused('already on the runway — too late to hold short')
+        if (!canHoldShortNow(ac)) return refused('no runway ahead to hold short of')
+        // Already stopping at the line: this is a confirmation, and the answer to "ready to
+        // cross" when the answer is no. Nothing to change — saying it *is* the instruction.
+        if (ac.held) return ACCEPTED
+        // Otherwise it holds a crossing clearance it has not used. Take it back.
+        if (!reholdAtRunway(ac)) return refused('no runway ahead to hold short of')
+        ac.runwayAuth = null // …and the permission that came with it
+        return ACCEPTED
+      }
       case 'sayAgain':
         // Refused only when there is nothing to repeat — never because the read-back happened
         // to be correct, which would turn the mechanic into a free answer.
@@ -2481,6 +2524,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
           // crossing, lining up, rolling — and the strip claimed an expedite that had ended,
           // with no command left in the menu that would take it back.
           expedite: ac.targetSpeed === EXPEDITE_SPEED_KT,
+          canHoldShort: canHoldShortNow(ac),
           canExpedite: canExpedite(ac),
           giveWayTo: ac.giveWayTo ? (find(ac.giveWayTo)?.callsign ?? null) : null,
           waitingForStand: ac.gate !== null && standHoldCap(ac) === 0 ? ac.gate : null,

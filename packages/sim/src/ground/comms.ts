@@ -100,6 +100,9 @@ export interface PhraseContext {
   crossing: boolean
   /** Still physically on the runway — a handoff issued now is "when clear of the runway…". */
   onRunway: boolean
+  /** Designator of the runway this aircraft's clearance stops short of, or null. The clause a
+   *  taxi clearance has to carry, and which the procedure makes mandatory to read back. */
+  holdingShortOf: string | null
 }
 
 /** A controller instruction and the pilot's correct read-back of it. */
@@ -153,8 +156,17 @@ export function phraseFor(cmd: GroundCommand, ctx: PhraseContext): Exchange | nu
     case 'taxiVia':
     case 'taxiViaGoal': {
       const dest = ctx.destination ? ` to ${ctx.destination}` : ''
-      return say(`taxi${dest}${via}`, `${ctx.destination ? cap(ctx.destination) : 'Taxi'}${via}`)
+      // "…, hold short of runway 27". Not decoration: a clearance to a destination never
+      // authorizes crossing anything on the way, and this is the clause that says so — the one
+      // the pilot must read back verbatim (docs/atc-runway-crossing.md §2–3).
+      const short = ctx.holdingShortOf ? `, hold short of runway ${ctx.holdingShortOf}` : ''
+      return say(
+        `taxi${dest}${via}${short}`,
+        `${ctx.destination ? cap(ctx.destination) : 'Taxi'}${via}${short}`,
+      )
     }
+    case 'holdShort':
+      return say(`hold short of ${rwy}`, `Hold short of ${rwy}`)
     case 'hold':
       return say('hold position', 'Hold position')
     case 'resume':

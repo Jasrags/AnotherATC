@@ -45,6 +45,10 @@ export type GroundCommand =
   | { type: 'hold'; aircraftId: string }
   | { type: 'resume'; aircraftId: string }
   | { type: 'crossRunway'; aircraftId: string }
+  /** "Hold short of runway N" — the instruction the whole crossing exchange turns on, and one a
+   *  pilot must read back verbatim. Confirms a hold the route already implies, and takes back a
+   *  crossing clearance the aircraft has not acted on yet. */
+  | { type: 'holdShort'; aircraftId: string }
   | { type: 'giveWay'; aircraftId: string; toId: string }
   | { type: 'contactTower'; aircraftId: string }
   | { type: 'lineUpAndWait'; aircraftId: string }
@@ -164,6 +168,9 @@ export interface GroundAircraft {
    *  or sharing it with traffic that is landing, lining up or rolling. Unlike {@link conflict}
    *  this is about *authority*, not distance — the two aircraft may be a mile apart. */
   incursion: boolean
+  /** A "hold short of runway N" would be accepted: there is a runway ahead on the route to hold
+   *  short of, and the aircraft has not already driven onto it. */
+  canHoldShort: boolean
   /** An "expedite" would be accepted: there is route left to run, and the aircraft is in a
    *  phase where the target speed is what governs. The sim's whole guard, exposed rather than
    *  re-derived, so the menu gates and explains the instruction exactly as the sim would refuse
