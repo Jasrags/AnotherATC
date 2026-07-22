@@ -4,6 +4,7 @@ import type { RunwayExit } from './runwayExits'
 import type { ActiveRunway } from './runway'
 import type { ApproachConfig } from './sim'
 import type { Transmission } from './comms'
+import type { RunwayIncursion } from './incursion'
 
 /** ICAO wake turbulence category: Light / Medium / Heavy / Super. */
 export type WakeCategory = 'L' | 'M' | 'H' | 'J'
@@ -152,6 +153,10 @@ export interface GroundAircraft {
   handoffPending: boolean
   /** Too close to another aircraft — a separation conflict. */
   conflict: boolean
+  /** Named in at least one entry of {@link GroundSnapshot.incursions}: on the runway uncleared,
+   *  or sharing it with traffic that is landing, lining up or rolling. Unlike {@link conflict}
+   *  this is about *authority*, not distance — the two aircraft may be a mile apart. */
+  incursion: boolean
   /** Callsign of the traffic this aircraft has been told to give way to, or null. */
   giveWayTo: string | null
   /** Designator of the stand this aircraft is holding for because someone is still on it, or
@@ -193,6 +198,8 @@ export interface GroundSnapshot {
   readbackErrors: number
   /** How many of those the controller caught with a "say again" before they mattered. */
   readbackCaught: number
+  /** Runway conflicts developing right now, most severe first. Empty is the normal case. */
+  incursions: readonly RunwayIncursion[]
 }
 
 /** Outcome of a dispatched command: accepted, or refused with a controller-facing reason. */

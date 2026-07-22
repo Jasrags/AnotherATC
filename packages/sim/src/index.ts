@@ -48,6 +48,8 @@ export { buildRunwayGuard } from './ground/runwayGuard'
 export { buildRunwayExits, buildRunwayIntersections, chooseExit } from './ground/runwayExits'
 export type { RunwayExit, RunwayIntersection } from './ground/runwayExits'
 export type { RunwayGuard } from './ground/runwayGuard'
+export { detectIncursions } from './ground/incursion'
+export type { RunwayIncursion, IncursionKind, IncursionSeverity, RunwayUse } from './ground/incursion'
 export type {
   GroundAircraft,
   GroundSnapshot,

@@ -27,6 +27,7 @@ import {
 } from './comms'
 import { wakeSeparationSec, WAKE_TIME_SCALE } from './wake'
 import { onRunway, splitRouteAtRunway, type RunwayGuard } from './runwayGuard'
+import { detectIncursions, type RunwayIncursion, type RunwayUse } from './incursion'
 import {
   finalFix,
   glideAltitudeFt,
@@ -381,6 +382,13 @@ interface Internal
   /** Cleared for takeoff while still holding short: taxi into position first, then roll.
    *  The roll begins on its own once the aircraft is established on the centerline. */
   rollWhenLinedUp: boolean
+  /** Permission to be on the runway surface without a takeoff or landing clearance: a crossing
+   *  clearance, or a rollout that has been released to taxi off. `'issued'` until the aircraft
+   *  actually reaches the pavement, `'on'` while it is there, then dropped — so the permission
+   *  is spent by the movement it was given for and a second, uncleared entry is an incursion. */
+  runwayAuth: 'issued' | 'on' | null
+  /** On the runway in a way {@link detectIncursions} has flagged — a red ring, not a refusal. */
+  incursion: boolean
   /** The last clearance transmitted to this aircraft — what "say again" repeats. */
   lastClearance: GroundCommand | null
   /** What the controller actually said, when the pilot read it back wrong. Null when the last
@@ -407,6 +415,9 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
   let time = 0
   let departed = 0
   let arrived = 0
+  /** Runway conflicts as of the last step, recomputed there rather than per snapshot — the
+   *  canvas snapshots every frame and this is a fleet-squared scan. */
+  let incursions: readonly RunwayIncursion[] = []
   /** The most recent departure to begin its takeoff roll — the wake-separation leader. */
   let lastDeparture: { wake: WakeCategory; atTime: number } | null = null
   let seq = 0
@@ -594,6 +605,8 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       intent: init.intent ?? 'departure',
       gate: init.gate ?? null,
       conflict: false,
+      runwayAuth: null,
+      incursion: false,
       path,
       leg: 0,
       targetSpeed: init.targetSpeed,
@@ -796,6 +809,40 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
    *  while anyone occupies its surface or is committed on short final above it. */
   function blocksRunway(ac: Internal): boolean {
     return occupiesForTakeoff(ac) || onShortFinal(ac)
+  }
+
+  /** What an aircraft on the runway is doing there, or null when it isn't on it. Ordered by
+   *  authority: a takeoff clearance outranks a line-up, which outranks a crossing. Anything on
+   *  the pavement that matches none of them holds no permission to be there. */
+  function runwayUse(ac: Internal): RunwayUse | null {
+    if (!onRunwayNow(ac)) return null
+    if (ac.departing || ac.rollWhenLinedUp) return 'takeoff'
+    if (ac.lineUpWait) return 'lineUp'
+    if (ac.rollingOut) return 'rollout'
+    if (ac.runwayAuth) return 'crossing'
+    return 'unauthorized'
+  }
+
+  /** Advance the crossing permission's little latch (see {@link Internal.runwayAuth}) and
+   *  recompute who is in conflict on the runway. */
+  function detectRunwayIncursions(): RunwayIncursion[] {
+    for (const ac of fleet) {
+      if (ac.runwayAuth === 'issued' && onRunwayNow(ac)) ac.runwayAuth = 'on'
+      else if (ac.runwayAuth === 'on' && !onRunwayNow(ac)) ac.runwayAuth = null
+    }
+    const found = detectIncursions(
+      fleet.map((ac) => ({
+        id: ac.id,
+        callsign: ac.callsign,
+        use: runwayUse(ac),
+        airborne: ac.airborne,
+        clearedToLand: ac.clearedToLand,
+        finalNm: finalDistance(ac),
+      })),
+    )
+    const flagged = new Set(found.flatMap((i) => [i.occupantId, ...(i.conflictId ? [i.conflictId] : [])]))
+    for (const ac of fleet) ac.incursion = flagged.has(ac.id)
+    return found
   }
 
   /**
@@ -1711,6 +1758,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         ac.path = ac.held
         ac.leg = 0
         ac.held = null
+        ac.runwayAuth = 'issued' // …and it is now permitted on the pavement, until it is off it
         ac.targetSpeed = TAXI_SPEED_KT
         ac.holding = false
         ac.holdShort = false
@@ -1994,6 +2042,9 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
   function handOffToGround(ac: Internal): boolean {
     if (!ac.goalPoint || !routeToOwnGoal(ac)) return false
     ac.rollingOut = false
+    // It stops being a rollout the moment Ground has it, but it is still on the pavement and
+    // still entitled to be — the taxi off the runway is the end of the landing, not a new entry.
+    ac.runwayAuth = 'on'
     ac.groundPending = false
     ac.controlledBy = 'ground'
     // Tower's business with this aircraft is finished; Ground has issued it nothing yet.
@@ -2205,6 +2256,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         trySpawn()
       }
       detectConflicts()
+      incursions = detectRunwayIncursions()
     },
     snapshot(): GroundSnapshot {
       return {
@@ -2214,6 +2266,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         comms: commsSnapshot(),
         readbackErrors,
         readbackCaught,
+        incursions,
         aircraft: fleet.map((ac) => ({
           id: ac.id,
           callsign: ac.callsign,
@@ -2239,6 +2292,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
           vacated: ac.rollingOut ? ac.vacated : false,
           handoffPending: ac.rollingOut && ac.groundPending,
           conflict: ac.conflict,
+          incursion: ac.incursion,
           giveWayTo: ac.giveWayTo ? (find(ac.giveWayTo)?.callsign ?? null) : null,
           waitingForStand: ac.gate !== null && standHoldCap(ac) === 0 ? ac.gate : null,
           gateBlocked:
