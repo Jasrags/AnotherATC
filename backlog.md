@@ -92,9 +92,22 @@ The core ground-control loop. Ordered roughly by priority.
   Authority rides a small latch (`runwayAuth`: issued → on → dropped when it leaves), so a
   crossing clearance is spent by the movement it was given for; a landing rollout inherits it
   across the Tower→Ground handoff. Snapshot `incursions` + per-aircraft `incursion`; dashed red
-  ring on the scope, HUD line at the top of the alert stack. _Next: a lever — controller-issued
-  go-around for the inbound, and "expedite" for the occupant; the alert currently informs
-  without offering the action, which is the same gap the gate alert had._
+  ring on the scope, HUD line at the top of the alert stack.
+- ✅ **Making the incursion alert actionable** — there are exactly two ways out of an aircraft
+  on the runway under an inbound: move the one in the air, or move the one on the ground.
+  **Go around** is now the controller's call (the sim only had the pilot's, announced at the
+  threshold); the state change is shared with it, but the two are transmitted differently — the
+  pilot's is an announcement, the controller's an instruction with a read-back — so the
+  transcript can tell them apart. Not gated on holding a landing clearance: an arrival still
+  awaiting one is the aircraft you most want to turn away early. **Expedite** runs the existing
+  clearance at 25 kt, cancels a give-way (you cannot hurry and wait at once), and is spent by
+  the next clearance; separation caps still apply on top, so hurrying is never permission to run
+  into anyone. Both are on the strip menu, labelled with the reason when the aircraft is the one
+  in the incursion, and expedite stays *visible and disabled* when the aircraft cannot be
+  hurried — "this one cannot get out of the way" is what tells you to send the other one around.
+  The banner itself is a button that selects and centres on the intruder, so alert → action is
+  one click. _Next: the go-around is still the stub re-establish (back to the 4 nm fix); the
+  real one climbs out and re-enters TRACON sequencing — see docs/atc-tower.md Slice 3._
 - ⬜ **Converging-traffic prediction** (incursion follow-up) — the `conflict` flag is still pure
   proximity. Project both aircraft forward and warn on time-to-conflict, so taxiway conflicts get
   the same "developing → happening" ladder the runway ones now have.
