@@ -52,6 +52,8 @@ export function GroundScope({ controller }: { controller: GroundController }) {
   const alertRef = useRef<HTMLDivElement>(null)
   const gateAlertRef = useRef<HTMLDivElement>(null)
   const incursionRef = useRef<HTMLButtonElement>(null)
+  const incursionMarkRef = useRef<HTMLSpanElement>(null)
+  const incursionTextRef = useRef<HTMLSpanElement>(null)
   const incursionSrRef = useRef<HTMLDivElement>(null)
   // The aircraft the banner would take you to, kept on a ref because the banner is written
   // from the render loop rather than re-rendered by React.
@@ -453,22 +455,26 @@ export function GroundScope({ controller }: { controller: GroundController }) {
         // two aircraft on a runway, which is the one that ends the game rather than the shift.
         // The visible line and the announced one are different strings — see alerts.ts — so the
         // range can tick on screen without interrupting a screen reader every tenth of a mile.
-        if (incursionRef.current && incursionSrRef.current) {
+        if (incursionRef.current && incursionMarkRef.current && incursionTextRef.current && incursionSrRef.current) {
           const alert = incursionAlert(snap.incursions)
           const el = incursionRef.current
-          setText(el, alert.text)
+          // The label text is the button's accessible name, so the two can never disagree —
+          // the glyph beside it is aria-hidden and contributes nothing to the name.
+          setText(incursionMarkRef.current, alert.mark)
+          setText(incursionTextRef.current, alert.text)
           setText(incursionSrRef.current, alert.announcement)
           // Only pulse when there is something to pulse about, and only in the alert's colour
           // when it is an alert — an advisory is amber and still, like the gate line.
           el.classList.toggle('is-alert', alert.severity === 'alert')
           el.classList.toggle('is-advisory', alert.severity === 'advisory')
+          incursionFocusRef.current = alert.focusId
           // Hidden rather than merely empty when there is nothing wrong: an empty button is
           // still a tab stop, and a tab stop that announces nothing is worse than no button.
-          el.hidden = alert.focusId === null
-          // The accessible name is the *stable* sentence, so focusing the button does not read
-          // out a range that will be wrong by the time it finishes saying it.
-          el.setAttribute('aria-label', alert.announcement)
-          incursionFocusRef.current = alert.focusId
+          // If it is hiding out from under a keyboard user — the incursion resolved while they
+          // were on it — hand focus back to the scope rather than dropping it on the floor.
+          const hide = alert.focusId === null
+          if (hide && !el.hidden && el.contains(document.activeElement)) canvas.focus()
+          el.hidden = hide
         }
         if (alertRef.current) {
           const inConflict = snap.aircraft.filter((a) => a.conflict).length
@@ -659,9 +665,11 @@ export function GroundScope({ controller }: { controller: GroundController }) {
       {controller.dev && <div ref={devRef} className="hud hud-dev mono" aria-live="polite" />}
       <div ref={statusRef} className="hud hud-tr mono" />
       {/* Two nodes for one alert. The visible one is a button — naming an aircraft and not
-          taking you to it is half an alert — whose accessible name is the stable sentence, so
-          the range it displays never reaches a screen reader. The off-screen twin is the live
-          region that does the announcing, and only it. */}
+          taking you to it is half an alert — and its label text *is* its accessible name, so a
+          speech-input user can say what they see. The off-screen twin is the live region that
+          does the announcing, and only it; keeping the two apart is what lets the visible line
+          repaint with a ticking range without interrupting a screen reader on every tenth of
+          a mile. */}
       <button
         ref={incursionRef}
         type="button"
@@ -669,11 +677,17 @@ export function GroundScope({ controller }: { controller: GroundController }) {
         hidden
         onClick={() => {
           const id = incursionFocusRef.current
-          if (!id) return
+          // Re-check against the live fleet: the banner is painted a frame ahead of the click,
+          // and an aircraft can leave the sim in between. Selecting an id that no longer exists
+          // would leave the bay pointed at nothing.
+          if (!id || !controller.sim.snapshot().aircraft.some((a) => a.id === id)) return
           controller.select(id)
           controller.focusOn(id)
         }}
-      />
+      >
+        <span ref={incursionMarkRef} aria-hidden="true" />
+        <span ref={incursionTextRef} />
+      </button>
       <div ref={incursionSrRef} className="sr-only" role="alert" />
       <div ref={alertRef} className="hud hud-alert mono" role="alert" />
       {/* Advisory, not an alarm: polite rather than role="alert", so it never cuts across the
