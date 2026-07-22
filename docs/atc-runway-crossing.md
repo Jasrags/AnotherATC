@@ -130,14 +130,14 @@ status; nothing in this section is a plan, only an honest statement of the diver
 | Procedure | Sim today |
 |---|---|
 | Route may embed the crossing ("…cross runway 15, then Bravo") | ❌ Never embedded. A route that crosses a runway is **always** split at the hold line (`splitRouteAtRunway`) and the far portion held until a separate `crossRunway` clearance releases it. Conservative in the right direction — it is the "taxi to" rule enforced structurally — but it means the one-instruction form does not exist. |
-| Hold short of a *named* runway | ⚠️ Held at the hold line, but the instruction is not phrased against a runway designator, and the pilot's read-back does not name it. |
+| Hold short of a *named* runway | ⚠️ Held at the hold line, but the instruction is not phrased against a runway designator, and the pilot's read-back does not name it. **"Hold position" is still a disabled placeholder at every hold-short line** — the other half of this exchange (§5–6), and now the largest remaining gap here. |
 | Mandatory verbatim read-back | ⚠️ Read-back exists as a mechanic (`comms.ts`), including deliberate mishearing, but a crossing clearance is not treated as a read-back-mandatory instruction distinct from the rest. |
 | Ground clears the crossing (option A) | ✅ `crossRunway`, gated on `blocksRunway` (surface occupants + anyone inside short final). |
-| Ground hands off for the crossing (option B) | ❌ Not modelled. |
-| Tower clears a crossing | ❌ **Not offered at all** — a handed-off aircraft has only line-up / takeoff / hold. The sim's `crossRunway` has no position gate, so this is a menu gap, not a missing mechanic (backlog: Tower Slice 3e). |
-| "No delay" as a distinct instruction | ⚠️ `expedite` exists and is the right shape for it, but is not wired to the crossing phraseology. |
+| Ground hands off for the crossing (option B) | ✅ `contactTower` takes a transit — including an arrival, which crosses to reach its gate — and says what the handoff is for. |
+| Tower clears a crossing | ✅ Tower's hold-short menu splits on what the aircraft is there for: a transit gets **Cross runway** and not the departure vocabulary, gated on the same runway-clear predicate the sim refuses with. |
+| "No delay" as a distinct instruction | ✅ Tower's crossing clearance carries it; Ground's does not. (`expedite` remains the separate, stronger instruction for an aircraft already moving.) |
 | Hold with a stated reason ("traffic on a 3 mile final") | ⚠️ Refusals carry a reason string and the UI surfaces it, but it is controller-facing text, not a transmitted instruction. |
-| Return to Ground after crossing | ❌ Not modelled — there is no Tower→Ground handoff for a crossing, only for a landing rollout. |
+| Return to Ground after crossing | ✅ "when clear of the runway, contact ground" — armed when issued mid-crossing, applied the moment the aircraft is off the pavement. Nothing is re-routed: a transit is already taxiing its own clearance. |
 | One runway at a time | ➖ Not yet meaningful: KSAN is single-runway. It becomes real at the first intersecting-runway field (backlog: second airport). |
 | Lights on when crossing | ➖ Not modelled; no aircraft lighting state exists. |
 

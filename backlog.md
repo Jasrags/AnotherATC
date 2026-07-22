@@ -215,19 +215,27 @@ Design note: `docs/atc-tower.md` (one sim, two projections; Ground and Tower own
   (see Cross-cutting systems) — the arrival procedure's transmissions are now all visible in the TWR
   bay. Still open: wake spacing on final, arrival sequence numbers, a player-issued go-around,
   hold-short during rollout, ATIS/weather line.
-- ⬜ **Slice 3e — Tower has no crossing vocabulary.** (Procedure: `docs/atc-runway-crossing.md`.) Once a departure is handed off, its
-  hold-short menu is *line up and wait* / *cleared for takeoff* / hold — there is no **cross
-  runway** on Tower's frequency at all. The handoff is therefore one-way in practice: an
-  aircraft whose plan changes after it is handed off (a runway change, a different intersection,
-  or simply a handoff issued too early) is stranded holding short with no instruction that gets
-  it across, and the only way out is back through Ground. This is a *menu* gap, not a missing
-  mechanic — `crossRunway` has no position gate in the sim, so it would be accepted from Tower
-  today, and `blocksRunway` already gates a crossing exactly as it gates a line-up or a takeoff.
-  Needs: **Cross runway** in the Tower hold-short branch, gated and labelled with the reason like
-  its neighbours; a decision on whether Ground's own **Cross runway** stays direct or becomes a
-  request Tower approves (the hold-short item under Ground already carries "require Tower
-  coordination" as its next step, and Local Control owning the surface is the real-world
-  argument for it); and phraseology that tells the two apart on the transcript.
+- ✅ **Slice 3e — Tower owns the crossing.** (Procedure: `docs/atc-runway-crossing.md` §5–7.)
+  The reported symptom was "after contacting tower there is no cross-runway option", but the gap
+  ran deeper than the menu: `contactTower` explicitly *refused* a transit, so an aircraft holding
+  short to cross could never be on Tower's frequency at all. **Procedure option B now works end
+  to end.** Ground may hand a transit to Tower for the crossing — including an arrival, which
+  crosses to reach its gate; Tower clears it with **"no delay"**, the phraseology that
+  distinguishes Local Control's crossing from Ground's; and Tower hands it back, worded "when
+  clear of the runway, contact ground" and *armed* when issued mid-crossing, applying the moment
+  the aircraft is off the pavement. Nothing is re-routed on the way back — unlike an arrival
+  leaving the runway, a transit is already taxiing the clearance it has. Ground keeps its own
+  direct **Cross runway** (option A): both are real and the choice is the controller's, so the
+  menu offers both. Tower's hold-short menu now splits on *what the aircraft is there for* — a
+  departure gets line-up/takeoff, a transit gets the crossing and nothing else, because offering
+  to line up a transit offers a runway it has no business using.
+  **Latent bug closed on the way:** `crossRunway` used to accept an aircraft cleared *to* the
+  runway, which would have driven it on and parked it there unaligned with no takeoff clearance —
+  a runway incursion issued by the controller. Two discriminators now, because there are two
+  questions: `holdingForTakeoff` (is the *destination* the runway?) decides what a handoff is for
+  and how it is phrased; `heldRouteCrosses` (does the held route *end* off the pavement?) answers
+  the physical one. _Next: "hold short of runway N" as a real instruction — still a disabled
+  placeholder at every hold-short line, and it is the other half of this exchange (§5)._
 - 💭 **Ramp Control** — a third layer after Ground at large hubs (airline/airport-run, not FAA).
   Deferred: adds a frequency without adding a decision until gate conflicts + pushback contention
   exist (see Turnaround).
