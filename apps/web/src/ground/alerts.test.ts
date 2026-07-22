@@ -16,7 +16,7 @@ function inc(over: Partial<RunwayIncursion> = {}): RunwayIncursion {
 
 describe('incursionAlert', () => {
   it('is empty when nothing is wrong — the normal case must not paint a bar', () => {
-    expect(incursionAlert([])).toEqual({ text: '', announcement: '', severity: null })
+    expect(incursionAlert([])).toEqual({ text: '', announcement: '', severity: null, focusId: null })
   })
 
   it('leads with the worst one, spelled out, because that is the one to act on', () => {
@@ -53,6 +53,10 @@ describe('incursionAlert', () => {
     expect(a.text).toContain('SWA1 on the runway')
     expect(a.text).toMatch(/\+2 more$/)
     expect(a.announcement).toMatch(/\+2 more$/)
+  })
+
+  it('points at the intruder, which is the aircraft the menu levers apply to', () => {
+    expect(incursionAlert([inc({ occupantId: 'swa1' })]).focusId).toBe('swa1')
   })
 
   it('takes the list as given — the sim has already ordered it worst first', () => {

@@ -10,9 +10,12 @@ export interface IncursionAlert {
   announcement: string
   /** Severity of the leading incursion, or null when there is none. */
   severity: IncursionSeverity | null
+  /** The aircraft to act on — the intruder of the leading incursion, or null when there is
+   *  none. Naming an aircraft and not taking you to it is half an alert. */
+  focusId: string | null
 }
 
-const EMPTY: IncursionAlert = { text: '', announcement: '', severity: null }
+const EMPTY: IncursionAlert = { text: '', announcement: '', severity: null, focusId: null }
 
 /**
  * The runway-incursion HUD line.
@@ -31,5 +34,6 @@ export function incursionAlert(incursions: readonly RunwayIncursion[]): Incursio
     text: `${isAlert ? '⛔' : '⚠'} RUNWAY — ${worst.message}${range}${rest}`,
     announcement: `Runway ${isAlert ? 'alert' : 'advisory'}. ${worst.message}${rest}`,
     severity: worst.severity,
+    focusId: worst.occupantId,
   }
 }

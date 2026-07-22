@@ -124,6 +124,15 @@ body {
    have to find before you can read it. Bounded by the scope's own width so a long sentence
    wraps on a phone instead of running off the left edge. */
 .hud-incursion {
+  /* The alert is the one HUD element you act on, so it opts back into pointer events and
+     carries a real focus ring — everything else in the .hud layer is read-only chrome. */
+  pointer-events: auto;
+  cursor: pointer;
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
   top: 44px;
   right: 18px;
   max-width: min(46ch, calc(100% - 36px));
@@ -143,6 +152,16 @@ body {
 
 .hud-incursion.is-advisory {
   color: #f0c06a;
+}
+
+.hud-incursion:hover,
+.hud-incursion:focus-visible {
+  text-decoration: underline;
+}
+
+.hud-incursion:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 3px;
 }
 
 @keyframes incursion-pulse {
