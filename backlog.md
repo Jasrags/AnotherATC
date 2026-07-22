@@ -215,7 +215,7 @@ Design note: `docs/atc-tower.md` (one sim, two projections; Ground and Tower own
   (see Cross-cutting systems) — the arrival procedure's transmissions are now all visible in the TWR
   bay. Still open: wake spacing on final, arrival sequence numbers, a player-issued go-around,
   hold-short during rollout, ATIS/weather line.
-- ⬜ **Slice 3e — Tower has no crossing vocabulary.** Once a departure is handed off, its
+- ⬜ **Slice 3e — Tower has no crossing vocabulary.** (Procedure: `docs/atc-runway-crossing.md`.) Once a departure is handed off, its
   hold-short menu is *line up and wait* / *cleared for takeoff* / hold — there is no **cross
   runway** on Tower's frequency at all. The handoff is therefore one-way in practice: an
   aircraft whose plan changes after it is handed off (a runway change, a different intersection,
