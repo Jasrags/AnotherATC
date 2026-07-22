@@ -3,7 +3,8 @@
 **Status:** reference material, being gathered. Sections 1–4 describe the real split; §5 records
 where the sim currently diverges from it.
 **Authorities:** FAA Order 7110.65 Ch. 3 (Airport Traffic Control); AIM Ch. 4 §3.
-See also `docs/atc-flight-strips.md` §"Controller Mode Details" (the same two positions, summarized
+See also `docs/atc-operations.md` (each task below as a step-by-step sequence with
+phraseology), `docs/atc-flight-strips.md` §"Controller Mode Details" (the same two positions, summarized
 at the level the flight strip needs), `docs/atc-flight-cycle.md` (the same handoffs as a *sequence*
 rather than an ownership map), `docs/atc-runway-crossing.md`, `docs/atc-tower.md`.
 

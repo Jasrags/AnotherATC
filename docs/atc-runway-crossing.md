@@ -7,7 +7,8 @@ Ground's own crossing clearance.
 **Authorities:** FAA Order 7110.65 Ch. 3 §7 (taxi and ground movement) and §2-4 (pilot
 acknowledgment / read back); AIM Ch. 4 §3 (airport operations). Paragraph numbers move between
 editions — cite the chapter, verify the paragraph against the current one before relying on it.
-See also `docs/atc-positions.md` (who owns what), `docs/atc-tower.md`,
+See also `docs/atc-positions.md` (who owns what), `docs/atc-operations.md` (this is
+operation 5 there), `docs/atc-tower.md`,
 `docs/atc-flight-cycle.md`, `docs/atc-flight-strips.md`.
 
 A runway crossing is one of the highest-risk operations in ground movement, which is why the

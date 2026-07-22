@@ -15,6 +15,11 @@ Today `ac.wake` (`L | M | H | J` = Light/Medium/Heavy/Super) is tracked end-to-e
 
 Authority: FAA AC 90-23G (Aircraft Wake Turbulence), FAA Order 7110.65 §3-9-6 / §5-5 (successive departures), ICAO Doc 4444 (time-based departure minima).
 
+> **Category vocabulary.** This note uses ICAO categories (`L | M | H | J`). Reference material
+> written to FAA weight classes (Small / Large / Heavy / Super) does not map across by name:
+> FAA **Large** is a 737/A320 — this codebase's **`M`** — while `L` here is Light. See
+> `docs/atc-operations.md` §D, which records where that trap already came up.
+
 ## Real-world basis
 
 For **successive departures from the same runway**, separation is *time-based*, measured from the moment the preceding aircraft begins its takeoff roll. The interval grows as the leader gets heavier and the follower gets lighter. Real minima cluster around 2 minutes (lighter behind Heavy) and 3 minutes (lighter behind Super); same-category and heavier-follower pairs need little or none.
