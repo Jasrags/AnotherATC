@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { RunwayIncursion } from '@anotheratc/sim'
-import { incursionAlert } from './alerts'
+import { AWAITING_ADVISORY_SEC, awaitingAlert, incursionAlert, type AwaitingItem } from './alerts'
 
 function inc(over: Partial<RunwayIncursion> = {}): RunwayIncursion {
   return {
@@ -68,5 +68,31 @@ describe('incursionAlert', () => {
     // Defensive re-sorting here would let the two orderings drift apart silently.
     const a = incursionAlert([inc({ severity: 'advisory', finalNm: null, message: 'first' }), inc({ message: 'second' })])
     expect(a.text).toBe('RUNWAY — first · +1 more')
+  })
+})
+
+describe('awaitingAlert', () => {
+  const wait = (callsign: string, awaitingSec: number, intent: 'arrival' | 'departure' = 'arrival') =>
+    ({ callsign, awaitingSec, intent }) as AwaitingItem
+
+  it('is empty when nobody has been left waiting long enough to mention', () => {
+    expect(awaitingAlert([])).toBe('')
+    expect(awaitingAlert([wait('AAL1', AWAITING_ADVISORY_SEC - 1)])).toBe('')
+  })
+
+  it('names who is waiting and for how long, once it is worth saying', () => {
+    expect(awaitingAlert([wait('AAL1', 45)])).toBe('⧗ AAL1 AWAITING TAXI 0:45')
+  })
+
+  it('leads with whoever has waited longest — that is the one to answer first', () => {
+    const line = awaitingAlert([wait('AAL1', 40), wait('DAL2', 130), wait('SWA3', 65)])
+    expect(line).toBe('⧗ DAL2 AWAITING TAXI 2:10 · SWA3 1:05 · AAL1 0:40')
+  })
+
+  it('counts the rest rather than listing a whole bay of them', () => {
+    // Past a handful this is no longer a list of aircraft to act on, it is a statement about
+    // how the session is going — and a HUD line that wraps is one nobody reads.
+    const many = [140, 130, 120, 110, 100, 90].map((s, i) => wait(`AAL${i}`, s))
+    expect(awaitingAlert(many)).toBe('⧗ AAL0 AWAITING TAXI 2:20 · AAL1 2:10 · AAL2 2:00 · +3 more')
   })
 })

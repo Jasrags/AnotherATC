@@ -35,6 +35,7 @@ function strip(over: Partial<StripItem> = {}): StripItem {
     hasInstruction: false,
     pushbackOptions: [],
     wakeHoldSec: 0,
+    awaitingSec: 0,
     services: [],
     serviceSec: 0,
     ...over,

@@ -399,6 +399,9 @@ interface Internal
   blockedEdge: string | null
   /** Seconds spent continuously reservation-held — once past a threshold, we try to divert. */
   heldSec: number
+  /** Seconds spent continuously stopped with nothing left to run — see
+   *  {@link GroundAircraft.awaitingSec}, which is this rounded down to whole seconds. */
+  awaitingSec: number
   /** Contested edges a diversion has already routed this aircraft around (kept off reroutes). */
   avoidEdges: Set<string>
   /** Blocked edges we already tried and failed to divert around (skip recompute until recleared). */
@@ -713,6 +716,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       services: (init.intent ?? 'departure') === 'departure' ? freshServices() : [],
       blockedEdge: null,
       heldSec: 0,
+      awaitingSec: 0,
       avoidEdges: new Set(),
       divertTried: new Set(),
       pushFacing: null,
@@ -848,6 +852,31 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     if (!ac.holding) return 'taxi'
     if (ac.path.length < 2 && ac.held === null) return 'parked'
     return 'holding'
+  }
+
+  /**
+   * Whether this aircraft is waiting on the *controller* — stopped, under Ground, with no
+   * clearance left to run and nothing else to be waiting for. See
+   * {@link GroundAircraft.awaitingSec} for what this is and what it deliberately excludes.
+   */
+  function awaitingInstruction(ac: Internal): boolean {
+    if (ac.controlledBy !== 'ground' || !ac.holding) return false
+    if (ac.airborne || ac.rollingOut || ac.departing || ac.pushingBack) return false
+    // On a stand — arrived and dwelling, or a departure waiting for its clearance. Both are
+    // already said elsewhere, and neither is holding anything up.
+    if (ac.dwell >= 0 || atGate(ac) || ac.path.length < 2) return false
+    // Holding short of a runway, or giving way: it has a clearance and is waiting on something
+    // real. The clock is for an aircraft nobody has said anything to.
+    if (ac.holdShort || ac.held !== null || ac.giveWayTo !== null) return false
+    return ac.leg >= ac.path.length - 1
+  }
+
+  /** Accrue each aircraft's wait on the controller, and reset it the moment it has something to
+   *  do. Runs after the movement resolves, so a clearance issued this tick shows as zero. */
+  function tickAwaiting(dt: number): void {
+    for (const ac of fleet) {
+      ac.awaitingSec = awaitingInstruction(ac) ? ac.awaitingSec + dt : 0
+    }
   }
 
   /** True while a departure is still parked at its gate (not pushed back or rolling). */
@@ -2605,6 +2634,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         nextSpawnAt = time + spawnIntervalSec()
         trySpawn()
       }
+      tickAwaiting(dt)
       detectConflicts()
       incursions = detectRunwayIncursions()
     },
@@ -2664,6 +2694,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
           squawk: ac.squawk,
           hasInstruction: ac.lastClearance !== null,
           wakeHoldSec: wakeHoldFor(ac),
+          awaitingSec: Math.floor(ac.awaitingSec),
           services: ac.services.map((s) => ({ kind: s.kind, total: s.total, remaining: s.remaining })),
           serviceSec: Math.ceil(serviceRemaining(ac)),
         })),

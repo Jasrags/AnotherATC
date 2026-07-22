@@ -3,6 +3,7 @@ import type { ControllerPosition, GroundIntent, GroundStatus, Point } from '@ano
 import type { GroundController, RouteDraft, StripItem } from './controller'
 import { StripCommandMenu } from './StripCommandMenu'
 import { CommsLog } from './CommsLog'
+import { AWAITING_ADVISORY_SEC, awaitingClock } from './alerts'
 
 /** Takeoff-queue sequence numbers: rank the departures awaiting takeoff (Tower-owned, holding
  *  short or lined up) in fleet order, so each strip can show its place in line. Deterministic. */
@@ -215,6 +216,12 @@ export function StripBay({ controller }: { controller: GroundController }) {
                   <div className="strip-giveway">⧗ GATE {a.waitingForStand} OCCUPIED</div>
                 )}
                 {a.wakeHoldSec > 0 && <div className="strip-wake">⚠ WAKE HOLD {a.wakeHoldSec}s</div>}
+                {/* Waiting on the controller: it has been told nothing and cannot move until it
+                    is. Shown only once the wait is worth answering — a clock on every stopped
+                    aircraft would be a clock on nothing. */}
+                {a.awaitingSec >= AWAITING_ADVISORY_SEC && (
+                  <div className="strip-awaiting">⧗ AWAITING TAXI {awaitingClock(a.awaitingSec)}</div>
+                )}
                 {a.serviceSec > 0 && (
                   <div className="strip-svc">
                     <span className="svc-label">SVC {a.serviceSec}s</span>

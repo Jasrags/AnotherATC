@@ -134,6 +134,9 @@ export interface StripItem {
   hasInstruction: boolean
   /** Seconds of wake-turbulence separation still owed before takeoff release; 0 when none. */
   wakeHoldSec: number
+  /** Whole seconds this aircraft has been stopped with nothing to run — waiting on *you*, not
+   *  on traffic or a gate. 0 when it isn't. Drives the strip's clock and the HUD advisory. */
+  awaitingSec: number
   /** Parallel ground services still running before pushback unlocks; empty when ready/none. */
   services: readonly ServiceProgress[]
   /** Seconds until the long-pole service finishes and pushback unlocks; 0 when ready/none. */
@@ -410,7 +413,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
     // Range-to-threshold is continuous, so it enters the signature at display precision
     // (0.1 nm ≈ one re-render every ~2.5 s on final) rather than every frame.
     for (const a of acs)
-      nextSig += `|${a.id}:${a.status}:${a.controlledBy}:${a.onRunway ? 'R' : ''}${a.blocksTakeoff ? 'B' : ''}${a.onShortFinal ? 'F' : ''}${a.vacated ? 'V' : ''}${a.handoffPending ? 'H' : ''}${a.incursion ? 'X' : ''}${a.expedite ? 'E' : ''}${a.canExpedite ? 'C' : ''}${a.canHoldShort ? 'S' : ''}:${a.exitRef ?? ''}:${(exitOpts.get(a.id) ?? []).map((e) => e.ref).join('+')}:${vias.get(a.id)!.join('.')}:${a.giveWayTo ?? ''}:${a.waitingForStand ?? ''}:${a.gateBlocked ? 'O' : ''}:${a.squawk ?? ''}:${a.hasInstruction ? 'I' : ''}:${a.wakeHoldSec}:${a.serviceSec}:${a.finalNm.toFixed(1)}`
+      nextSig += `|${a.id}:${a.status}:${a.controlledBy}:${a.onRunway ? 'R' : ''}${a.blocksTakeoff ? 'B' : ''}${a.onShortFinal ? 'F' : ''}${a.vacated ? 'V' : ''}${a.handoffPending ? 'H' : ''}${a.incursion ? 'X' : ''}${a.expedite ? 'E' : ''}${a.canExpedite ? 'C' : ''}${a.canHoldShort ? 'S' : ''}:${a.exitRef ?? ''}:${(exitOpts.get(a.id) ?? []).map((e) => e.ref).join('+')}:${vias.get(a.id)!.join('.')}:${a.giveWayTo ?? ''}:${a.waitingForStand ?? ''}:${a.gateBlocked ? 'O' : ''}:${a.squawk ?? ''}:${a.hasInstruction ? 'I' : ''}:${a.wakeHoldSec}:${a.awaitingSec}:${a.serviceSec}:${a.finalNm.toFixed(1)}`
     if (nextSig === sig) return
     sig = nextSig
     snapshot = {
@@ -451,6 +454,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
         squawk: a.squawk,
         hasInstruction: a.hasInstruction,
         wakeHoldSec: a.wakeHoldSec,
+        awaitingSec: a.awaitingSec,
         services: a.services,
         serviceSec: a.serviceSec,
       })),

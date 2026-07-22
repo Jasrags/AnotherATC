@@ -200,6 +200,17 @@ body {
   color: #f0c06a;
 }
 
+/* Aircraft waiting on the controller. Quieter still than the gate line — a muted slate rather
+   than an amber — because nothing has gone wrong yet; someone is simply being ignored. */
+.hud-awaiting {
+  top: 126px;
+  right: 18px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  color: #8fa6bd;
+}
+
 /* Admin/dev HUD control bar — the interactive controls, so it opts back into pointer
    events; the buttons get real focus rings for keyboard users. */
 .hud-controls {
@@ -568,6 +579,16 @@ body {
   font-weight: 700;
   letter-spacing: 0.08em;
   color: #ff8a5c;
+}
+
+/* Waiting on the controller: the same muted slate as its HUD line, so the strip and the scope
+   are recognisably saying one thing. Not a warning colour — nothing is wrong yet. */
+.strip-awaiting {
+  margin-top: 5px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #8fa6bd;
 }
 
 /* Ground-servicing row: a long-pole countdown + one progress bar per parallel service. */
@@ -957,6 +978,11 @@ body {
   }
   .hud-gate-alert {
     top: 96px;
+    right: 12px;
+    font-size: 10px;
+  }
+  .hud-awaiting {
+    top: 114px;
     right: 12px;
     font-size: 10px;
   }

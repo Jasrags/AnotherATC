@@ -207,6 +207,21 @@ export interface GroundAircraft {
   /** Seconds of wake-turbulence separation still required before this holding-short
    *  departure can be released for takeoff; 0 when none applies. */
   wakeHoldSec: number
+  /**
+   * Whole seconds this aircraft has been stopped with no clearance to run — waiting on the
+   * controller, not on traffic, a gate or a runway. 0 when it is not.
+   *
+   * The case it exists for is an arrival that has checked in with Ground after landing: it has
+   * been issued nothing, it cannot move until it is, and it holds its turnoff for as long as it
+   * sits there — silently, looking exactly like an aircraft that is fine. A departure left on
+   * the alley after its pushback is the same failure and counts the same way.
+   *
+   * Deliberately *not* counted: a departure on its stand (waiting for a clearance the strip
+   * already shows), anything holding short of a runway or giving way (it has a clearance, it is
+   * waiting on something real), and anything told to hold position — an instruction is not
+   * neglect. Whole seconds rather than raw time so a UI can key a re-render on it.
+   */
+  awaitingSec: number
   /** Parallel ground services on a parked departure (fuel/cargo/…); empty when none apply. */
   services: readonly ServiceProgress[]
   /** Seconds until the longest ground service finishes and pushback unlocks; 0 when ready/none. */
