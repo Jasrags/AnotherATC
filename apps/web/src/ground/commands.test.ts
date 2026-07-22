@@ -764,3 +764,43 @@ describe('a departure holding a wheels-up slot', () => {
     expect(cmds.find((c) => c.key === 'takeoff')!.label).toBe('Cleared for takeoff')
   })
 })
+
+describe('lining up behind traffic that is leaving', () => {
+  const holdingShort = strip({
+    status: 'holdShort',
+    controlledBy: 'tower',
+    intent: 'departure',
+    holdingForTakeoff: true,
+  })
+  const other = (over: Partial<StripItem>) => strip({ id: 'b', callsign: 'DAL2', ...over })
+
+  it('is offered behind a departure already rolling', () => {
+    const { controller } = fakeController()
+    const rolling = other({ status: 'departing', onRunway: true })
+    const cmds = commandsFor(controller, holdingShort, [holdingShort, rolling])
+    expect(cmds.find((c) => c.key === 'lineup')!.action.kind).toBe('run')
+  })
+
+  it('is offered behind a landing that is rolling out, and says so', () => {
+    const { controller } = fakeController()
+    const landing = other({ status: 'rollout', onRunway: true })
+    const cmds = commandsFor(controller, holdingShort, [holdingShort, landing])
+    const lineup = cmds.find((c) => c.key === 'lineup')!
+    expect(lineup.action.kind).toBe('run')
+    expect(lineup.label).toBe('Line up and wait — behind landing traffic')
+  })
+
+  it('is not offered under an aircraft on short final', () => {
+    const { controller } = fakeController()
+    const short = other({ status: 'landing', onShortFinal: true })
+    const cmds = commandsFor(controller, holdingShort, [holdingShort, short])
+    expect(cmds.find((c) => c.key === 'lineup')!.action.kind).toBe('soon')
+  })
+
+  it('is not offered behind an aircraft stopped on the runway', () => {
+    const { controller } = fakeController()
+    const stopped = other({ status: 'lineUpWait', onRunway: true })
+    const cmds = commandsFor(controller, holdingShort, [holdingShort, stopped])
+    expect(cmds.find((c) => c.key === 'lineup')!.action.kind).toBe('soon')
+  })
+})

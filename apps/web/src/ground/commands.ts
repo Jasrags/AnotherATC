@@ -188,10 +188,14 @@ function phaseCommandsFor(controller: GroundController, item: StripItem, aircraf
     // Still a placeholder for an aircraft *on* the runway, where "hold short" is meaningless and
     // "hold position" is the right words — the one place the stub was never the wrong idea.
     const holdPosition: MenuCommand = { label: 'Hold position', action: { kind: 'soon' } }
-    // A stationary occupant (lined up or crossing) blocks a line-up; a rolling departure doesn't.
-    // Traffic on short final blocks both — you can't put anything under a landing aircraft.
+    // A stationary occupant (lined up or crossing) blocks a line-up; traffic *leaving* down the
+    // runway does not — a rolling departure or a landing rolling out is what the instruction
+    // exists to be issued behind (docs/atc-operations.md §6). Traffic on short final blocks it
+    // either way: nothing goes under an aircraft about to touch down. Mirrors the sim's own
+    // predicate, so the menu never disables a clearance the sim would accept.
+    const leaving = (o: StripItem) => o.status === 'departing' || o.status === 'rollout'
     const runwayBlockedForLineup = aircraft.some(
-      (o) => o.id !== id && ((o.onRunway && o.status !== 'departing') || o.onShortFinal),
+      (o) => o.id !== id && ((o.onRunway && !leaving(o)) || o.onShortFinal),
     )
     // A takeoff needs the runway clear of anything not yet rotated (self excluded).
     const runwayBlockedForTakeoff = aircraft.some((o) => o.id !== id && (o.blocksTakeoff || o.onShortFinal))
@@ -221,9 +225,16 @@ function phaseCommandsFor(controller: GroundController, item: StripItem, aircraf
       if (!item.holdingForTakeoff) {
         return [crossRunway(controller, item, runwayBlockedForLineup), holdShort(controller, item)]
       }
+      // Named for what it is when there is something to line up behind: an aircraft being sent
+      // onto an occupied runway should be able to read why from the button.
+      const behindLanding = aircraft.some((o) => o.id !== id && o.status === 'rollout' && o.onRunway)
       const lineup: MenuCommand = runwayBlockedForLineup
         ? { key: 'lineup', label: 'Line up and wait — runway busy', action: { kind: 'soon' } }
-        : { key: 'lineup', label: 'Line up and wait', action: { kind: 'run', run: () => send({ type: 'lineUpAndWait', aircraftId: id }) } }
+        : {
+            key: 'lineup',
+            label: behindLanding ? 'Line up and wait — behind landing traffic' : 'Line up and wait',
+            action: { kind: 'run', run: () => send({ type: 'lineUpAndWait', aircraftId: id }) },
+          }
       return [lineup, takeoff, holdShort(controller, item)]
     }
     // Tower-owned and no longer holding short: a crossing it cleared and now has to give back.

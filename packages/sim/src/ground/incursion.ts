@@ -57,6 +57,10 @@ export interface IncursionView {
   callsign: string
   /** How it is using the runway surface, or null when it is not on it. */
   use: RunwayUse | null
+  /** Rolling *away* down the runway — a takeoff roll under power, or a landing still rolling
+   *  out. An aircraft that is leaving is not an obstruction to one lining up behind it, which
+   *  is the entire premise of "line up and wait"; one that has stopped on the pavement is. */
+  movingAway: boolean
   airborne: boolean
   clearedToLand: boolean
   /** Distance (nm) still to fly to the threshold; only meaningful while airborne. */
@@ -77,6 +81,15 @@ const ADVISORY_FINAL_NM = 3
 const RUNWAY_USER: readonly RunwayUse[] = ['takeoff', 'lineUp', 'rollout']
 
 const SEVERITY_RANK: Record<IncursionSeverity, number> = { alert: 0, advisory: 1 }
+
+/** Whether `behind` is legitimately in position behind `ahead`, which is leaving. */
+function isAnticipated(ahead: IncursionView, behind: IncursionView): boolean {
+  return (
+    behind.use === 'lineUp' &&
+    ahead.movingAway &&
+    (ahead.use === 'takeoff' || ahead.use === 'rollout')
+  )
+}
 
 /** Find every runway conflict in the fleet, most severe first. */
 export function detectIncursions(fleet: readonly IncursionView[]): RunwayIncursion[] {
@@ -126,6 +139,13 @@ export function detectIncursions(fleet: readonly IncursionView[]): RunwayIncursi
       // is the aircraft to move. Pairing them as well would say the same thing a second time,
       // and the HUD shows one sentence and a count.
       if (!aUser && !bUser) continue
+      // Anticipated separation: one leaving down the runway, one in position behind it. This is
+      // what the line-up clearance is *for* (docs/atc-operations.md §6), and the sim issues it
+      // deliberately — alerting on the result meant the game shouted about an instruction it had
+      // just given. Narrow on purpose: the one behind must be in position, so a crossing under a
+      // rolling departure is still an alert, and the one ahead must actually be moving, so a
+      // stationary aircraft with another taxiing onto its spot still is too.
+      if (isAnticipated(a, b) || isAnticipated(b, a)) continue
       const [occ, other] = aUser === bUser ? (a.id < b.id ? [a, b] : [b, a]) : aUser ? [b, a] : [a, b]
       found.push({
         kind: 'sharedRunway',

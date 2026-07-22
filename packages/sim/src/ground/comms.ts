@@ -91,6 +91,9 @@ export interface PhraseContext {
   /** The wheels-up time this clearance carries, already formatted (see {@link clockTime}), or
    *  null when the flight is unconstrained. */
   edct: string | null
+  /** An aircraft is landing on this runway right now — issued with a line-up, which is the one
+   *  instruction that sends an aircraft onto a runway something else is still using. */
+  landingTraffic: boolean
   /** Named taxiways of the current route, in order. */
   taxiways: readonly string[]
   /** Where the clearance ends, already worded: "runway 27", "gate 39". */
@@ -204,8 +207,12 @@ export function phraseFor(cmd: GroundCommand, ctx: PhraseContext): Exchange | nu
       const traffic = ctx.giveWayTo ?? 'the traffic'
       return say(`give way to ${traffic}`, `Give way to ${traffic}`)
     }
-    case 'lineUpAndWait':
-      return say(`${rwy}, line up and wait`, `${Rwy}, line up and wait`)
+    case 'lineUpAndWait': {
+      // The traffic rides on the instruction, not on a separate call: it is the reason this
+      // clearance is safe, and a pilot entering a runway hears the two together or not at all.
+      const traffic = ctx.landingTraffic ? `, traffic landing ${rwy}` : ''
+      return say(`${rwy}, line up and wait${traffic}`, `${Rwy}, line up and wait`)
+    }
     case 'clearedForTakeoff':
       return say(`${rwy}, cleared for takeoff`, `${Rwy}, cleared for takeoff`)
     case 'clearedToLand':

@@ -6,6 +6,7 @@ function view(id: string, over: Partial<IncursionView> = {}): IncursionView {
     id,
     callsign: id.toUpperCase(),
     use: null,
+    movingAway: false,
     airborne: false,
     clearedToLand: false,
     finalNm: 0,
@@ -115,5 +116,57 @@ describe('runway incursion detection', () => {
       'advisory:ghost:occupiedVsLanding',
       'advisory:x:occupiedVsLanding',
     ])
+  })
+})
+
+/**
+ * Anticipated separation is not an incursion.
+ *
+ * "A departure actually rolling down the runway does not block a line-up behind it — that is
+ * precisely what line up and wait is for." The sim says so and permits the clearance; this used
+ * to fire an alert on the result, so the game issued a legal instruction and then shouted about
+ * it. Two predicates disagreeing about the same instant.
+ */
+describe('a departure rolling with one lined up behind it', () => {
+  const rolling = (over: Partial<IncursionView> = {}): IncursionView => ({
+    id: 'a', callsign: 'DEV01', use: 'takeoff', movingAway: true,
+    airborne: false, clearedToLand: false, finalNm: 0, ...over,
+  })
+  const inPosition = (over: Partial<IncursionView> = {}): IncursionView => ({
+    id: 'b', callsign: 'DEV02', use: 'lineUp', movingAway: false,
+    airborne: false, clearedToLand: false, finalNm: 0, ...over,
+  })
+
+  it('is not an incursion — it is the instruction working', () => {
+    expect(detectIncursions([rolling(), inPosition()])).toEqual([])
+  })
+
+  it('is still an incursion when the one ahead has not started rolling', () => {
+    // Cleared for takeoff but stationary — the aircraft behind is taxiing onto an occupied
+    // spot, which is the thing that must never be quiet.
+    const found = detectIncursions([rolling({ movingAway: false }), inPosition()])
+    expect(found).toHaveLength(1)
+    expect(found[0]!.severity).toBe('alert')
+  })
+
+  it('lets a landing roll out with a departure lining up behind it', () => {
+    // The situation LUAW exists for (docs/atc-operations.md §6).
+    expect(detectIncursions([rolling({ use: 'rollout' }), inPosition()])).toEqual([])
+  })
+
+  it('still flags a crossing under a rolling departure — that one is in the way, not behind', () => {
+    const found = detectIncursions([rolling(), inPosition({ use: 'crossing' })])
+    expect(found).toHaveLength(1)
+    expect(found[0]!.severity).toBe('alert')
+  })
+
+  it('still flags an arrival landing on top of the pair', () => {
+    const found = detectIncursions([
+      rolling(),
+      inPosition(),
+      { id: 'c', callsign: 'ARR1', use: null, movingAway: false, airborne: true, clearedToLand: true, finalNm: 1 },
+    ])
+    expect(found.length).toBeGreaterThan(0)
+    expect(found.every((f) => f.kind === 'occupiedVsLanding')).toBe(true)
   })
 })

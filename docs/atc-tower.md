@@ -137,8 +137,18 @@ The single tension that makes Tower a game: **one runway, contested by departure
 arrivals.** The existing single-occupancy guard (`onRunway`, used at `sim.ts:776`) generalizes
 to a **runway-clear predicate** consulted by every clearance:
 
-- `clearedForTakeoff` / `lineUpAndWait` refused if any aircraft is on the runway, on short
-  final inside a threshold distance, or already lined up.
+- `clearedForTakeoff` refused if any aircraft is on the runway, on short final inside a
+  threshold distance, or already lined up.
+- `lineUpAndWait` is looser, deliberately: traffic **leaving** down the runway — a departure
+  rolling, or a landing still rolling out — does not block a line-up behind it. That is the
+  situation the instruction exists for (`docs/atc-operations.md` §6), and the traffic is issued
+  with the clearance ("runway 27, line up and wait, traffic landing runway 27"). Anything
+  *stationary* on the pavement still blocks, including a rollout that has stopped on it, and so
+  does an aircraft already cleared into position — one aircraft in position at a time, counted
+  from the clearance rather than from when its wheels reach the centerline.
+- The incursion detector knows about this pair: a rolling departure with one lined up behind it
+  is **anticipated separation, not an incursion**. Alerting on it meant the game issued an
+  instruction and then shouted about the result.
 - `clearedToLand` refused (or flagged as a conflict alert) if a departure occupies the runway
   or is lined up and waiting — the classic "go around, traffic on the runway."
 - An aircraft in **LUAW** counts as occupying, so you can't land over it.

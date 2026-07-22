@@ -513,3 +513,141 @@ describe('"continue taxi" needs a taxi to continue', () => {
     expect(A(sim, 'a')!.groundspeed).toBeGreaterThan(0)
   })
 })
+
+/**
+ * Line up and wait behind a landing aircraft.
+ *
+ * The situation LUAW exists for, in the words of docs/atc-operations.md §6: "the runway is not
+ * quite clear — *a landing aircraft is still rolling out* — so rather than hold the departure on
+ * the taxiway, Tower puts it on the runway ready to go." The sim used to refuse exactly that,
+ * which left the instruction usable only when it was least needed.
+ *
+ * The line is whether the arrival has *landed*. On short final it is still going to touch down,
+ * and putting an aircraft on the runway underneath it is the accident the incursion machinery
+ * exists for. Once it is rolling out it is leaving, and the departure lines up behind it.
+ */
+describe('line up and wait behind landing traffic', () => {
+  /** A departure at the hold-short line, handed to Tower, ready to be worked. */
+  function ready(sim: ReturnType<typeof createGroundSim>, id: string) {
+    for (let i = 0; i < 2000 && !A(sim, id)?.holdShort; i += 1) sim.step(0.1)
+    expect(sim.dispatch({ type: 'contactTower', aircraftId: id })).toEqual({ ok: true })
+  }
+
+  it('refuses a line-up under an aircraft still on short final', () => {
+    const sim = createGroundSim([arrivalOnFinal('a'), departure('d')], { guard, graph })
+    sim.dispatch({ type: 'clearedToLand', aircraftId: 'a' })
+    ready(sim, 'd')
+    for (let i = 0; i < 4000 && !A(sim, 'a')?.onShortFinal; i += 1) sim.step(0.1)
+    expect(A(sim, 'a')!.onShortFinal).toBe(true)
+    expect(sim.dispatch({ type: 'lineUpAndWait', aircraftId: 'd' })).toEqual({
+      ok: false,
+      reason: 'runway occupied',
+    })
+  })
+
+  it('allows it behind an arrival that has touched down and is rolling out', () => {
+    const sim = createGroundSim([arrivalOnFinal('a'), departure('d')], { guard, graph })
+    sim.dispatch({ type: 'clearedToLand', aircraftId: 'a' })
+    ready(sim, 'd')
+    for (let i = 0; i < 4000 && A(sim, 'a')?.status !== 'rollout'; i += 1) sim.step(0.1)
+    expect(A(sim, 'a')!.onRunway).toBe(true) // still on the pavement, and still leaving it
+
+    expect(sim.dispatch({ type: 'lineUpAndWait', aircraftId: 'd' })).toEqual({ ok: true })
+    expect(A(sim, 'd')!.status).toBe('lineUpWait')
+  })
+
+  it('tells the departure what it is lining up behind', () => {
+    // FAA 7110.65 requires the traffic to be issued with the instruction: an aircraft told to
+    // enter a runway with something else on it is owed the reason.
+    const sim = createGroundSim([arrivalOnFinal('a'), departure('d')], { guard, graph })
+    sim.dispatch({ type: 'clearedToLand', aircraftId: 'a' })
+    ready(sim, 'd')
+    for (let i = 0; i < 4000 && A(sim, 'a')?.status !== 'rollout'; i += 1) sim.step(0.1)
+    sim.dispatch({ type: 'lineUpAndWait', aircraftId: 'd' })
+
+    const [instruction, readback] = sim.snapshot().comms.slice(-2)
+    expect(instruction!.text).toMatch(/line up and wait/i)
+    expect(instruction!.text).toMatch(/traffic landing/i)
+    expect(readback!.text).toMatch(/line up and wait/i)
+  })
+
+  it('still refuses a takeoff clearance until that arrival is off the runway', () => {
+    // The line-up is the whole concession. The takeoff clearance keeps the stricter bar, which
+    // is what makes lining up early useful rather than merely earlier.
+    const sim = createGroundSim([arrivalOnFinal('a'), departure('d')], { guard, graph })
+    sim.dispatch({ type: 'clearedToLand', aircraftId: 'a' })
+    ready(sim, 'd')
+    for (let i = 0; i < 4000 && A(sim, 'a')?.status !== 'rollout'; i += 1) sim.step(0.1)
+    sim.dispatch({ type: 'lineUpAndWait', aircraftId: 'd' })
+    expect(sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'd' })).toEqual({
+      ok: false,
+      reason: 'runway occupied',
+    })
+  })
+
+  it('still refuses a second aircraft onto the runway', () => {
+    // One aircraft in position at a time. A rollout is leaving; a lined-up departure is not.
+    const sim = createGroundSim([departure('d'), departure('e', 1.5)], { guard, graph })
+    ready(sim, 'd')
+    ready(sim, 'e')
+    expect(sim.dispatch({ type: 'lineUpAndWait', aircraftId: 'd' })).toEqual({ ok: true })
+    expect(sim.dispatch({ type: 'lineUpAndWait', aircraftId: 'e' })).toEqual({
+      ok: false,
+      reason: 'runway occupied',
+    })
+  })
+})
+
+describe('the alert must not fire on the instruction the sim just gave', () => {
+  /** A departure at the hold-short line, handed to Tower. */
+  function ready(sim: ReturnType<typeof createGroundSim>, id: string) {
+    for (let i = 0; i < 2000 && !A(sim, id)?.holdShort; i += 1) sim.step(0.1)
+    expect(sim.dispatch({ type: 'contactTower', aircraftId: id })).toEqual({ ok: true })
+  }
+
+  it('clears one for takeoff, lines the next up behind it, and says nothing', () => {
+    // Played exactly as reported: #1 rolling, #2 lined up behind. The pair was raising a
+    // runway-incursion alert — for a sequence the sim had accepted on purpose.
+    const sim = createGroundSim([departure('d'), departure('e', 1.5)], { guard, graph })
+    ready(sim, 'd')
+    ready(sim, 'e')
+    expect(sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'd' })).toEqual({ ok: true })
+
+    let alerted: string | null = null
+    let sawBothOnRunway = false
+    for (let i = 0; i < 3000; i += 1) {
+      sim.step(0.1)
+      const snap = sim.snapshot()
+      const d = A(sim, 'd')
+      // Line #2 up the moment #1 is genuinely rolling, which is what the instruction is for.
+      if (d && d.status === 'departing' && d.groundspeed > 30 && A(sim, 'e')?.status === 'holdShort') {
+        expect(sim.dispatch({ type: 'lineUpAndWait', aircraftId: 'e' })).toEqual({ ok: true })
+      }
+      if (d?.onRunway && A(sim, 'e')?.onRunway) sawBothOnRunway = true
+      if (snap.incursions.length > 0 && !alerted) alerted = snap.incursions[0]!.message
+    }
+
+    expect(sawBothOnRunway).toBe(true) // the situation really did occur…
+    expect(alerted).toBeNull() // …and nothing was shouted about it
+    expect(sim.snapshot().departed).toBe(1)
+  })
+
+  it('still alerts when the one behind lines up before the first has moved', () => {
+    // The same two aircraft, one instruction earlier. This is the real thing: an aircraft
+    // taxiing onto a runway another is sitting on, cleared or not.
+    const sim = createGroundSim([departure('d'), departure('e', 1.5)], { guard, graph })
+    ready(sim, 'd')
+    ready(sim, 'e')
+    sim.dispatch({ type: 'lineUpAndWait', aircraftId: 'd' })
+    for (let i = 0; i < 600 && !A(sim, 'd')?.onRunway; i += 1) sim.step(0.1)
+    expect(A(sim, 'd')!.onRunway).toBe(true)
+
+    // Refused, because one aircraft is in position at a time — so the alert cannot even be
+    // reached through the menu. The detector is the backstop for the ways it can be reached:
+    // the dev sandbox, and any future path that puts two aircraft on one runway.
+    expect(sim.dispatch({ type: 'lineUpAndWait', aircraftId: 'e' })).toEqual({
+      ok: false,
+      reason: 'runway occupied',
+    })
+  })
+})

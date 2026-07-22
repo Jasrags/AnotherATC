@@ -583,6 +583,10 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       runway: rwy,
       squawk: ac.squawk,
       edct: ac.edctSec === null ? null : clockTime(ac.edctSec),
+      // Something is landing on the runway this aircraft is being sent onto. FAA 7110.65 issues
+      // the traffic with the instruction, and an aircraft told to enter an occupied runway is
+      // owed the reason.
+      landingTraffic: fleet.some((o) => o !== ac && o.rollingOut && onRunwayNow(o)),
       taxiways: taxiwaysFor(ac),
       destination:
         ac.intent === 'departure' ? (rwy ? `runway ${rwy}` : null) : ac.gate ? `gate ${ac.gate}` : null,
@@ -1171,6 +1175,9 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         id: ac.id,
         callsign: ac.callsign,
         use: runwayUse(ac),
+        // Under power and going: the same bar the line-up clearance itself uses, so the
+        // instruction and the alert cannot disagree about whether an aircraft is leaving.
+        movingAway: (ac.departing || ac.rollingOut) && ac.groundspeed > ROLLING_KT,
         airborne: ac.airborne,
         clearedToLand: ac.clearedToLand,
         finalNm: finalDistance(ac),
@@ -2308,19 +2315,32 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
           return refused('route crosses the runway — clear it to cross, not to line up')
         const cannotRoll = takeoffBlocked(ac)
         if (cannotRoll) return refused(cannotRoll)
-        // A departure actually ROLLING down the runway (moving away) does NOT block a line-up
-        // behind it — that's precisely what "line up and wait" is for (anticipated separation).
-        // But one merely *cleared and not yet moving* (departing, still at its spot), any
-        // stationary occupant, or an aircraft crossing, still blocks it: #2 must not taxi onto
-        // an occupied spot. (Line-up uses the "rolling" bar; takeoff clearance uses the stricter
-        // "rotated" bar — see clearedForTakeoff.)
+        // Traffic that is *moving away* down the runway does not block a line-up behind it —
+        // that is precisely what "line up and wait" is for. A departure rolling, and equally a
+        // landing rolling out, are both leaving: docs/atc-operations.md §6 gives the rollout as
+        // the reason the instruction exists ("the runway is not quite clear — a landing aircraft
+        // is still rolling out"). Anything *stationary* on the pavement still blocks, including
+        // a rollout that has stopped on it, because that one is not leaving at all.
+        //
+        // "On its way into position" counts as in position: an aircraft cleared to line up is
+        // committed to the runway from the clearance, not from the moment its wheels reach the
+        // centerline. Without that, two aircraft dispatched in the same tick were both accepted
+        // — neither was physically on the runway yet, and both were told to taxi onto it.
+        //
+        // (Line-up uses this "moving away" bar; the takeoff clearance keeps the stricter
+        // "rotated" one — see clearedForTakeoff. That difference is the whole value of lining
+        // up early rather than merely earlier.)
+        const leavingTheRunway = (o: Internal): boolean =>
+          (o.departing || o.rollingOut) && o.groundspeed > ROLLING_KT
         if (
           guard &&
           fleet.some(
             (o) =>
               o !== ac &&
               (onShortFinal(o) ||
-                (onRunwayNow(o) && !(o.departing && o.groundspeed > ROLLING_KT))),
+                o.lineUpWait ||
+                o.rollWhenLinedUp ||
+                (onRunwayNow(o) && !leavingTheRunway(o))),
           )
         )
           return refused('runway occupied')

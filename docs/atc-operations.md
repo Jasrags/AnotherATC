@@ -308,7 +308,7 @@ GATE ──── RAMP ──── GROUND ──── [hold short] ───�
 | 3 | Taxi exit → gate | ✅ Including a real Tower→Ground handoff and a pilot check-in. ❌ No Ramp |
 | 4 | Vehicles | ❌ Nothing. No vehicles exist at all |
 | 5 | Runway crossing (Ground) | ✅ Ground only — see `docs/atc-runway-crossing.md` §8 |
-| 6 | Line up and wait | ✅ ❌ No 90-second query; "hold position" at the line is still a disabled placeholder |
+| 6 | Line up and wait | ✅ ❌ No 90-second query; "hold position" at the line is still a disabled placeholder. Lining up behind a landing rollout — the setup described above — now works, with the traffic issued alongside |
 | 7 | Takeoff clearance | ✅ Gated on runway-clear + wake. ❌ No wind, no initial heading, no cancel-before-V1 |
 | 8 | Landing clearance | ✅ Gated on runway-clear. ❌ No wind, no traffic advisory, no pilot check-in with intentions |
 | 9 | Go-around | ✅ Both pilot- and controller-initiated, and transmitted differently. ⚠️ Stub re-establish at the 4 nm fix — no runway heading, no climb, no resequencing |
