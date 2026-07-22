@@ -194,8 +194,11 @@ export interface GroundSimOptions {
 // here is the part that is not the field's: the compliance window and what a miss costs are
 // flow-management rules, the same at every airport the flow system touches.
 /** How early, and how late (s), a takeoff clearance still meets the slot. Narrow on purpose:
- *  a window wide enough to hit by accident is not a constraint. */
-const EDCT_EARLY_SEC = 120
+ *  a window wide enough to hit by accident is not a constraint. `EARLY` is exported because a
+ *  UI counting down to the window has to count to the same instant the sim starts accepting the
+ *  clearance — restating the number there would let a countdown reach zero on a button that is
+ *  still refused. */
+export const EDCT_EARLY_SEC = 120
 const EDCT_LATE_SEC = 120
 /** A missed slot is re-issued this far out (s) — the negotiation, as a penalty. */
 const EDCT_PENALTY_MIN_SEC = 6 * 60

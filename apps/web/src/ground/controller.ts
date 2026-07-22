@@ -5,6 +5,7 @@ import {
   buildTaxiGraph,
   createAirportGame,
   createGroundSim,
+  EDCT_EARLY_SEC,
   findRunway,
   APPROACH_SPEED_KT,
 } from '@anotheratc/sim'
@@ -70,11 +71,6 @@ export function trafficLevelFor(rate: number): (typeof TRAFFIC_LEVELS)[number] |
  * Its own stream, so turning it on does not shift the spawner's traffic by a single aircraft.
  */
 const READBACK = { errorRate: 0.15, seed: 7919 }
-
-/** How early a slot may be used, mirrored from the sim's own window so the strip's countdown
- *  reaches zero exactly when the takeoff clearance starts being accepted. The sim is the
- *  authority; this is the display's copy of one number, not a second rule. */
-const EDCT_WINDOW_SEC = 120
 
 /** What a flight strip shows — deliberately excludes fast-changing fields (position,
  *  speed) so the strip bay only re-renders when phase or selection changes. */
@@ -481,7 +477,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
         wakeHoldSec: a.wakeHoldSec,
         awaitingSec: a.awaitingSec,
         edctSec: a.edctSec,
-        edctInSec: a.edctSec === null ? 0 : Math.ceil(a.edctSec - EDCT_WINDOW_SEC - simSnap.time),
+        edctInSec: a.edctSec === null ? 0 : Math.ceil(a.edctSec - EDCT_EARLY_SEC - simSnap.time),
         services: a.services,
         serviceSec: a.serviceSec,
       })),

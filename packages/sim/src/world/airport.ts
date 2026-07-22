@@ -182,7 +182,11 @@ export function createAirportGame(airport: Airport, seed = 1, runwayIdent?: stri
     spawn,
     destinations,
     servicing: airport.servicing,
-    ...(airport.slots ? { slots: { ...airport.slots, seed } } : {}),
+    // Its own sub-seed, not the game's: `createRng` is seed-determined, so handing two streams
+    // the same integer makes them produce the same sequence call for call — which would tie
+    // which flights get slots to what the spawner happened to draw. The initial-identity stream
+    // above is salted for the same reason.
+    ...(airport.slots ? { slots: { ...airport.slots, seed: seed + 7717 } } : {}),
     runway,
     stands: buildStands(airport.surface),
   }

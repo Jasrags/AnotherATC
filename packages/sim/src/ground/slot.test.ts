@@ -208,3 +208,113 @@ describe('a slot worked end to end, on the real field', () => {
     expect(sim.snapshot().departed).toBe(1)
   })
 })
+
+describe('a slot-holding departure is in everyone else\'s way', () => {
+  const graph = buildTaxiGraph(KSAN.surface)
+  const guard = buildRunwayGuard(KSAN.surface)
+
+  /** Two departures off two stands, both taxied to the runway and handed to Tower. */
+  function twoAtTheRunway(opts: GroundSimOptions) {
+    const game = createAirportGame(KSAN, 1)
+    const gates = KSAN.fleets[0]!.gates
+    const mk = (id: string, i: number) => {
+      const slot = gates[i]!
+      return {
+        id, callsign: id.toUpperCase(), type: 'B738', wake: 'M' as const,
+        path: [slot.point], targetSpeed: 0,
+        ...(slot.headingDeg !== undefined ? { heading: slot.headingDeg } : {}),
+        intent: 'departure' as const, gate: slot.ref, goalPoint: game.runway.departureStart,
+      }
+    }
+    const sim = createGroundSim([mk('one', 0), mk('two', 8)], {
+      graph, guard, runway: game.runway, stands: game.stands, ...opts,
+    })
+    const A = (id: string) => sim.snapshot().aircraft.find((a) => a.id === id)!
+    for (const id of ['one', 'two']) {
+      sim.dispatch({ type: 'clearance', aircraftId: id })
+      sim.dispatch({ type: 'pushback', aircraftId: id })
+    }
+    for (let i = 0; i < 3000 && ['one', 'two'].some((id) => A(id).status === 'pushback'); i += 1) sim.step(0.1)
+    for (const id of ['one', 'two']) sim.dispatch({ type: 'taxiToGoal', aircraftId: id })
+    // Only the first reaches the line: the second queues *behind* it, which is the whole shape
+    // of a departure queue and the reason a hold at the runway costs everyone.
+    for (let i = 0; i < 40000 && A('one').status !== 'holdShort'; i += 1) sim.step(0.1)
+    expect(sim.dispatch({ type: 'contactTower', aircraftId: 'one' })).toEqual({ ok: true })
+
+    /** Bring the second aircraft up to the line and onto Tower's frequency, once there is room. */
+    const advanceSecond = () => {
+      for (let i = 0; i < 40000 && A('two').status !== 'holdShort'; i += 1) sim.step(0.1)
+      expect(sim.dispatch({ type: 'contactTower', aircraftId: 'two' })).toEqual({ ok: true })
+    }
+    return { sim, A, advanceSecond }
+  }
+
+  it('blocks the aircraft behind it while it sits on the runway waiting for its window', () => {
+    // The cost the mechanic is *for*: an aircraft ready to go, on the runway, holding a slot,
+    // with the whole departure queue stopped behind it. If the runway gates did not see it the
+    // hold would be free, and a free hold is not a constraint.
+    const { sim, A, advanceSecond } = twoAtTheRunway({ slots: { rate: 1, seed: 5, ...LEAD } })
+    expect(A('one').edctSec).not.toBeNull()
+    expect(sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'one' }).ok).toBe(false) // its window
+    expect(sim.dispatch({ type: 'lineUpAndWait', aircraftId: 'one' })).toEqual({ ok: true })
+    advanceSecond()
+
+    expect(sim.dispatch({ type: 'lineUpAndWait', aircraftId: 'two' })).toEqual({
+      ok: false,
+      reason: 'runway occupied',
+    })
+    const res = sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'two' })
+    expect(res).toEqual({ ok: false, reason: 'runway occupied' })
+    // …and the runway gate answers before the slot does, so the reason names the thing the
+    // controller can actually act on rather than a clock nobody can move.
+    expect(A('two').onRunway).toBe(false)
+  })
+
+  it('makes the aircraft behind miss its own slot — the delay cascades', () => {
+    // Not contrived: this fell out of running two ordinary departures. The first holds the
+    // runway for its window, the second is stuck behind it, and by the time the runway and the
+    // wake interval are clear the second has blown a window nobody could have made it hit.
+    // "A natural source of cascading delay" (docs/atc-flight-cycle.md) — and the reason a slot
+    // is a thing you plan a whole field around rather than one aircraft.
+    const { sim, A, advanceSecond } = twoAtTheRunway({ slots: { rate: 1, seed: 5, ...LEAD } })
+    sim.dispatch({ type: 'lineUpAndWait', aircraftId: 'one' })
+    advanceSecond()
+    const twosSlot = A('two').edctSec!
+
+    for (let i = 0; i < 40000 && !sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'one' }).ok; i += 1) {
+      sim.step(0.1)
+    }
+    expect(sim.snapshot().slotsMet).toBe(1)
+    for (let i = 0; i < 6000 && sim.snapshot().aircraft.some((a) => a.id === 'one'); i += 1) sim.step(0.1)
+    expect(sim.snapshot().departed).toBe(1)
+    for (let i = 0; i < 3000; i += 1) sim.step(0.1) // wake interval
+
+    const res = sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'two' })
+    expect(res.ok).toBe(false)
+    expect(res).toEqual({ ok: false, reason: expect.stringMatching(/slot missed/) })
+    expect(sim.snapshot().slotsMissed).toBe(1)
+    expect(A('two').edctSec).toBeGreaterThan(twosSlot) // re-issued, and it waits again
+
+    // …and the new one is makeable, which is what stops a cascade being a dead end.
+    for (let i = 0; i < 40000 && !sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'two' }).ok; i += 1) {
+      sim.step(0.1)
+    }
+    expect(sim.snapshot().slotsMet).toBe(2)
+  })
+
+  it('does not let a slot stop an arrival landing over the field', () => {
+    // A slot is a departure's constraint. An aircraft holding one must never be a reason an
+    // arrival cannot be worked — it holds short or lines up, and the landing traffic is the
+    // runway's own business.
+    const { sim } = twoAtTheRunway({ slots: { rate: 1, seed: 5, ...LEAD } })
+    sim.dispatch({ type: 'lineUpAndWait', aircraftId: 'one' }) // holding on the runway for it
+    const game = createAirportGame(KSAN, 1)
+    sim.add({
+      id: 'arr', callsign: 'ARR1', type: 'B738', wake: 'M',
+      path: [game.spawn.approach.fix, game.spawn.approach.threshold],
+      targetSpeed: 140, airborne: true, intent: 'arrival',
+      goalPoint: KSAN.fleets[0]!.gates[2]!.point, gate: KSAN.fleets[0]!.gates[2]!.ref,
+    })
+    expect(sim.dispatch({ type: 'clearedToLand', aircraftId: 'arr' })).toEqual({ ok: true })
+  })
+})
