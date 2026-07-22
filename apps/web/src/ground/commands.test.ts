@@ -25,6 +25,7 @@ function strip(over: Partial<StripItem> = {}): StripItem {
     finalNm: 0,
     via: [],
     giveWayTo: null,
+    lineUpBehind: null,
     incursion: false,
     expedite: false,
     canExpedite: true,
@@ -92,6 +93,7 @@ describe('commandsFor (strip state machine)', () => {
       strip({ status: 'holdShort', controlledBy: 'tower', holdingForTakeoff: true }),
       [],
     )
+    // No traffic at all, so nothing to be behind: the conditional is not offered.
     expect(labels(cmds)).toEqual(['Line up and wait', 'Cleared for takeoff', 'Hold position'])
     const luaw = cmds[0]!.action
     if (luaw.kind === 'run') luaw.run()
@@ -553,8 +555,11 @@ describe('commandsFor — Tower arrivals', () => {
     const inbound = strip({ id: 'b', callsign: 'UAL2', status: 'landing', controlledBy: 'tower', intent: 'arrival', altitude: 300, finalNm: 1, onShortFinal: true })
     const dep = strip({ status: 'holdShort', controlledBy: 'tower', holdingForTakeoff: true })
     const cmds = commandsFor(controller, dep, [inbound])
+    // …and the conditional appears in its place: a runway you cannot have *now* is exactly the
+    // situation "behind the landing traffic, line up and wait" is for.
     expect(labels(cmds)).toEqual([
       'Line up and wait — runway busy',
+      'Line up and wait behind…',
       'Cleared for takeoff — runway busy',
       'Hold position',
     ])
@@ -565,7 +570,12 @@ describe('commandsFor — Tower arrivals', () => {
     const inbound = strip({ id: 'b', callsign: 'UAL2', status: 'landing', controlledBy: 'tower', intent: 'arrival', altitude: 1200, finalNm: 3.8 })
     const dep = strip({ status: 'holdShort', controlledBy: 'tower', holdingForTakeoff: true })
     const cmds = commandsFor(controller, dep, [inbound])
-    expect(labels(cmds)).toEqual(['Line up and wait', 'Cleared for takeoff', 'Hold position'])
+    expect(labels(cmds)).toEqual([
+      'Line up and wait',
+      'Line up and wait behind…',
+      'Cleared for takeoff',
+      'Hold position',
+    ])
   })
 })
 
@@ -802,5 +812,43 @@ describe('lining up behind traffic that is leaving', () => {
     const stopped = other({ status: 'lineUpWait', onRunway: true })
     const cmds = commandsFor(controller, holdingShort, [holdingShort, stopped])
     expect(cmds.find((c) => c.key === 'lineup')!.action.kind).toBe('soon')
+  })
+})
+
+describe('the conditional line-up', () => {
+  const holdingShort = strip({
+    status: 'holdShort',
+    controlledBy: 'tower',
+    intent: 'departure',
+    holdingForTakeoff: true,
+  })
+  const landing = strip({ id: 'b', callsign: 'DAL2', status: 'landing', onShortFinal: true })
+
+  it('is offered against traffic that is landing, naming it', () => {
+    const { controller, dispatched } = fakeController()
+    const cmds = commandsFor(controller, holdingShort, [holdingShort, landing])
+    const behind = cmds.find((c) => c.key === 'lineupBehind')!
+    expect(behind.label).toBe('Line up and wait behind…')
+    const items = behind.action.kind === 'submenu' ? behind.action.items : []
+    expect(items.map((i) => i.label)).toEqual(['DAL2 — landing'])
+    items[0]!.run()
+    expect(dispatched).toContainEqual({ type: 'lineUpAndWait', aircraftId: 'a', behind: 'b' })
+  })
+
+  it('is not offered when nothing is landing to be behind', () => {
+    const { controller } = fakeController()
+    const taxiing = strip({ id: 'b', callsign: 'DAL2', status: 'taxi' })
+    const cmds = commandsFor(controller, holdingShort, [holdingShort, taxiing])
+    expect(cmds.find((c) => c.key === 'lineupBehind')).toBeUndefined()
+  })
+
+  it('says what it is waiting for once it has been issued, instead of offering it again', () => {
+    const { controller } = fakeController()
+    const armed = strip({ ...holdingShort, lineUpBehind: 'DAL2' })
+    const cmds = commandsFor(controller, armed, [armed, landing])
+    expect(cmds.find((c) => c.key === 'lineupBehind')).toBeUndefined()
+    expect(cmds.find((c) => c.key === 'lineup')!.label).toBe('Lining up behind DAL2 — issued')
+    // …and "hold short" is the way to take it back, which is already on the menu.
+    expect(cmds.find((c) => c.key === 'holdshort')).toBeDefined()
   })
 })

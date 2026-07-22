@@ -94,6 +94,8 @@ export interface PhraseContext {
   /** An aircraft is landing on this runway right now — issued with a line-up, which is the one
    *  instruction that sends an aircraft onto a runway something else is still using. */
   landingTraffic: boolean
+  /** Callsign this line-up is *conditional* on, or null for an ordinary one. */
+  lineUpBehind: string | null
   /** Named taxiways of the current route, in order. */
   taxiways: readonly string[]
   /** Where the clearance ends, already worded: "runway 27", "gate 39". */
@@ -208,6 +210,14 @@ export function phraseFor(cmd: GroundCommand, ctx: PhraseContext): Exchange | nu
       return say(`give way to ${traffic}`, `Give way to ${traffic}`)
     }
     case 'lineUpAndWait': {
+      // Conditional: the ICAO sandwich (Doc 4444) — the condition is stated *before* the
+      // clearance and repeated *after* it, so it cannot be heard as an unconditional line-up
+      // by an aircraft that misses the first three words. The read-back repeats both, which is
+      // the whole safety case for permitting a conditional clearance at all.
+      if (cmd.behind !== undefined && ctx.lineUpBehind) {
+        const behind = `behind the landing ${ctx.lineUpBehind}`
+        return say(`${behind}, ${rwy}, line up and wait, behind`, `${cap(behind)}, ${rwy}, line up and wait, behind`)
+      }
       // The traffic rides on the instruction, not on a separate call: it is the reason this
       // clearance is safe, and a pilot entering a runway hears the two together or not at all.
       const traffic = ctx.landingTraffic ? `, traffic landing ${rwy}` : ''

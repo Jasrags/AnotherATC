@@ -213,6 +213,11 @@ export function StripBay({ controller }: { controller: GroundController }) {
                 )}
                 {a.via.length > 0 && <div className="strip-route">VIA {a.via.join(' · ')}</div>}
                 {a.giveWayTo && <div className="strip-giveway">◁ GIVE WAY {a.giveWayTo}</div>}
+                {/* A clearance issued and not yet acted on — the one thing on a strip that is
+                    true of the future rather than the present. */}
+                {a.lineUpBehind && (
+                  <div className="strip-conditional">⧗ LUAW BEHIND {a.lineUpBehind}</div>
+                )}
                 {a.waitingForStand && (
                   <div className="strip-giveway">⧗ GATE {a.waitingForStand} OCCUPIED</div>
                 )}

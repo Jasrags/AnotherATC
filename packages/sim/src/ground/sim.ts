@@ -407,6 +407,10 @@ interface Internal
   departing: boolean
   /** Lined up on the runway centerline awaiting takeoff clearance (Tower's "line up and wait"). */
   lineUpWait: boolean
+  /** Id of the landing aircraft a *conditional* line-up is waiting for, or null. The clearance
+   *  is issued now and applied later, so this is a commitment the controller has made and the
+   *  sim has not yet acted on — see {@link resolveConditionalLineUp}. */
+  lineUpBehind: string | null
   /** Flying the final approach (altitude > 0, not yet touched down). */
   airborne: boolean
   /** Holds a landing clearance — will touch down rather than go around at the threshold. */
@@ -587,6 +591,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       // the traffic with the instruction, and an aircraft told to enter an occupied runway is
       // owed the reason.
       landingTraffic: fleet.some((o) => o !== ac && o.rollingOut && onRunwayNow(o)),
+      lineUpBehind: ac.lineUpBehind ? (find(ac.lineUpBehind)?.callsign ?? null) : null,
       taxiways: taxiwaysFor(ac),
       destination:
         ac.intent === 'departure' ? (rwy ? `runway ${rwy}` : null) : ac.gate ? `gate ${ac.gate}` : null,
@@ -807,6 +812,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       squawk: null,
       departing: false,
       lineUpWait: false,
+      lineUpBehind: null,
       airborne,
       clearedToLand: false,
       rollingOut: false,
@@ -1053,6 +1059,43 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
    *  while anyone occupies its surface or is committed on short final above it. */
   function blocksRunway(ac: Internal): boolean {
     return occupiesForTakeoff(ac) || onShortFinal(ac)
+  }
+
+  /**
+   * Whether the runway is available for `ac` to line up on *right now*.
+   *
+   * Traffic that is moving away down the runway does not block a line-up behind it — that is
+   * precisely what "line up and wait" is for. A departure rolling, and equally a landing rolling
+   * out, are both leaving: docs/atc-operations.md §6 gives the rollout as the reason the
+   * instruction exists ("the runway is not quite clear — a landing aircraft is still rolling
+   * out"). Anything *stationary* on the pavement still blocks, including a rollout that has
+   * stopped on it, because that one is not leaving at all.
+   *
+   * "On its way into position" counts as in position: an aircraft cleared to line up is
+   * committed to the runway from the clearance, not from the moment its wheels reach the
+   * centerline. Without that, two aircraft dispatched in the same tick were both accepted —
+   * neither was physically on the runway yet, and both were told to taxi onto it.
+   *
+   * One predicate, two callers: the clearance asks it, and a conditional line-up asks it again
+   * at the moment its condition comes true. They must not be able to disagree about the same
+   * runway — the whole hazard of a conditional clearance is the gap between issuing and acting.
+   *
+   * (Line-up uses this "moving away" bar; the takeoff clearance keeps the stricter "rotated"
+   * one — see clearedForTakeoff. That difference is the whole value of lining up early rather
+   * than merely earlier.)
+   */
+  function canLineUpNow(ac: Internal): boolean {
+    if (!guard) return true
+    const leavingTheRunway = (o: Internal): boolean =>
+      (o.departing || o.rollingOut) && o.groundspeed > ROLLING_KT
+    return !fleet.some(
+      (o) =>
+        o !== ac &&
+        (onShortFinal(o) ||
+          o.lineUpWait ||
+          o.rollWhenLinedUp ||
+          (onRunwayNow(o) && !leavingTheRunway(o))),
+    )
   }
 
   /**
@@ -2217,6 +2260,9 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       }
       case 'holdShort': {
         if (onRunwayNow(ac)) return refused('already on the runway — too late to hold short')
+        // A conditional line-up is a clearance the aircraft has not acted on yet, so this is
+        // exactly the instruction that takes it back — the same way it takes back a crossing.
+        ac.lineUpBehind = null
         if (!canHoldShortNow(ac)) return refused('no runway ahead to hold short of')
         // Already stopping at the line: this is a confirmation, and the answer to "ready to
         // cross" when the answer is no. Nothing to change — saying it *is* the instruction.
@@ -2315,6 +2361,19 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
           return refused('route crosses the runway — clear it to cross, not to line up')
         const cannotRoll = takeoffBlocked(ac)
         if (cannotRoll) return refused(cannotRoll)
+        // Conditional: "behind the landing 737, line up and wait, behind". Nothing happens now.
+        // The runway gate below is deliberately *not* applied at issue — the runway is occupied,
+        // that is the entire premise — and is applied instead at the moment the condition comes
+        // true, against the situation as it is then.
+        if (command.behind !== undefined) {
+          const traffic = find(command.behind)
+          if (!traffic || traffic === ac) return refused('unknown traffic')
+          if (traffic.intent !== 'arrival' || !traffic.airborne || !traffic.clearedToLand) {
+            return refused('that traffic is not cleared to land')
+          }
+          ac.lineUpBehind = traffic.id
+          return ACCEPTED
+        }
         // Traffic that is *moving away* down the runway does not block a line-up behind it —
         // that is precisely what "line up and wait" is for. A departure rolling, and equally a
         // landing rolling out, are both leaving: docs/atc-operations.md §6 gives the rollout as
@@ -2330,20 +2389,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         // (Line-up uses this "moving away" bar; the takeoff clearance keeps the stricter
         // "rotated" one — see clearedForTakeoff. That difference is the whole value of lining
         // up early rather than merely earlier.)
-        const leavingTheRunway = (o: Internal): boolean =>
-          (o.departing || o.rollingOut) && o.groundspeed > ROLLING_KT
-        if (
-          guard &&
-          fleet.some(
-            (o) =>
-              o !== ac &&
-              (onShortFinal(o) ||
-                o.lineUpWait ||
-                o.rollWhenLinedUp ||
-                (onRunwayNow(o) && !leavingTheRunway(o))),
-          )
-        )
-          return refused('runway occupied')
+        if (!canLineUpNow(ac)) return refused('runway occupied')
         enterRunway(ac)
         return ACCEPTED
       }
@@ -2632,6 +2678,59 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     checkIn(ac)
   }
 
+  /**
+   * Apply, or kill, a conditional line-up ("behind the landing 737, line up and wait, behind").
+   *
+   * The clearance was issued against a situation that had not happened yet, so this is where the
+   * sim finds out whether it ever does. Three outcomes, and the two that are not "line up" are
+   * the reason conditional clearances are treated carefully in the real world:
+   *
+   * - **The traffic stops being a landing aircraft** — it goes around, or leaves the sim. The
+   *   condition can never be met by *that* aircraft, and quietly re-pointing it at the next one
+   *   is how a conditional clearance kills people. It is cancelled, out loud.
+   * - **The runway is not usable when the moment comes** — someone else is on it. The clearance
+   *   was for a runway with one aircraft leaving it, which is not the runway this now is, so it
+   *   is cancelled rather than held open for a situation nobody cleared.
+   * - Otherwise the aircraft lines up on its own and says so, because the controller issued this
+   *   some time ago and is not watching this one aircraft.
+   */
+  function resolveConditionalLineUp(ac: Internal): void {
+    if (ac.lineUpBehind === null) return
+    const traffic = find(ac.lineUpBehind)
+    const cancel = (): void => {
+      ac.lineUpBehind = null
+      const rwy = runwayIdent()
+      const where = rwy ? ` runway ${rwy}` : ''
+      transmit('controller', ac.controlledBy, ac, `${ac.callsign}, cancel line up and wait, hold short of${where}.`)
+      transmit('pilot', ac.controlledBy, ac, `Holding short of${where}, ${ac.callsign}.`)
+    }
+    // Gone, or no longer landing: a go-around voids the landing clearance, which is exactly the
+    // fact that makes "the landing traffic" stop being the landing traffic.
+    if (!traffic || (traffic.airborne && !traffic.clearedToLand)) return cancel()
+    if (traffic.airborne) return // still on final — the condition has not come true yet
+    if (!hasPassed(ac, traffic)) return
+    // Behind it, and it is leaving. Everything else about the runway still has to hold.
+    if (!canLineUpNow(ac)) return cancel()
+    enterRunway(ac)
+    ac.lineUpBehind = null
+    const rwy = runwayIdent()
+    transmit('pilot', ac.controlledBy, ac, `Lining up${rwy ? ` runway ${rwy}` : ''}, ${ac.callsign}.`)
+  }
+
+  /**
+   * Whether `traffic` has gone past the point `ac` would enter the runway at — "behind" meaning
+   * behind, not merely "has landed". Measured along the runway from the landing threshold, which
+   * is the only ordering that means anything on a strip of pavement; without a runway
+   * configuration there is no threshold to measure from, so it falls back to the strictest
+   * reading, which is that the traffic has left the runway altogether.
+   */
+  function hasPassed(ac: Internal, traffic: Internal): boolean {
+    const entry = nearestRunwayPoint([ac.x, ac.y])
+    if (!runway || !entry) return !onRunwayNow(traffic)
+    const from = runway.threshold
+    return alongRunway(from, [traffic.x, traffic.y]) > alongRunway(from, entry)
+  }
+
   /** Post-motion airborne bookkeeping: descend the final, touch down or go around at the
    *  threshold, and hand a slowed rollout over to Ground. */
   function resolveApproach(ac: Internal): void {
@@ -2841,6 +2940,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       for (const ac of fleet) resolveApproach(ac)
       for (const ac of fleet) resolveCrossingHandoff(ac)
       for (const ac of fleet) resolveLineUp(ac)
+      for (const ac of fleet) resolveConditionalLineUp(ac)
       for (const id of resolveGoals(dt)) {
         const i = fleet.findIndex((a) => a.id === id)
         if (i >= 0) fleet.splice(i, 1)
@@ -2904,6 +3004,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
           canHoldShort: canHoldShortNow(ac),
           canExpedite: canExpedite(ac),
           giveWayTo: ac.giveWayTo ? (find(ac.giveWayTo)?.callsign ?? null) : null,
+          lineUpBehind: ac.lineUpBehind ? (find(ac.lineUpBehind)?.callsign ?? null) : null,
           waitingForStand: ac.gate !== null && standHoldCap(ac) === 0 ? ac.gate : null,
           gateBlocked:
             ac.intent === 'arrival' &&

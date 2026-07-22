@@ -587,6 +587,16 @@ body {
   color: #ff8a5c;
 }
 
+/* An armed conditional clearance: issued, not yet happened. The same amber as the slot, because
+   both are commitments the controller has made and the sim has not acted on. */
+.strip-conditional {
+  margin-top: 5px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #d8a648;
+}
+
 /* The wheels-up slot: a promise with a clock on it. Amber while it is still ahead — this is a
    constraint you are working toward — and green once the window is open and the aircraft may go. */
 .strip-edct {

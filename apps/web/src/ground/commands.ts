@@ -228,14 +228,39 @@ function phaseCommandsFor(controller: GroundController, item: StripItem, aircraf
       // Named for what it is when there is something to line up behind: an aircraft being sent
       // onto an occupied runway should be able to read why from the button.
       const behindLanding = aircraft.some((o) => o.id !== id && o.status === 'rollout' && o.onRunway)
-      const lineup: MenuCommand = runwayBlockedForLineup
-        ? { key: 'lineup', label: 'Line up and wait — runway busy', action: { kind: 'soon' } }
-        : {
-            key: 'lineup',
-            label: behindLanding ? 'Line up and wait — behind landing traffic' : 'Line up and wait',
-            action: { kind: 'run', run: () => send({ type: 'lineUpAndWait', aircraftId: id }) },
-          }
-      return [lineup, takeoff, holdShort(controller, item)]
+      const lineup: MenuCommand = item.lineUpBehind
+        ? // Already issued, conditionally. Saying what it is waiting for beats offering it
+          // again: the clearance exists, it simply has not happened yet, and "hold short"
+          // below is how it is taken back.
+          { key: 'lineup', label: `Lining up behind ${item.lineUpBehind} — issued`, action: { kind: 'soon' } }
+        : runwayBlockedForLineup
+          ? { key: 'lineup', label: 'Line up and wait — runway busy', action: { kind: 'soon' } }
+          : {
+              key: 'lineup',
+              label: behindLanding ? 'Line up and wait — behind landing traffic' : 'Line up and wait',
+              action: { kind: 'run', run: () => send({ type: 'lineUpAndWait', aircraftId: id }) },
+            }
+
+      // "Behind the landing 737, line up and wait, behind" — offered only against traffic that
+      // is actually landing, because that is the only condition this clearance can name and the
+      // only one the sim will accept. Not offered once one is armed: a second would replace a
+      // commitment already made, silently.
+      const inbound = aircraft.filter((o) => o.id !== id && o.status === 'landing')
+      const lineupBehind: MenuCommand | null =
+        item.lineUpBehind || inbound.length === 0
+          ? null
+          : {
+              key: 'lineupBehind',
+              label: 'Line up and wait behind…',
+              action: {
+                kind: 'submenu',
+                items: inbound.map((o) => ({
+                  label: `${o.callsign} — landing`,
+                  run: () => send({ type: 'lineUpAndWait', aircraftId: id, behind: o.id }),
+                })),
+              },
+            }
+      return [lineup, ...(lineupBehind ? [lineupBehind] : []), takeoff, holdShort(controller, item)]
     }
     // Tower-owned and no longer holding short: a crossing it cleared and now has to give back.
     // Offered while the aircraft is still on the runway too — that is the real "when clear of

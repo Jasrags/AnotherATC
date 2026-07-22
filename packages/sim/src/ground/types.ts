@@ -52,7 +52,11 @@ export type GroundCommand =
   | { type: 'holdShort'; aircraftId: string }
   | { type: 'giveWay'; aircraftId: string; toId: string }
   | { type: 'contactTower'; aircraftId: string }
-  | { type: 'lineUpAndWait'; aircraftId: string }
+  /** "Line up and wait", optionally *conditionally*: `behind` names the landing aircraft this
+   *  clearance waits for. ICAO phraseology (Doc 4444), deliberately not FAA — the US issues
+   *  explicit clearances only. Armed at issue and applied when the named traffic has landed and
+   *  passed the holding point; cancelled if it stops being a landing aircraft. */
+  | { type: 'lineUpAndWait'; aircraftId: string; behind?: string }
   | { type: 'clearedForTakeoff'; aircraftId: string }
   | { type: 'clearedToLand'; aircraftId: string }
   /** "Go around" — the controller's call, not the pilot's. The lever the runway-incursion
@@ -194,6 +198,10 @@ export interface GroundAircraft {
   hotspot: string | null
   /** Callsign of the traffic this aircraft has been told to give way to, or null. */
   giveWayTo: string | null
+  /** Callsign of the landing traffic this aircraft is holding a *conditional* line-up behind,
+   *  or null. Set from the clearance and cleared when it is applied or cancelled — so a strip
+   *  showing it is showing a clearance that has been issued but has not happened yet. */
+  lineUpBehind: string | null
   /** Designator of the stand this aircraft is holding for because someone is still on it, or
    *  null. It has a good clearance — it just cannot have the gate yet. */
   waitingForStand: string | null

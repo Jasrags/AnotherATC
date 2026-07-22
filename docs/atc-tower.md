@@ -149,6 +149,19 @@ to a **runway-clear predicate** consulted by every clearance:
 - The incursion detector knows about this pair: a rolling departure with one lined up behind it
   is **anticipated separation, not an incursion**. Alerting on it meant the game issued an
   instruction and then shouted about the result.
+- **Conditional line-up** (`lineUpAndWait` with `behind`) — "behind the landing 737, line up
+  runway 27 and wait, behind". ICAO phraseology (Doc 4444) and deliberately *not* FAA, which
+  issues explicit clearances only; it is here for the mechanic rather than the realism. The
+  condition brackets the clearance in both the instruction and the read-back, so it cannot be
+  heard as an unconditional one. Armed at issue, applied when the named traffic has landed *and
+  passed the holding point* — measured along the runway from the threshold, because "behind"
+  means behind and not merely "has landed".
+
+  It is **cancelled, out loud**, when the traffic stops being a landing aircraft (a go-around
+  voids the landing clearance, which is exactly that fact) or leaves the sim, and when the
+  runway is not usable at the moment the condition comes true. Never silently re-pointed at the
+  next arrival: "the landing 737" is one aircraft. `holdShort` takes it back, the same way it
+  takes back a crossing the aircraft has not acted on.
 - `clearedToLand` refused (or flagged as a conflict alert) if a departure occupies the runway
   or is lined up and waiting — the classic "go around, traffic on the runway."
 - An aircraft in **LUAW** counts as occupying, so you can't land over it.
