@@ -319,6 +319,20 @@ describe('tower — departures', () => {
     expect(sim.snapshot().aircraft).toHaveLength(0)
   })
 
+  it('refuses to hand a lined-up departure back to Ground — it is committed to the runway', () => {
+    // The crossing handback must not become a way to strand an aircraft on the runway on the
+    // wrong frequency. A line-up is Tower's until it is airborne.
+    const sim = createGroundSim([departure('d')], { guard })
+    taxiToHoldShort(sim)
+    expect(sim.dispatch({ type: 'contactTower', aircraftId: 'd' }).ok).toBe(true)
+    expect(sim.dispatch({ type: 'lineUpAndWait', aircraftId: 'd' }).ok).toBe(true)
+    for (let i = 0; i < 300; i += 1) sim.step(0.1)
+
+    const r = sim.dispatch({ type: 'contactGround', aircraftId: 'd' })
+    expect(r.ok).toBe(false)
+    expect(A(sim, 'd').controlledBy).toBe('tower')
+  })
+
   it('never turns a crossing into a departure, whoever runs it', () => {
     // A departure whose route continues past the runway to the far side — a crossing, not a
     // takeoff. It may now be handed to Tower *for the crossing* (docs/atc-runway-crossing.md

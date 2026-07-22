@@ -436,6 +436,17 @@ is switched on.
   follow the stand's painted lead-in line (`ground/stands.ts`). Residual: KSAN Terminal 1 has no
   lines in OSM, so its 19 stands run on a derived straight lead-in (drawn dashed to say so)
 - ⬜ Surface redrawn every frame; consider offscreen-canvas caching if perf needs it
+- ⬜ **`goalPoint` and the held route can disagree about what an aircraft is doing.**
+  `holdingForTakeoff` reads the *goal* (is the destination on the runway?); `heldRouteCrosses`
+  reads the *current clearance* (does the held route end off the pavement?). They answer
+  different questions and usually agree, but the dev sandbox hands every spawn the runway as its
+  goal, so a dev-spawned aircraft manually routed across the runway looks like a departure: it is
+  never offered the crossing vocabulary, and `lineUpAndWait`/`clearedForTakeoff` would accept it
+  and abandon its real route. Production spawns set both consistently, so this is dev-tool-only
+  today. Tightening the clearance guards to consult the held route as well was tried and reverted
+  — it fails ~30 tests whose hand-authored fixtures draw a departure's path past the runway, and
+  reconciling goal-vs-route across those is a bigger change than it belongs inside. _Fix with the
+  fixtures, not around them._
 - ⬜ Scenario stitches arbitrary long taxiways for demo traffic — replace with real gate→runway flows
 - ℹ️ Headless screenshots show T+00:00 (Chrome virtual-time doesn't drive rAF) — motion is fine live
 

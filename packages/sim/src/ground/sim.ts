@@ -497,11 +497,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       // runway is departing, however far its route happens to be drawn past it — then the
       // route, then a crossing already under way. `rollingOut` is the landing case, which words
       // itself differently.
-      crossing:
-        !ac.rollingOut &&
-        !ac.airborne &&
-        !holdingForTakeoff(ac) &&
-        (heldRouteCrosses(ac) || ac.runwayAuth !== null),
+      crossing: onCrossing(ac),
       onRunway: onRunwayNow(ac),
     }
   }
@@ -551,18 +547,34 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     return true
   }
 
-  /** Log the exchange for a command that was just applied. `position` is who *issued* it —
-   *  captured before the command ran, since a handoff changes the owner mid-command. */
-  function logExchange(cmd: GroundCommand, ac: Internal, position: ControllerPosition): void {
+  /** The situational facts a clearance is worded against, captured *before* it is applied.
+   *  A command that changes the very thing its phrasing describes — a handoff that ends the
+   *  crossing it is announcing — would otherwise be worded from the state it just created. */
+  function situationBefore(ac: Internal | undefined): Partial<PhraseContext> {
+    if (!ac) return {}
+    const { crossing, onRunway } = phraseContext(ac)
+    return { crossing, onRunway }
+  }
+
+  /** Log the exchange for a command that was just applied. `position` and `before` are captured
+   *  before the command ran, since a handoff changes the owner and the situation mid-command. */
+  function logExchange(
+    cmd: GroundCommand,
+    ac: Internal,
+    position: ControllerPosition,
+    before: Partial<PhraseContext>,
+  ): void {
     // The instruction is phrased from the state as issued; the read-back from the state as the
     // pilot heard it. When nothing is misheard the two are the same context.
-    const ex = phraseFor(cmd, phraseContext(ac))
+    const ex = phraseFor(cmd, { ...phraseContext(ac), ...before })
     if (!ex) return
     // A new clearance supersedes the last one — including a mishearing of it, which is now
     // beyond correcting: "say again" repeats what was said *most recently*, not a stale code.
     ac.lastClearance = cmd
     ac.misheard = null
-    const readbackText = maybeMishear(cmd, ac) ? (phraseFor(cmd, phraseContext(ac))?.readback ?? ex.readback) : ex.readback
+    const readbackText = maybeMishear(cmd, ac)
+      ? (phraseFor(cmd, { ...phraseContext(ac), ...before })?.readback ?? ex.readback)
+      : ex.readback
     transmit('controller', position, ac, ex.instruction)
     transmit('pilot', position, ac, readbackText)
   }
@@ -865,9 +877,27 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
    */
   function heldRouteCrosses(ac: Internal): boolean {
     if (!ac.held || ac.held.length < 2) return false
-    if (!guard) return true // no runway model → nothing to be on the far side of
+    // No runway model → no runways, so nothing is a crossing. (`plan` never splits a route
+    // without a guard either, so this branch is belt and braces.)
+    if (!guard) return false
     const end = ac.held[ac.held.length - 1]
     return end !== undefined && !onRunway(end, guard)
+  }
+
+  /**
+   * This surface aircraft is on a crossing: holding short with a far side to reach, part-way
+   * across, or across and waiting to be handed back.
+   *
+   * The last of those is why `controlledBy` is in here. Once an aircraft is off the pavement its
+   * held route is spent and its crossing authority has been dropped, so nothing about its own
+   * state still says "crossing" — but Local Control does not hold a *taxiing* aircraft for any
+   * other reason, so Tower still owning it is the surviving evidence. Excludes everything
+   * committed to the runway itself, which Tower holds for a quite different reason.
+   */
+  function onCrossing(ac: Internal): boolean {
+    if (ac.airborne || ac.rollingOut || ac.lineUpWait || ac.departing || ac.rollWhenLinedUp) return false
+    if (holdingForTakeoff(ac)) return false
+    return ac.controlledBy === 'tower' || heldRouteCrosses(ac) || ac.runwayAuth !== null
   }
 
   /** What an aircraft on the runway is doing there, or null when it isn't on it. Ordered by
@@ -1727,13 +1757,14 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
   function dispatch(command: GroundCommand): DispatchResult {
     const ac = find(command.aircraftId)
     const issuedBy = ac?.controlledBy ?? 'ground'
+    const before = situationBefore(ac)
     const result = applyCommand(command)
     if (result.ok && ac) {
       if (command.type === 'sayAgain') {
         logCorrection(ac, issuedBy)
         return result
       }
-      logExchange(command, ac, issuedBy)
+      logExchange(command, ac, issuedBy, before)
       // A handoff that took effect immediately: the pilot checks in on the new frequency.
       if (command.type === 'contactTower') checkIn(ac)
       // "…contact ground" issued once already clear of the runway takes effect at once.
@@ -1835,6 +1866,10 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         return ACCEPTED
       }
       case 'crossRunway':
+        // Deliberately no `controlledBy` gate, unlike lineUpAndWait/clearedForTakeoff: a
+        // crossing is legitimately either position's to issue (docs/atc-runway-crossing.md §5),
+        // and the sim has no notion of *who* is dispatching — `issuedBy` is taken from whoever
+        // owns the aircraft. The owner is the issuer by construction, so there is nothing to gate.
         if (!ac.held || ac.held.length < 2) return refused('not holding short of a runway')
         // A clearance to cross has to have a far side to reach. Without this an aircraft cleared
         // *to* the runway would be driven onto it and parked there — see `heldRouteCrosses`.
@@ -2019,6 +2054,9 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         // gives it back once the aircraft is across. Nothing is re-routed — unlike an arrival
         // off the runway, a transit is already taxiing the clearance it was given.
         if (!ac.rollingOut) {
+          // Only a crossing. A line-up or a takeoff roll is Tower's until it is airborne, and
+          // handing one to Ground would strand it on the runway on the wrong frequency.
+          if (!onCrossing(ac)) return refused('committed to the runway — not a crossing')
           if (onRunwayNow(ac)) {
             ac.groundPending = true // still on the pavement: "when clear of the runway…"
             return ACCEPTED
@@ -2433,7 +2471,9 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
           onShortFinal: onShortFinal(ac),
           exitRef: ac.exit?.ref ?? ac.assignedExitRef,
           vacated: ac.rollingOut ? ac.vacated : false,
-          handoffPending: ac.rollingOut && ac.groundPending,
+          // Not rollout-only: a crossing arms the same handoff, and the button that reads this
+          // has to stop offering to re-issue what has already been issued.
+          handoffPending: ac.groundPending,
           conflict: ac.conflict,
           incursion: ac.incursion,
           // Derived, never stored: "expediting" *is* "the target speed is the expedite speed".

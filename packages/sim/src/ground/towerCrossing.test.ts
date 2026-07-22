@@ -185,6 +185,27 @@ describe('Tower → Ground once the crossing is complete', () => {
     expect(A(sim, 'x').controlledBy).toBe('ground')
   })
 
+  it('still says the crossing is complete, though applying it ends the crossing', () => {
+    // The instruction is worded from the state as *issued*, not the state it creates. Phrased
+    // afterwards, this aircraft is an ordinary Ground taxi and the transmission collapses to a
+    // bare "contact ground" — losing the half that says the runway is clear. Only reachable
+    // through a real dispatch: a hand-built phrase context cannot show it.
+    const sim = crossing()
+    expect(until(sim, () => A(sim, 'x').onRunway)).toBe(true)
+    expect(until(sim, () => !A(sim, 'x').onRunway)).toBe(true)
+    const before = sim.snapshot().comms.length
+    sim.dispatch({ type: 'contactGround', aircraftId: 'x' })
+    expect(sim.snapshot().comms.slice(before)[0]!.text).toMatch(/clear, contact ground/i)
+  })
+
+  it('reports the armed handoff as pending, so it is not offered twice', () => {
+    const sim = crossing()
+    expect(until(sim, () => A(sim, 'x').onRunway)).toBe(true)
+    expect(A(sim, 'x').handoffPending).toBe(false)
+    sim.dispatch({ type: 'contactGround', aircraftId: 'x' })
+    expect(A(sim, 'x').handoffPending).toBe(true)
+  })
+
   it('keeps taxiing its own clearance across the handoff — it was never re-routed', () => {
     const sim = crossing()
     expect(until(sim, () => !A(sim, 'x').onRunway)).toBe(true)
