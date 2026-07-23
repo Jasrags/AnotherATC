@@ -249,6 +249,10 @@ export interface GroundController {
   readonly dev: boolean
   selectedId(): string | null
   select(id: string | null): void
+  /** Whether the selected aircraft is committed to the runway — lined up, cleared for takeoff and
+   *  rolling into position, departing, or rolling out from a landing. A stray click-to-taxi must
+   *  not silently re-route one of these off the runway; a deliberate abort will be its own action. */
+  selectedCommittedToRunway(): boolean
   /** The active controller position (Ground or Tower). */
   position(): ControllerPosition
   /** Switch the active controller position (which strip bay is shown). */
@@ -672,6 +676,11 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
       probeState = null
     },
     selectedId: () => selected,
+    selectedCommittedToRunway: () => {
+      if (!selected) return false
+      const ac = sim.snapshot().aircraft.find((a) => a.id === selected)
+      return !!ac && (ac.status === 'departing' || ac.status === 'lineUpWait' || ac.status === 'rollout')
+    },
     select: (id) => {
       selected = id
       if (draft && draft.id !== id) draft = null // route mode is bound to its aircraft

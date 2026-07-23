@@ -367,11 +367,16 @@ export function GroundScope({ controller }: { controller: GroundController }) {
         // space looks like issuing a clearance, which is why it read as the aircraft changing
         // its mind on its own. Off the network, a click means what it means with nothing
         // selected: deselect.
-        const [wx, wy] = toWorld(view, sx, sy)
-        if (distanceToNetworkNm(controller.topology, [wx, wy]) <= clearanceRangeNm(view.scale)) {
-          controller.dispatch({ type: 'taxiTo', aircraftId: selectedId, dest: [wx, wy] })
-        } else {
-          controller.select(null)
+        // Lined up, cleared for takeoff, or rolling out: a stray click must not silently re-taxi it
+        // off the runway (and back across it). Aborting a takeoff will be its own deliberate action;
+        // here the click is ignored, so the aircraft stays committed and selected.
+        if (!controller.selectedCommittedToRunway()) {
+          const [wx, wy] = toWorld(view, sx, sy)
+          if (distanceToNetworkNm(controller.topology, [wx, wy]) <= clearanceRangeNm(view.scale)) {
+            controller.dispatch({ type: 'taxiTo', aircraftId: selectedId, dest: [wx, wy] })
+          } else {
+            controller.select(null)
+          }
         }
       } else {
         controller.select(null)

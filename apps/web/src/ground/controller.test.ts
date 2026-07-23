@@ -154,6 +154,30 @@ describe('ground controller bridge', () => {
 const KSAN_WEST = -0.6
 const KSAN_EAST = 0.6
 
+describe('a stray click cannot re-taxi a runway-committed aircraft', () => {
+  it('reports the selected aircraft as committed once cleared for takeoff, not while taxiing', () => {
+    const c = createGroundController({ dev: true })
+    c.setDevType('C172')
+    c.spawnAt([0.27, -0.05])
+    const id = c.selectedId()!
+    const A = () => c.sim.snapshot().aircraft.find((a) => a.id === id)
+    // Taxiing to hold short: not committed — a click here should still be able to re-taxi it.
+    c.sim.dispatch({ type: 'taxiTo', aircraftId: id, dest: [0.34, -0.16] })
+    for (let i = 0; i < 4000 && !A()?.holdShort; i += 1) c.sim.step(0.1)
+    expect(c.selectedCommittedToRunway()).toBe(false)
+
+    // Cleared for takeoff and lining up on the centerline: now committed. The GroundScope click
+    // handler gates click-to-taxi on this, so a stray click no longer reroutes it across its runway.
+    c.sim.dispatch({ type: 'contactTower', aircraftId: id })
+    c.sim.dispatch({ type: 'clearedForTakeoff', aircraftId: id })
+    expect(c.selectedCommittedToRunway()).toBe(true)
+  })
+
+  it('is false when nothing is selected', () => {
+    expect(createGroundController({ dev: true }).selectedCommittedToRunway()).toBe(false)
+  })
+})
+
 describe('ground controller — dev sandbox', () => {
   it('starts empty in dev mode (no seeded aircraft)', () => {
     expect(createGroundController({ dev: true }).getSnapshot().aircraft).toHaveLength(0)
