@@ -529,8 +529,10 @@ describe('lining up follows the connector onto the runway', () => {
     sim.dispatch({ type: 'lineUpAndWait', aircraftId: 'd' })
     const route = sim.routeOf('d')
 
-    // A straight cut onto the centerline is 2–3 points. Following the connector is many more:
-    // the taxi clearance's held portion is only a chord, so the curve has to come from the graph.
+    // A straight cut onto the centerline is 2–3 points; the generated fillet that turns the
+    // aircraft through onto the stripe is many more. (It used to try to follow the graph's charted
+    // connector, but almost no connector has a node planted on the centerline, so the fillet is
+    // built from the aircraft's pose and the runway direction instead — see lineUpPath.)
     expect(route.length).toBeGreaterThan(6)
     // …and no doubling back at the runway edge, which is what going on to the perpendicular
     // projection after the route had already reached the centerline used to produce.

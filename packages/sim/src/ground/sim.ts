@@ -283,32 +283,22 @@ export const APPROACH_SPEED_KT = 140
  *  exit assigned the rate is solved per rollout instead, so it arrives at the turnoff at the
  *  turnoff's speed (see runwayExits.ts). */
 const ROLLOUT_DECEL = MAX_BRAKE_KT_S
-/** How far (nm ≈ 180 ft) up the runway a lining-up aircraft rolls past the point it entered, so
- *  it finishes pointing down the runway rather than across it. */
-const LINEUP_ALIGN_NM = 0.03
-/** How close (nm ≈ 24 ft) a node must be to the centerline to count as *on* it. The runway
- *  guard's band is deliberately wider than the pavement, so "on the runway" also catches
- *  connector nodes a hundred feet off the centerline — fine for occupancy, useless for
- *  choosing where to line up. */
-const CENTERLINE_EPS_NM = 0.004
-/** How far from the line-up point a *charted* runway entry may be and still be the way onto the
- *  runway. Beyond this the graph simply has no entry node at this spot, and routing to the
- *  nearest one it does have would drive the aircraft away from the runway to reach it — on a
- *  field whose only centerline node is a mid-field turnoff, that means taxiing back down the
- *  parallel and entering half a mile behind where it was holding. Past this bound the straight
- *  move onto the stripe in front of the aircraft is both correct and what a pilot would do. */
-const LINEUP_ENTRY_MAX_NM = 0.15
-/** Extra distance (nm) a line-up may travel over a straight pull onto the centerline before its
- *  route is judged a detour and abandoned. LINEUP_ENTRY_MAX_NM bounds only the *straight-line*
- *  distance to a charted entry node; a node that close can still sit on a connector across the
- *  runway whose only graph route loops around the field and over the runway to reach it (the
- *  C3→C4→cross→B2 report). ~900 ft covers a real connector's curve; the loop was ~3,500 ft. */
-const LINEUP_MAX_DETOUR_NM = 0.15
-/** How near (nm) the aircraft's held route must come to the centerline for it to count as a real
- *  charted connector delivering onto the stripe (rather than a straight chord that merely ends on
- *  the pavement). A real connector's vertices reach the centerline within a few dozen feet; a
- *  straight synthetic crossing straddles it far wider. */
-const LINEUP_CONNECTOR_MAX_OFFSET_NM = 0.05
+/** How far ahead of the perpendicular foot the generated fillet aims, clamped to this range. A
+ *  line-up close to the stripe still needs room to arc onto it (the floor); one holding far off
+ *  must not be carried a long way down the runway to line up (the ceiling) — a real hold-short is
+ *  a plane's width off, so the ceiling only bites the artificially wide synthetic fixtures. */
+const LINEUP_FILLET_MIN_LEAD_NM = 0.025
+const LINEUP_FILLET_MAX_LEAD_NM = 0.035
+/** Length (nm) of the final straight step that pins the line-up's last segment exactly onto the
+ *  takeoff direction. Only its direction matters, so it is kept short to barely lengthen the roll-
+ *  in — a longer one carries the aircraft needlessly down the runway before it stops. */
+const LINEUP_FILLET_ALIGN_NM = 0.012
+/** Cubic-Bézier control-handle length as a fraction of the start→entry chord. ~0.4 gives a gentle,
+ *  full turn; higher bulges the curve, lower tightens it toward a straight cut. */
+const LINEUP_FILLET_TENSION = 0.4
+/** How many segments to sample the fillet into. Enough that the drawn path reads as a curve and
+ *  the aircraft's turn-rate limiter has vertices close enough to track smoothly. */
+const LINEUP_FILLET_SAMPLES = 12
 /** How close (nm) counts as reaching a gate. */
 const GATE_EPS = 0.02
 /** Seconds an arrival dwells at the gate before it clears the stand. */
@@ -1280,92 +1270,80 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
    * runway instead of turning through it.
    */
   /**
-   * The aircraft's own held route through the connector, truncated where it first reaches the
-   * runway centerline — the charted curve it taxied in on, which is where the connector's geometry
-   * is recorded. A line-up follows this rather than a straight cut onto the stripe (which kinks
-   * across the fillet), and unlike a fresh graph search it cannot loop across the runway: it is the
-   * route the aircraft is already on.
+   * A generated line-up curve: a smooth arc from where the aircraft is holding onto the runway
+   * centerline, tangent to how it is pointing at the start and to the takeoff direction at the end,
+   * so it turns *through* the fillet instead of cutting straight across it and kinking. Unlike a
+   * graph search it cannot loop across the runway (it is constructed, not searched), and unlike the
+   * charted route it does not depend on the field's taxi data having a node planted on the stripe —
+   * which most connectors do not, so a straight cut was the fallback everywhere they lack one.
    *
-   * Returns null when there is no held route, or when the held route is a straight chord that never
-   * comes near the centerline (a taxi straight to a point on the pavement leaves no curve to
-   * follow) — the projection in {@link lineUpPath} handles that case.
+   * A cubic Bézier does the work: the aircraft's heading sets the start tangent, the runway
+   * direction the end tangent, and the endpoint sits on the centerline a lead ahead of the
+   * perpendicular foot, toward the far end — so the curve arrives aligned and rolling, not crabbed.
    */
-  function connectorApproach(ac: Internal): Point[] | null {
-    const held = ac.held
-    if (!guard || !held || held.length < 2) return null
-    // Follow the connector to its closest approach to the centerline, then stop: past that the
-    // held route is heading away across the runway, and a line-up does not cross.
-    let best = 0
-    let bestOffset = Infinity
-    for (let i = 0; i < held.length; i += 1) {
-      const p = held[i]!
-      const c = nearestRunwayPoint(p)
-      const offset = c ? dist(p, c) : Infinity
-      if (offset < bestOffset - 1e-9) {
-        bestOffset = offset
-        best = i
-      } else if (offset > bestOffset + 1e-6) {
-        break
-      }
+  function filletLineUp(ac: Internal): Point[] {
+    const p0: Point = [ac.x, ac.y]
+    const base = nearestRunwayPoint(p0)
+    const far = base ? farRunwayEnd(base) : null
+    if (!base || !far) return [p0] // no runway to line up on — nothing sensible to build
+    const rlen = dist(base, far) || 1
+    const rx = (far[0] - base[0]) / rlen
+    const ry = (far[1] - base[1]) / rlen // unit vector down the takeoff direction
+    // Aim a lead ahead of the perpendicular foot so the arc has room to turn; the further the
+    // aircraft is holding off the stripe, the more room it needs, so the lead tracks that offset —
+    // clamped so it always has room and never carries the aircraft far down the runway to line up.
+    const lead = Math.min(
+      Math.max(dist(p0, base), LINEUP_FILLET_MIN_LEAD_NM),
+      LINEUP_FILLET_MAX_LEAD_NM,
+    )
+    const entry: Point = [base[0] + rx * lead, base[1] + ry * lead]
+    // Start tangent: the direction the aircraft is pointing. If that faces away from the entry (a
+    // hold-short that stopped turned round), aim straight at the entry instead of curving backwards.
+    const hr = (ac.heading * Math.PI) / 180
+    let sx = Math.sin(hr)
+    let sy = Math.cos(hr)
+    const tx = entry[0] - p0[0]
+    const ty = entry[1] - p0[1]
+    if (sx * tx + sy * ty <= 0) {
+      const tl = Math.hypot(tx, ty) || 1
+      sx = tx / tl
+      sy = ty / tl
     }
-    if (bestOffset > LINEUP_CONNECTOR_MAX_OFFSET_NM) return null
-    // Land the curve exactly on the centerline by projecting its final vertex onto the stripe —
-    // replacing it, not appending, so the connector flows into that point instead of jogging
-    // perpendicular to it (which is what kinked the line-up). The connector's own heading carries
-    // through, so the turn onto the runway stays gentle.
-    const curve = held.slice(0, best + 1)
-    const onCenterline = nearestRunwayPoint(curve[curve.length - 1]!)
-    if (onCenterline) curve[curve.length - 1] = onCenterline
-    return curve
+    const chord = dist(p0, entry)
+    const h = LINEUP_FILLET_TENSION * chord
+    const c1: Point = [p0[0] + sx * h, p0[1] + sy * h]
+    const c2: Point = [entry[0] - rx * h, entry[1] - ry * h]
+    const pts: Point[] = []
+    for (let i = 0; i <= LINEUP_FILLET_SAMPLES; i += 1) {
+      const t = i / LINEUP_FILLET_SAMPLES
+      const u = 1 - t
+      const a = u * u * u
+      const b = 3 * u * u * t
+      const c = 3 * u * t * t
+      const d = t * t * t
+      pts.push([
+        a * p0[0] + b * c1[0] + c * c2[0] + d * entry[0],
+        a * p0[1] + b * c1[1] + c * c2[1] + d * entry[1],
+      ])
+    }
+    // One short step straight down the runway so the final segment is *exactly* the takeoff
+    // direction — the sampled Bézier only approaches it — leaving the aircraft aligned rather than
+    // a few degrees crabbed when it stops. Short, so it barely adds to the line-up distance.
+    pts.push([entry[0] + rx * LINEUP_FILLET_ALIGN_NM, entry[1] + ry * LINEUP_FILLET_ALIGN_NM])
+    return pts
   }
 
-  function lineUpPath(ac: Internal, lineup: Point): Point[] {
-    const pts: Point[] = [[ac.x, ac.y]]
-    if (graph && guard) {
-      const startKey = graph.nearestNode([ac.x, ac.y])
-      // Route to a node genuinely *on the centerline* — the runway polyline's own vertices —
-      // so the path runs through the connector's geometry, which is where its curvature is
-      // recorded, and finishes on the stripe rather than at the pavement edge.
-      const entryKey = graph.nearestNodeWhere(lineup, (n) => {
-        if (dist(n, lineup) > LINEUP_ENTRY_MAX_NM) return false
-        const c = nearestRunwayPoint(n)
-        return c !== null && dist(n, c) < CENTERLINE_EPS_NM
-      })
-      const rawRoute = startKey && entryKey ? graph.route(startKey, entryKey) : []
-      // Take the charted route only when it is genuinely a short pull onto the stripe. The nearest
-      // centerline node can be within LINEUP_ENTRY_MAX_NM in a straight line yet reachable only by
-      // looping around the field and across the runway — because it sits on a connector on the far
-      // side, and driving that route takes a departure over its own active runway uncleared.
-      const straightAhead = dist([ac.x, ac.y], nearestRunwayPoint([ac.x, ac.y]) ?? lineup)
-      const detours = pathLength([[ac.x, ac.y], ...rawRoute]) > straightAhead + LINEUP_MAX_DETOUR_NM
-      // When it detours, follow the aircraft's own held route through the connector — the curve it
-      // actually taxied in on — instead of cutting straight across the fillet, which kinks onto the
-      // runway. connectorApproach is null when the held route is a straight chord with no curve to
-      // recover (a taxi straight to a runway point), and the projection below handles that.
-      const route = detours ? (connectorApproach(ac) ?? []) : rawRoute
-      for (const p of route) {
-        const last = pts[pts.length - 1]!
-        if (dist(last, p) > 1e-6) pts.push(p)
-      }
-    }
-    // Finish on the centerline. Projecting the *end of the route* rather than the aircraft's
-    // original position keeps this ahead of it: projecting from where it was holding would
-    // double back to a point already behind, swinging it through a near-reversal. A connector
-    // curve already ends on the stripe (connectorApproach projects its last vertex), so this is a
-    // no-op there and only does real work for a straight approach that has yet to reach it.
-    const arrived = pts[pts.length - 1]!
-    const base = nearestRunwayPoint(arrived) ?? lineup
-    if (dist(arrived, base) > 1e-6) pts.push(base)
-    // …then roll far enough up the runway to be aligned with the takeoff direction.
-    const far = farRunwayEnd(base)
-    if (far) {
-      const d = dist(base, far)
-      if (d > 1e-6) {
-        const step = Math.min(LINEUP_ALIGN_NM, d / 2)
-        pts.push([base[0] + ((far[0] - base[0]) / d) * step, base[1] + ((far[1] - base[1]) / d) * step])
-      }
-    }
-    return pts
+  /**
+   * The path a departure follows from holding short onto the runway centerline, aligned for
+   * takeoff — a generated fillet ({@link filletLineUp}). It replaced three data-dependent attempts
+   * (a graph search to a charted centerline node, the aircraft's held route, and a straight cut)
+   * that each worked at some hold-short points and kinked or looped at others: the search could
+   * route across the runway to a node on the far side, the held route was often a straight chord,
+   * and the field data plants a node on the stripe at almost no connector. The fillet needs none of
+   * that — it turns from the aircraft's heading onto the runway direction wherever it is holding.
+   */
+  function lineUpPath(ac: Internal): Point[] {
+    return filletLineUp(ac)
   }
 
   /**
@@ -2060,9 +2038,8 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
    * departure-runway goal — so it lines up where it is holding, at either end).
    */
   function enterRunway(ac: Internal): void {
-    const lineup: Point = nearestRunwayPoint([ac.x, ac.y]) ?? ac.goalPoint ?? [ac.x, ac.y]
     clearDiversion(ac)
-    ac.path = lineUpPath(ac, lineup)
+    ac.path = lineUpPath(ac)
     ac.leg = 0
     ac.held = null
     ac.holdShort = false

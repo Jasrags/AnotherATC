@@ -138,7 +138,6 @@ export function GroundScope({ controller }: { controller: GroundController }) {
     }
     // The full record goes to the browser console to copy; the HUD gets the fields that decide
     // taxi routing and takeoff-vs-crossing, which is what the bug reports have been about.
-    // eslint-disable-next-line no-console
     console.log(`[inspect ${d.callsign}]`, d)
     const p = (pt: readonly number[] | null) => (pt ? `[${pt[0]!.toFixed(2)},${pt[1]!.toFixed(2)}]` : '—')
     devInspectRef.current =
