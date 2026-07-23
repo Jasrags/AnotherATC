@@ -424,11 +424,12 @@ own coupling rule as a seam plug; neither is blocked.
   `kbur-osm.raw.json`, `build-kbur-surface.mjs` → `world/kbur.surface.json`). The crossing point
   re-derives to **66.3% / 79.2%** from the survey; **08 is the only precision end, no displaced
   threshold**; **15/33 both displaced** (909/350 ft); **EMAS 170×350 at DER 08 = the east end**.
-  Surface scan: **14/14 gates+stands** (better than KSAN), ~29 unnamed runway-touching connectors
-  to name, 44 `construction` features (new terminal, excluded). **Verdict: GO.** _Next themes:
-  (1) taxiway naming — patch the ~29 connectors by way-id against `00067AD.PDF` into `REF_PATCH`,
-  document in `docs/BUR/taxiway-naming.md`; (2) the `Airport` bundle `world/kburAirport.ts` +
-  the crossing rule on the `runwaysInteract` seam; (3) copy `world/airport.test.ts` for KBUR._
+  Surface scan: **14/14 gates+stands** (better than KSAN), 44 `construction` features (new
+  terminal, excluded). **Verdict: GO.** **Taxiway naming shipped** (`docs/BUR/taxiway-naming.md`):
+  19 of the 29 runway-touching connectors patched by way-id to their designator (coverage
+  20→39/115), the other 10 (run-up apron, C/D throats, SE terminal cluster, end stubs) left
+  unnamed by KSAN discipline. _Next themes: (1) the `Airport` bundle `world/kburAirport.ts` +
+  the crossing rule on the `runwaysInteract` seam; (2) copy `world/airport.test.ts` for KBUR._
 - ⬜ **KOAK — the parallel/dependent case**. Four runways, **zero intersections**: **10L/28R**
   (5,457 ft) and **10R/28L** (6,213 ft) are parallel and only **1,001 ft apart** — well under the
   ~2,500 ft dependent-approach threshold, so they are *not* independent and arrivals must be

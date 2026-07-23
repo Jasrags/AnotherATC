@@ -88,11 +88,11 @@ Counted against the committed OSM extract:
 | `construction` features | **44** (`construction=parking_position`) | new Burbank replacement terminal — excluded by the ingest KEEP set, but the OSM surface is mid-redevelopment and will churn |
 | Field span | 1.48 × 1.14 nm | compact, KSAN-comparable |
 
-**Verdict: GO.** Full gate + stand coverage means spawning and real paint work out of the box. The
-one labour item is naming the ~29 runway-touching connectors against `00067AD.PDF` (by OSM way id,
-the way `docs/SAN/taxiway-naming.md` does for KSAN) — a `docs/BUR/taxiway-naming.md` to be written
-in the naming theme. The first ingest ships with an empty patch set, so those connectors are
-currently unnamed.
+**Verdict: GO.** Full gate + stand coverage means spawning and real paint work out of the box.
+**Taxiway naming applied** (`docs/BUR/taxiway-naming.md`): 19 of the 29 runway-touching connectors
+patched by OSM way-id to their designator (A/B/C/D spines + A2/A3, B2/B3, C6–C8, D7/D8), coverage
+20 → 39 / 115; the other 10 (run-up apron fillets, C/D throats, SE terminal cluster, runway-end
+stubs) are left unnamed by the same discipline as KSAN.
 
 ## Game relevance
 

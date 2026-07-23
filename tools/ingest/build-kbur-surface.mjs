@@ -63,12 +63,41 @@ const KEEP = new Set([
 ])
 
 // OpenStreetMap tags the KBUR spine and its main connectors (A/B/C/D/G, A1–A3,
-// B1–B3, C6–C8, D1–D2/D7–D8, G1, BB). ~29 unnamed ways touch the runways and need
-// designators for hold-short / intersection-departure destinations — those are
-// patched here by OSM way id, matched to the FAA airport diagram (00067AD.PDF),
-// the way docs/SAN/taxiway-naming.md documents KSAN. Deferred to the taxiway-naming
-// theme; left empty so this first ingest projects the raw surface as-is.
-const REF_PATCH = {}
+// B1–B3, BB, C6–C8, D1–D2/D7–D8, G1). Of the ~29 unnamed ways that touch a runway,
+// 19 are continuation segments of an already-named taxiway (they share a node with
+// it and reach the runway edge) — patched here by OSM way id, matched by endpoint
+// topology and cross-referenced to the FAA airport diagram (00067AD.PDF). Method and
+// per-way rationale: docs/BUR/taxiway-naming.md. The remaining 10 are deliberately
+// left unnamed (run-up/bypass-apron fillets at the 15 threshold, the C/D crossing
+// throats, the SE terminal-apron cluster, and the two runway-end stubs) — same
+// discipline as KSAN: you route to the gate, not via apron pavement.
+const REF_PATCH = {
+  // 15/33 — NE-side connectors (A-series) and SW-side connectors (B-series),
+  // each extended to the runway edge / hold line.
+  99871903: 'A2',
+  221228113: 'A3',
+  221228199: 'A3',
+  99872086: 'B2',
+  221227905: 'B3',
+  221228208: 'B3',
+  99872054: 'C', // C reaching 15/33 just past the crossing (81% along)
+
+  // 08/26 — the C and D parallels and their numbered connectors, extended to the
+  // runway edge. C6/C7/C8 and D7/D8 are the connectors; A and B are the 15/33
+  // parallels reaching 08/26 either side of the crossing.
+  99872003: 'C6',
+  99872004: 'C6',
+  99872034: 'C7',
+  99872002: 'C8',
+  558772698: 'D7',
+  558772691: 'D8',
+  99872009: 'C', // C's west end reaching the 08 threshold
+  99872011: 'D', // D's west end reaching the 08 threshold
+  99871973: 'B', // B reaching 08/26 just west of the crossing
+  99871976: 'B',
+  221231878: 'A', // A reaching 08/26 just east of the crossing
+  221231956: 'A',
+}
 
 // Charted hot spots (not in OSM). KBUR publishes hot spots on SW3HOTSPOT.PDF;
 // their exact centres are read off that chart during the naming theme.
