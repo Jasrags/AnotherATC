@@ -31,6 +31,20 @@ describe('an intersection takeoff lines up straight ahead, not across the runway
     c.sim.dispatch({ type: 'contactTower', aircraftId: id })
     expect(c.sim.dispatch({ type: 'clearedForTakeoff', aircraftId: id }).ok).toBe(true)
 
+    // The line-up follows the connector's charted curve onto the stripe, not a straight cut with a
+    // sharp turn: no vertex may kink more than a gentle amount. The corner-cutting bug turned ~90°.
+    const path = c.inspectSelected()!.path
+    let maxTurnDeg = 0
+    for (let i = 1; i < path.length - 1; i += 1) {
+      const [a, b, d] = [path[i - 1]!, path[i]!, path[i + 1]!]
+      const h1 = Math.atan2(b[1] - a[1], b[0] - a[0])
+      const h2 = Math.atan2(d[1] - b[1], d[0] - b[0])
+      let turn = Math.abs(((h2 - h1) * 180) / Math.PI)
+      if (turn > 180) turn = 360 - turn
+      maxTurnDeg = Math.max(maxTurnDeg, turn)
+    }
+    expect(maxTurnDeg).toBeLessThan(45)
+
     // Distance taxied from the clearance until the takeoff roll actually spools up. (status is
     // 'departing' the instant the clearance is issued — rollWhenLinedUp — so speed is the honest
     // signal: the line-up taxis at ~15 kt, the roll accelerates past it.) Pulling straight onto

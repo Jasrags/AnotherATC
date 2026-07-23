@@ -304,6 +304,11 @@ const LINEUP_ENTRY_MAX_NM = 0.15
  *  runway whose only graph route loops around the field and over the runway to reach it (the
  *  C3→C4→cross→B2 report). ~900 ft covers a real connector's curve; the loop was ~3,500 ft. */
 const LINEUP_MAX_DETOUR_NM = 0.15
+/** How near (nm) the aircraft's held route must come to the centerline for it to count as a real
+ *  charted connector delivering onto the stripe (rather than a straight chord that merely ends on
+ *  the pavement). A real connector's vertices reach the centerline within a few dozen feet; a
+ *  straight synthetic crossing straddles it far wider. */
+const LINEUP_CONNECTOR_MAX_OFFSET_NM = 0.05
 /** How close (nm) counts as reaching a gate. */
 const GATE_EPS = 0.02
 /** Seconds an arrival dwells at the gate before it clears the stand. */
@@ -1274,6 +1279,46 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
    * at the nearest centerline point) makes the aircraft cut across the fillet and kink onto the
    * runway instead of turning through it.
    */
+  /**
+   * The aircraft's own held route through the connector, truncated where it first reaches the
+   * runway centerline — the charted curve it taxied in on, which is where the connector's geometry
+   * is recorded. A line-up follows this rather than a straight cut onto the stripe (which kinks
+   * across the fillet), and unlike a fresh graph search it cannot loop across the runway: it is the
+   * route the aircraft is already on.
+   *
+   * Returns null when there is no held route, or when the held route is a straight chord that never
+   * comes near the centerline (a taxi straight to a point on the pavement leaves no curve to
+   * follow) — the projection in {@link lineUpPath} handles that case.
+   */
+  function connectorApproach(ac: Internal): Point[] | null {
+    const held = ac.held
+    if (!guard || !held || held.length < 2) return null
+    // Follow the connector to its closest approach to the centerline, then stop: past that the
+    // held route is heading away across the runway, and a line-up does not cross.
+    let best = 0
+    let bestOffset = Infinity
+    for (let i = 0; i < held.length; i += 1) {
+      const p = held[i]!
+      const c = nearestRunwayPoint(p)
+      const offset = c ? dist(p, c) : Infinity
+      if (offset < bestOffset - 1e-9) {
+        bestOffset = offset
+        best = i
+      } else if (offset > bestOffset + 1e-6) {
+        break
+      }
+    }
+    if (bestOffset > LINEUP_CONNECTOR_MAX_OFFSET_NM) return null
+    // Land the curve exactly on the centerline by projecting its final vertex onto the stripe —
+    // replacing it, not appending, so the connector flows into that point instead of jogging
+    // perpendicular to it (which is what kinked the line-up). The connector's own heading carries
+    // through, so the turn onto the runway stays gentle.
+    const curve = held.slice(0, best + 1)
+    const onCenterline = nearestRunwayPoint(curve[curve.length - 1]!)
+    if (onCenterline) curve[curve.length - 1] = onCenterline
+    return curve
+  }
+
   function lineUpPath(ac: Internal, lineup: Point): Point[] {
     const pts: Point[] = [[ac.x, ac.y]]
     if (graph && guard) {
@@ -1290,11 +1335,14 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       // Take the charted route only when it is genuinely a short pull onto the stripe. The nearest
       // centerline node can be within LINEUP_ENTRY_MAX_NM in a straight line yet reachable only by
       // looping around the field and across the runway — because it sits on a connector on the far
-      // side. That route drives a departure over its own active runway uncleared; reject it and
-      // fall through to the straight projection below (as when there is no charted entry at all).
+      // side, and driving that route takes a departure over its own active runway uncleared.
       const straightAhead = dist([ac.x, ac.y], nearestRunwayPoint([ac.x, ac.y]) ?? lineup)
-      const route =
-        pathLength([[ac.x, ac.y], ...rawRoute]) <= straightAhead + LINEUP_MAX_DETOUR_NM ? rawRoute : []
+      const detours = pathLength([[ac.x, ac.y], ...rawRoute]) > straightAhead + LINEUP_MAX_DETOUR_NM
+      // When it detours, follow the aircraft's own held route through the connector — the curve it
+      // actually taxied in on — instead of cutting straight across the fillet, which kinks onto the
+      // runway. connectorApproach is null when the held route is a straight chord with no curve to
+      // recover (a taxi straight to a runway point), and the projection below handles that.
+      const route = detours ? (connectorApproach(ac) ?? []) : rawRoute
       for (const p of route) {
         const last = pts[pts.length - 1]!
         if (dist(last, p) > 1e-6) pts.push(p)
@@ -1302,7 +1350,9 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     }
     // Finish on the centerline. Projecting the *end of the route* rather than the aircraft's
     // original position keeps this ahead of it: projecting from where it was holding would
-    // double back to a point already behind, swinging it through a near-reversal.
+    // double back to a point already behind, swinging it through a near-reversal. A connector
+    // curve already ends on the stripe (connectorApproach projects its last vertex), so this is a
+    // no-op there and only does real work for a straight approach that has yet to reach it.
     const arrived = pts[pts.length - 1]!
     const base = nearestRunwayPoint(arrived) ?? lineup
     if (dist(arrived, base) > 1e-6) pts.push(base)
