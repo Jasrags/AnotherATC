@@ -304,8 +304,12 @@ export interface GroundSim {
   /** Runway turnoffs this arrival could still be assigned: ahead of it, and reachable at its
    *  current speed. Empty for anything that isn't landing. */
   exitOptions(aircraftId: string): RunwayExit[]
-  /** The runway direction in use, or null when the sim has no configuration. */
+  /** The runway direction in use — the primary active runway, or null when the sim has no
+   *  configuration. On a multi-runway field this is the first of {@link runways}. */
   runway(): ActiveRunway | null
+  /** Every active runway direction, one per physical runway in use (docs/atc-multi-runway.md §5).
+   *  A single-runway field returns one; empty when there is no configuration. */
+  runways(): readonly ActiveRunway[]
   /** Where arrivals are established on final, derived from the active runway. */
   approach(): ApproachConfig | null
   /** Change the active runway direction — the airport's configuration. Refused while anything

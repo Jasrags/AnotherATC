@@ -205,8 +205,12 @@ export interface GroundSimOptions {
   slots?: SlotConfig & { seed: number }
   /** The runway direction in use. Supplies the real landing threshold (which is *not* the end
    *  of the pavement where the threshold is displaced) and the far end a takeoff rolls toward,
-   *  instead of guessing both from the polyline endpoints. */
+   *  instead of guessing both from the polyline endpoints. Sugar for a one-runway `runways`. */
   runway?: ActiveRunway
+  /** The active runway directions when more than one runway is in use at once — at most one
+   *  direction per physical runway (docs/atc-multi-runway.md §5). A single-runway field passes
+   *  `runway` instead; this is its generalisation, and the two are mutually exclusive. */
+  runways?: readonly ActiveRunway[]
 }
 
 // ─── Wheels-up time windows (EDCT) ───────────────────────────────────────────
@@ -535,8 +539,36 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
   const { graph, guard, spawn, servicing, frequencies, readback, slots, turnaround } = opts
   const hotspots = opts.hotspots ?? []
   const stands = opts.stands ?? []
-  /** The runway direction in use. Mutable: an airport changes configuration. */
-  let runway: ActiveRunway | undefined = opts.runway
+  /**
+   * The active runway directions, at most one per physical runway (docs/atc-multi-runway.md §5).
+   * A single-runway field has exactly one. Each is tagged with the physical runway id it uses (the
+   * guard's answer for its threshold), so an aircraft's runway can be matched to its active
+   * direction. Mutable: an airport changes configuration.
+   */
+  const physicalIdOf = (dir: ActiveRunway): string => {
+    if (guard) {
+      const id = runwayIdAt(dir.threshold, guard)
+      if (id !== null) return id
+    }
+    // No guard geometry to name the runway: group the two reciprocal directions (09/27) under one
+    // canonical id, so a direction change is a swap on one runway, not the birth of a second.
+    return [dir.ident, reciprocalIdent(dir.ident)].sort()[0]!
+  }
+  let active: { dir: ActiveRunway; id: string }[] = (
+    opts.runways ?? (opts.runway ? [opts.runway] : [])
+  ).map((dir) => ({ dir, id: physicalIdOf(dir) }))
+  /** The primary active runway — the config-level default for approach, glide path and spawn.
+   *  A single-runway field has one; on a multi-runway field these are per-runway concerns that
+   *  arrive with per-runway spawning, so the first active runway stands in until then. Kept in
+   *  sync with `active` (see setRunway) so the many config-level reads below need no change. */
+  let runway: ActiveRunway | undefined = active[0]?.dir
+  /** The active direction on the runway `ac` is using — its takeoff/landing geometry — matched by
+   *  the aircraft's own runway id, falling back to the single active runway. */
+  const activeRunwayFor = (ac: Internal): ActiveRunway | undefined => {
+    const id = targetRunwayId(ac)
+    const hit = id !== null ? active.find((a) => a.id === id) : undefined
+    return hit?.dir ?? (active.length === 1 ? active[0]!.dir : undefined)
+  }
   /** Where arrivals are established, derived from the active runway when there is one. */
   const approachNow = (): ApproachConfig | null =>
     runway
@@ -892,9 +924,13 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     return a && b ? [a, b] : []
   })()
   const farRunwayEnd = (from: Point): Point | null => {
-    // With a configuration there is one answer: everyone is using the same direction, so the
-    // far end is the same for a takeoff roll and for a landing rollout.
-    if (runway) return runway.farEnd
+    // Resolve by the runway `from` sits on: its active direction gives the far end a takeoff rolls
+    // toward and a landing rolls out to. On a single-runway field everyone is on the one runway, so
+    // this is the old `runway.farEnd`; on a crossing field a point on runway B gets B's far end.
+    const id = guard ? runwayIdAt(from, guard) : null
+    const dir = id !== null ? active.find((a) => a.id === id)?.dir : undefined
+    if (dir) return dir.farEnd
+    if (runway) return runway.farEnd // off the pavement (id null): the primary active direction
     if (runwayEnds.length < 2) return null
     return dist(from, runwayEnds[0]!) >= dist(from, runwayEnds[1]!) ? runwayEnds[0]! : runwayEnds[1]!
   }
@@ -930,9 +966,15 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     const hit = exitCache.get(key)
     if (hit) return hit
     // Turnoffs are bounded by the *declared* landing distance, not by the pavement: on KSAN 09
-    // the last ~1,100 ft is physically there but is not landing distance available.
+    // the last ~1,100 ft is physically there but is not landing distance available. The active
+    // direction on the threshold's runway supplies the declared LDA; anything else falls back to
+    // the pavement far end.
+    const landingDir =
+      guard ? active.find((a) => a.id === runwayIdAt(threshold, guard))?.dir : undefined
     const far =
-      runway && dist(threshold, runway.threshold) < 1e-6 ? landingEnd(runway) : farRunwayEnd(threshold)
+      landingDir && dist(threshold, landingDir.threshold) < 1e-6
+        ? landingEnd(landingDir)
+        : farRunwayEnd(threshold)
     const exits = graph && guard && far ? buildRunwayExits(graph.topology(), guard, threshold, far) : []
     exitCache.set(key, exits)
     return exits
@@ -1425,12 +1467,13 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
    * far end — i.e. lined up facing the wrong way for the runway in use.
    */
   function takeoffRunRemaining(ac: Internal): number {
-    const far = runway ? takeoffEnd(runway) : farRunwayEnd([ac.x, ac.y])
+    const r = activeRunwayFor(ac)
+    const far = r ? takeoffEnd(r) : farRunwayEnd([ac.x, ac.y])
     if (!far) return Infinity
     // Without a configuration `farRunwayEnd` answers "whichever end is further away", so this
     // measures toward that end by construction and effectively never trips — the legacy path
     // never had the wrong-end bug this guards against.
-    const from = runway?.departureStart ?? null
+    const from = r?.departureStart ?? null
     if (!from) return dist([ac.x, ac.y], far)
     const dx = far[0] - from[0]
     const dy = far[1] - from[1]
@@ -1446,11 +1489,12 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
   function takeoffBlocked(ac: Internal): string | null {
     const remaining = takeoffRunRemaining(ac)
     if (remaining >= MIN_TAKEOFF_RUN_NM) return null
-    if (runway) {
+    const r = activeRunwayFor(ac)
+    if (r) {
       const here: Point = [ac.x, ac.y]
-      const atFarEnd = dist(here, runway.farEnd) < dist(here, runway.departureStart)
+      const atFarEnd = dist(here, r.farEnd) < dist(here, r.departureStart)
       if (atFarEnd)
-        return `RWY ${reciprocalIdent(runway.ident)} is not in use — RWY ${runway.ident} is the active runway`
+        return `RWY ${reciprocalIdent(r.ident)} is not in use — RWY ${r.ident} is the active runway`
     }
     return 'insufficient runway remaining for takeoff'
   }
@@ -2136,7 +2180,8 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
    * from hold-short accelerate at takeoff power diagonally off the taxiway and onto the runway.
    */
   function beginTakeoffRoll(ac: Internal): boolean {
-    const far = runway ? takeoffEnd(runway) : farRunwayEnd([ac.x, ac.y])
+    const r = activeRunwayFor(ac)
+    const far = r ? takeoffEnd(r) : farRunwayEnd([ac.x, ac.y])
     if (!far) return false
     clearDiversion(ac)
     ac.path = [[ac.x, ac.y], far]
@@ -2901,8 +2946,9 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     // session, waiting on something that has already finished happening.
     if (!onRunwayNow(traffic)) return true
     const entry = nearestRunwayPoint([ac.x, ac.y])
-    if (!runway || !entry) return false // no threshold to measure from; wait for it to vacate
-    const from = runway.threshold
+    const r = activeRunwayFor(ac)
+    if (!r || !entry) return false // no threshold to measure from; wait for it to vacate
+    const from = r.threshold
     return alongRunway(from, [traffic.x, traffic.y]) > alongRunway(from, entry)
   }
 
@@ -3206,6 +3252,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     },
     dispatch,
     runway: () => runway ?? null,
+    runways: () => active.map((a) => a.dir),
     approach: () => approachNow(),
     trafficRate() {
       return trafficRate
@@ -3221,34 +3268,54 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       nextSpawnAt = time + spawnIntervalSec()
     },
     setRunway(next: ActiveRunway): DispatchResult {
-      // A runway change is coordinated, not thrown. Anything already committed to the runway —
-      // on it, or on short final above it — has to finish first; the controller stops the flow,
-      // lets it land or go, and then turns the airport around.
-      if (runway && next.ident === runway.ident) return refused(`RWY ${next.ident} already in use`)
-      // Deliberately stricter than `blocksRunway`: that predicate lets a departure past
-      // ROTATE_KT stop blocking, which is safe only because everything rolls the *same* way.
-      // A direction change breaks exactly that assumption, so anything physically on the
-      // pavement counts — a jet at 130 kt is still very much on the runway.
-      const committed = fleet.find((a) => blocksRunway(a) || onRunwayNow(a))
+      // Activate `next` on its physical runway, replacing whichever direction was active there and
+      // leaving every *other* runway untouched (docs/atc-multi-runway.md §5). A single-runway field
+      // has one entry, so this is the old "swap the one active direction".
+      const nextId = physicalIdOf(next)
+      const current = active.find((a) => a.id === nextId)
+      if (current && current.dir.ident === next.ident) return refused(`RWY ${next.ident} already in use`)
+      // A runway change is coordinated, not thrown. Anything committed to *this* runway — on it, on
+      // short final above it, or rolling out on it — has to finish first. Deliberately stricter
+      // than `blocksRunway`: that lets a departure past ROTATE_KT stop blocking, safe only because
+      // everything rolls the same way; a direction change breaks exactly that assumption, so
+      // anything physically on the pavement counts — a jet at 130 kt is still very much on it.
+      //
+      // `soleSwap` — this change turns the *only* active runway around — is when the scoping is
+      // vacuous (everything active is on this one runway) and the original unscoped check applies;
+      // it is also the no-guard case, where the per-runway predicates can't resolve. When a *second*
+      // runway is coming online, or one of several is changing, the scoping is load-bearing:
+      // traffic on the other runways must not be swept into this change.
+      const soleSwap = active.length === 1 && active[0]!.id === nextId
+      const committed = fleet.find((a) =>
+        soleSwap
+          ? blocksRunway(a) || onRunwayNow(a)
+          : (onShortFinal(a) && approachRunwayOf(a) === nextId) ||
+            (a.rollingOut && !a.vacated && approachRunwayOf(a) === nextId) ||
+            (onRunwayNow(a) && physicalRunwayOf(a) === nextId),
+      )
       if (committed)
-        return refused(`runway in use — ${committed.callsign} is committed to RWY ${runway?.ident ?? ''}`.trim())
+        return refused(
+          `runway in use — ${committed.callsign} is committed to RWY ${current?.dir.ident ?? next.ident}`,
+        )
 
-      const previous = runway
-      runway = next
+      const previous = current?.dir
+      active = [...active.filter((a) => a.id !== nextId), { dir: next, id: nextId }]
+      runway = active[0]?.dir
       exitCache.clear() // turnoffs are derived per landing direction
 
       for (const ac of fleet) {
+        // Only traffic using *this* runway is caught in the change; other runways carry on. When
+        // this swaps the sole active runway every aircraft is on it (and targetRunwayId may be
+        // unresolved without a guard), so the scoping is skipped there.
+        if (!soleSwap && targetRunwayId(ac) !== nextId) continue
         // Arrivals still on final for the old direction cannot land on it any more, so they go
         // around and re-establish on the new approach. This is the cascade — one configuration
-        // change hands the controller back every inbound at once.
+        // change hands the controller back every inbound to this runway at once.
         if (ac.airborne && ac.intent === 'arrival') {
-          const ap = approachNow()
-          if (ap) {
-            ac.path = [ap.fix, ap.threshold]
-            ac.threshold = ap.threshold
-            ac.finalLenNm = pathLength(ac.path)
-            ac.finalAltFt = glideAltitudeFt(next.glidePathDeg, ac.finalLenNm)
-          }
+          ac.path = [finalFix(next, FINAL_APPROACH_NM), next.threshold]
+          ac.threshold = next.threshold
+          ac.finalLenNm = pathLength(ac.path)
+          ac.finalAltFt = glideAltitudeFt(next.glidePathDeg, ac.finalLenNm)
           goAround(ac)
           continue
         }

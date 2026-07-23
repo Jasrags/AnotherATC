@@ -18,11 +18,12 @@ import type { AirportSurface } from './types'
  * x=0.3. KSAN stays a single-runway field and must not move — world/airport.test.ts is the
  * no-regression anchor.
  *
- * Scope: this slice covers §1 (runwayIdAt) and §3 (per-runway occupancy). Wake separation is now
- * per-runway too (§4, `lastDepartureByRunway`), but a *cross-runway* wake assertion needs two
- * runways active at once to drive a takeoff on each — that arrives with config-as-a-set (§5), and
- * the end-to-end wake-independence + multi-runway-crossing scenarios are asserted there. Here the
- * full single-runway suite is the regression guard that neither change moved KSAN.
+ * Scope: §1 (runwayIdAt), §3 (per-runway occupancy), §4 (per-runway wake) and §5 (config as a set
+ * of active runways) are all covered here — including the two runways-active-at-once scenarios that
+ * §4/§5 unlock (dual-runway takeoff, cross-runway wake independence). Still deferred to the
+ * dependency-seam slice (§6): a crossing clearance for a route that crosses *two* runways, and the
+ * inter-runway rules KBUR/KOAK plug in. The full single-runway suite remains the regression guard
+ * that none of this moved KSAN.
  */
 const surface: AirportSurface = {
   icao: 'KXRW',
@@ -54,6 +55,38 @@ const RWY_36: ActiveRunway = {
   glidePathDeg: 3,
   pattern: 'left',
 }
+
+/** 27 rolls west along the east–west runway — the second active direction in the two-runway
+ *  scenarios. Its physical runway (09/27) is a different one from 36's (18/36). */
+const RWY_27: ActiveRunway = {
+  ident: '27',
+  threshold: [0.8, 0], // displaced from the east pavement end
+  departureStart: [1, 0],
+  farEnd: [-1, 0],
+  toraFt: 12000,
+  ldaFt: 10000,
+  glidePathDeg: 3,
+  pattern: 'right',
+}
+
+/** A departure holding short of a runway end, off the pavement. */
+const departureHoldingShort = (
+  id: string,
+  callsign: string,
+  wake: 'L' | 'M' | 'H' | 'J',
+  approach: [number, number],
+  end: [number, number],
+  past: [number, number],
+) => ({
+  id,
+  callsign,
+  type: 'B738',
+  wake,
+  path: [approach, end, past],
+  targetSpeed: 15,
+  intent: 'departure' as const,
+  goalPoint: end,
+})
 
 describe('runwayIdAt: a point knows which runway it is on (docs/atc-multi-runway.md §1)', () => {
   it('names the runway a point lies on, and distinguishes the two', () => {
@@ -106,5 +139,89 @@ describe('occupancy is per-runway (docs/atc-multi-runway.md §3)', () => {
     // The blocker is on 09/27, not 18/36, so it has no bearing on lining up on 36. Today this is
     // refused because occupancy is field-wide (onRunwayNow sees any runway) — that is the bug.
     expect(sim.dispatch({ type: 'lineUpAndWait', aircraftId: 'b' })).toEqual({ ok: true })
+  })
+})
+
+describe('two runways active at once (docs/atc-multi-runway.md §5)', () => {
+  // Both directions active. A departure on each — 36 rolls north, 27 rolls west. With a single
+  // active `runway` the sim refused a takeoff on whichever direction wasn't configured; the active
+  // *set* lets each roll on its own runway.
+  const twoRunwaySim = () =>
+    createGroundSim(
+      [
+        departureHoldingShort('n', 'XRW360', 'H', [0.5, -1], [0.3, -1], [0.1, -1]), // holds short of 36
+        departureHoldingShort('w', 'XRW270', 'L', [1, 0.2], [1, 0], [1, -0.2]), // holds short of 27
+      ],
+      { graph, guard, runways: [RWY_27, RWY_36] },
+    )
+
+  it('reports both active runways', () => {
+    expect(
+      twoRunwaySim()
+        .runways()
+        .map((r) => r.ident),
+    ).toEqual(['27', '36'])
+  })
+
+  it('clears a departure on each runway and both get airborne', () => {
+    const sim = twoRunwaySim()
+    expect(sim.snapshot().aircraft.find((a) => a.id === 'n')!.holdingForTakeoff).toBe(true)
+    expect(sim.snapshot().aircraft.find((a) => a.id === 'w')!.holdingForTakeoff).toBe(true)
+
+    // Launch 36 first, let it clear the field, then 27 — sequenced so the two rolls don't meet at
+    // the crossing (that conflict is the seam's job, §6, not this test's).
+    // Budgets are generous: a departure holding 0.2 nm off the end lines up on a slow fillet
+    // before it rolls, so the whole sequence is ~100 s per aircraft.
+    expect(sim.dispatch({ type: 'contactTower', aircraftId: 'n' })).toEqual({ ok: true })
+    expect(sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'n' })).toEqual({ ok: true })
+    for (let i = 0; i < 2000 && sim.snapshot().departed < 1; i += 1) sim.step(0.1)
+    expect(sim.snapshot().departed).toBe(1)
+
+    expect(sim.dispatch({ type: 'contactTower', aircraftId: 'w' })).toEqual({ ok: true })
+    expect(sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'w' })).toEqual({ ok: true })
+    for (let i = 0; i < 2000 && sim.snapshot().departed < 2; i += 1) sim.step(0.1)
+    expect(sim.snapshot().departed).toBe(2)
+  })
+
+  it('bringing a second runway online leaves the first runway’s traffic alone', () => {
+    // Start with only 36 active; an arrival is cleared to land on it. Activating 27 (a *different*
+    // physical runway) must not sweep the 36 arrival into a go-around — the change is scoped to the
+    // runway coming online, not the whole field.
+    const finalFix36: [number, number] = [0.3, -4.75] // 4 nm south of 36's threshold
+    const sim = createGroundSim(
+      [
+        {
+          id: 'a',
+          callsign: 'XRW111',
+          type: 'B738',
+          wake: 'M',
+          path: [finalFix36, RWY_36.threshold],
+          targetSpeed: 140,
+          airborne: true,
+          intent: 'arrival',
+          goalPoint: [-0.8, 0.6],
+          gate: '1',
+        },
+      ],
+      { graph, guard, runways: [RWY_36] },
+    )
+    expect(sim.dispatch({ type: 'clearedToLand', aircraftId: 'a' })).toEqual({ ok: true })
+
+    expect(sim.setRunway(RWY_27)).toEqual({ ok: true })
+    expect(sim.runways().map((r) => r.ident)).toEqual(['36', '27'])
+    // Untouched: still landing on 36 — a go-around would void the clearance and drop it back to
+    // 'onFinal', so 'landing' is proof it was not swept into 27's activation.
+    expect(sim.snapshot().aircraft.find((x) => x.id === 'a')!.status).toBe('landing')
+  })
+
+  it('wake on one runway does not gate a departure on the other (§4)', () => {
+    const sim = twoRunwaySim()
+    // A Heavy rolls on 36 — its wake leader is recorded against runway 18/36.
+    sim.dispatch({ type: 'contactTower', aircraftId: 'n' })
+    expect(sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'n' })).toEqual({ ok: true })
+    // Immediately, a Small on 27 is cleared. Same-runway this would be a wake hold behind the
+    // Heavy; on a different runway it is not gated at all.
+    sim.dispatch({ type: 'contactTower', aircraftId: 'w' })
+    expect(sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'w' })).toEqual({ ok: true })
   })
 })
