@@ -3,6 +3,10 @@ import type { AirportSurface, Point } from '../world/types'
 interface Seg {
   a: Point
   b: Point
+  /** Which physical runway this segment belongs to — the surface feature's designator-pair ref
+   *  (e.g. "09/27"). A field's own answer to "which runway is this", per docs/atc-multi-runway.md
+   *  §1. A single-runway field has one value here for every segment. */
+  runwayId: string
 }
 
 export interface RunwayGuard {
@@ -17,15 +21,39 @@ const HALF_ZONE_NM = 0.02
 /** Runway centerline segments, used to detect when a taxi route crosses a runway. */
 export function buildRunwayGuard(surface: AirportSurface): RunwayGuard {
   const segments: Seg[] = []
+  let runwayIndex = 0
   for (const f of surface.features) {
     if (f.kind !== 'runway') continue
+    // A runway feature should carry its designator ("09/27"); if a field omits it the runway
+    // still guards, just under a stable synthetic id so onRunway coverage is never dropped.
+    const runwayId = f.ref ?? `runway-${runwayIndex}`
+    runwayIndex += 1
     for (let i = 1; i < f.points.length; i += 1) {
       const a = f.points[i - 1]
       const b = f.points[i]
-      if (a && b) segments.push({ a, b })
+      if (a && b) segments.push({ a, b, runwayId })
     }
   }
   return { segments, halfZoneNm: HALF_ZONE_NM }
+}
+
+/**
+ * The physical runway a point lies on — the id of the nearest centerline segment within the
+ * protected zone — or null if the point is off all runways. This is the primitive that lets
+ * occupancy, line-up and wake reason about *which* runway, rather than treating the field as one
+ * (docs/atc-multi-runway.md §1). `onRunway` answers "any runway"; this answers "which".
+ */
+export function runwayIdAt(p: Point, guard: RunwayGuard): string | null {
+  let best: string | null = null
+  let bestD = guard.halfZoneNm
+  for (const s of guard.segments) {
+    const d = distToSeg(p, s.a, s.b)
+    if (d <= bestD) {
+      bestD = d
+      best = s.runwayId
+    }
+  }
+  return best
 }
 
 function distToSeg(p: Point, a: Point, b: Point): number {
