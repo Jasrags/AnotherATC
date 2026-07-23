@@ -126,6 +126,14 @@ export function GroundScope({ controller }: { controller: GroundController }) {
     setDevTool(next)
     if (next !== 'probe') controller.clearProbe()
   }
+  // Dev sandbox: which airframe the next SPAWN/ARRIVAL uses. Local state mirrors the controller's
+  // so the <select> is controlled; the groups are stable for the field, so memoize them.
+  const [devType, setDevType] = useState<string>(() => controller.devType())
+  const spawnTypeGroups = useMemo(() => controller.spawnTypeGroups(), [controller])
+  const pickDevType = (designator: string) => {
+    setDevType(designator)
+    controller.setDevType(designator)
+  }
 
   // Surface-derived draw data (feature buckets, label anchors) is static — compute it once,
   // not every animation frame (WEB-1). The surface never changes, so this never recomputes.
@@ -688,6 +696,24 @@ export function GroundScope({ controller }: { controller: GroundController }) {
             >
               {showGraph ? '◆ GRAPH' : '◇ GRAPH'}
             </button>
+            <label className="ctl-btn mono dev-type" title="Airframe the next SPAWN or ARRIVAL uses">
+              TYPE
+              <select
+                className="mono dev-type-select"
+                value={devType}
+                onChange={(e) => pickDevType(e.target.value)}
+              >
+                {spawnTypeGroups.map((group) => (
+                  <optgroup key={group.kind} label={group.kind.toUpperCase()}>
+                    {group.types.map((t) => (
+                      <option key={t.designator} value={t.designator}>
+                        {t.designator} ({t.wake})
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            </label>
             <button
               type="button"
               className="ctl-btn mono"

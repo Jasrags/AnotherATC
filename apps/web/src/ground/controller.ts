@@ -7,7 +7,7 @@ import {
   createGroundSim,
   EDCT_EARLY_SEC,
   findRunway,
-  APPROACH_SPEED_KT,
+  lookupAircraftType,
 } from '@anotheratc/sim'
 import type {
   Airport,
@@ -278,6 +278,16 @@ export interface GroundController {
   /** Put a test arrival on the final approach, inbound to the landing runway, and select it.
    *  Airborne traffic can't be placed by clicking the surface, so it gets its own control. */
   spawnArrival(): void
+  /** The ICAO designator the sandbox will spawn next (for both {@link spawnAt} and
+   *  {@link spawnArrival}). */
+  devType(): string
+  /** Choose the airframe the sandbox spawns next. Unknown designators fall back to a Medium at
+   *  spawn time via the catalog, so this never has to validate. */
+  setDevType(designator: string): void
+  /** The selectable spawn types, grouped by the field's own fleets, for the dev type picker.
+   *  Fleet membership is an airport property, so it comes from the airport's fleets rather than
+   *  the (airport-independent) type catalog. */
+  spawnTypeGroups(): { kind: string; types: { designator: string; wake: WakeCategory }[] }[]
   /** Remove the selected aircraft, if any. */
   removeSelected(): void
   /** Remove a specific aircraft by id (for click-to-delete). Clears the selection if it was
@@ -341,6 +351,12 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
   let draft: RouteDraft | null = null
   let devSeq = 0
   let probeState: ProbeResult | null = null
+  // Which airframe the dev sandbox spawns next — for both the click-to-place departure and the
+  // ARRIVAL button. Defaults to the first designator any fleet flies (not just fleets[0]'s, so an
+  // empty leading fleet can't seed a type the picker never renders), and only falls to a literal
+  // if the field somehow flies nothing. Wake and approach speed come from the catalog, so
+  // spawning a Heavy behaves like a Heavy.
+  let devType = airport.fleets.flatMap((f) => f.types)[0] ?? 'B738'
   let pendingFocus: string | null = null
 
   // Gate stands aren't routing nodes (they sit off the taxiway network), so include them as
@@ -537,8 +553,8 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
       const base = {
         id,
         callsign: `DEV${String(devSeq).padStart(2, '0')}`,
-        type: 'B738',
-        wake: 'M' as const,
+        type: devType,
+        wake: lookupAircraftType(devType).wake,
         path: [place.point],
         targetSpeed: 0,
         // Parked on a stand it faces the way the lead-in points, like any other gate departure.
@@ -569,13 +585,16 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
         fix[1] + ((fix[1] - threshold[1]) / len) * back,
       ]
       const stand = gatePoints[(devSeq - 1) % Math.max(1, gatePoints.length)]
+      const spec = lookupAircraftType(devType)
       sim.add({
         id,
         callsign: `DEV${String(devSeq).padStart(2, '0')}`,
-        type: 'B738',
-        wake: 'M',
+        type: devType,
+        wake: spec.wake,
         path: [start, threshold],
-        targetSpeed: APPROACH_SPEED_KT,
+        // Its own type's threshold speed, so a dev C172 and a dev B763 occupy the runway for
+        // visibly different times — the capability the sim proves in a test, made watchable here.
+        targetSpeed: spec.approachKt,
         airborne: true,
         intent: 'arrival',
         goalPoint: stand?.point ?? threshold,
@@ -585,6 +604,19 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
       position = 'tower' // an arrival on final is Local Control's — show the bay that owns it
       publish()
     },
+    devType: () => devType,
+    setDevType: (designator) => {
+      devType = designator
+    },
+    spawnTypeGroups: () =>
+      airport.fleets
+        // A fleet that flies nothing would render an empty <optgroup> and, if it led, could leave
+        // the selected value with no matching option — so it never reaches the picker.
+        .filter((f) => f.types.length > 0)
+        .map((f) => ({
+          kind: f.kind,
+          types: f.types.map((designator) => ({ designator, wake: lookupAircraftType(designator).wake })),
+        })),
     removeSelected: () => {
       if (!selected) return
       sim.remove(selected)

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildStands } from '@anotheratc/sim'
+import { buildStands, lookupAircraftType } from '@anotheratc/sim'
 import { createGroundController } from './controller'
 import type { Airport, AirportSurface, Point, Rng } from '@anotheratc/sim'
 import { visibleComms } from './CommsLog'
@@ -186,6 +186,45 @@ describe('ground controller — dev sandbox', () => {
     expect(Math.hypot(ac.x - -0.711, ac.y - 0.041)).toBeGreaterThan(2e-3)
   })
 
+  it('spawns the field default airframe until the picker changes it', () => {
+    const c = createGroundController({ dev: true })
+    expect(c.devType()).toBe('B738') // KSAN's airline fleet leads with the 738
+    c.spawnAt([0, 0])
+    const ac = c.sim.snapshot().aircraft[0]!
+    expect(ac.type).toBe('B738')
+    expect(ac.wake).toBe('M')
+  })
+
+  it('setDevType changes the airframe a placed departure spawns as, wake and all', () => {
+    const c = createGroundController({ dev: true })
+    c.setDevType('B763') // a Heavy freighter
+    c.spawnAt([0, 0])
+    const ac = c.sim.snapshot().aircraft[0]!
+    expect(ac.type).toBe('B763')
+    // Derived from the catalog, not left at the old hardcoded 'M' — a Heavy spawns as a Heavy, so
+    // it puts a real wake interval behind it.
+    expect(ac.wake).toBe('H')
+  })
+
+  it('flies a dev arrival at its selected type approach speed', () => {
+    const speedOf = (designator: string): number => {
+      const c = createGroundController({ dev: true })
+      c.setDevType(designator)
+      c.spawnArrival()
+      return c.sim.snapshot().aircraft[0]!.groundspeed // airborne → groundspeed is the spawn speed
+    }
+    expect(speedOf('B763')).toBe(lookupAircraftType('B763').approachKt)
+    expect(speedOf('C172')).toBe(lookupAircraftType('C172').approachKt)
+    expect(speedOf('C172')).toBeLessThan(speedOf('B763')) // the whole point: the type decides
+  })
+
+  it('groups the selectable types by the field own fleets, with wake', () => {
+    const groups = createGroundController({ dev: true }).spawnTypeGroups()
+    expect(groups.map((g) => g.kind)).toEqual(['airline', 'cargo', 'ga'])
+    const cargo = groups.find((g) => g.kind === 'cargo')!
+    expect(cargo.types.find((t) => t.designator === 'B763')!.wake).toBe('H')
+  })
+
   it('removeSelected and clearAll empty the surface', () => {
     const c = createGroundController({ dev: true })
     c.spawnAt([0, 0])
@@ -301,6 +340,7 @@ describe('the controller runs whatever airport it is given', () => {
         kind: 'airline',
         weight: 1,
         gates: [{ ref: 'G1', point: [0.5, 1] as Point }],
+        types: ['E75L'],
         identity: (rng: Rng) => ({ callsign: `TW${rng.int(10, 99)}`, type: 'E75L', wake: 'M' as const }),
       },
     ],

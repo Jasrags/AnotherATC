@@ -16,6 +16,7 @@ const fleet = (kind: string, servicing?: ServicingConfig): SpawnFleet => ({
   kind,
   weight: 1,
   gates: [{ ref: `${kind}1`, point: [0, 0] }],
+  types: ['C172'],
   identity,
   ...(servicing ? { servicing } : {}),
 })

@@ -162,11 +162,12 @@ export const KSAN: Airport = {
   // south of it — so this is also what makes a runway crossing an ordinary event here rather
   // than something you have to contrive. See docs/atc-runway-crossing.md.
   fleets: [
-    { kind: 'airline', weight: 10, gates: gatesFromSurface(KSAN_SURFACE), identity },
+    { kind: 'airline', weight: 10, gates: gatesFromSurface(KSAN_SURFACE), types: AIRLINE_TYPES, identity },
     {
       kind: 'cargo',
       weight: 2,
       gates: standsAsGates(KSAN_SURFACE, (s) => NORTH_RAMP.has(s.ref)),
+      types: CARGO_TYPES,
       identity: cargoIdentity,
       servicing: CARGO_SERVICING,
     },
@@ -174,6 +175,7 @@ export const KSAN: Airport = {
       kind: 'ga',
       weight: 2,
       gates: standsAsGates(KSAN_SURFACE, (s) => GA_RAMP.has(s.ref)),
+      types: GA_TYPES,
       identity: gaIdentity,
       servicing: GA_SERVICING,
     },

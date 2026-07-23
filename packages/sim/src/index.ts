@@ -17,6 +17,8 @@ export type {
 } from './world/types'
 
 export { createGroundSim, APPROACH_SPEED_KT } from './ground/sim'
+export { AIRCRAFT_TYPES, lookupAircraftType } from './ground/aircraftTypes'
+export type { AircraftType } from './ground/aircraftTypes'
 export type {
   AircraftInit,
   ApproachConfig,

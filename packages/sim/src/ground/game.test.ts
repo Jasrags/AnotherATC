@@ -38,6 +38,7 @@ const spawn: SpawnConfig = {
       kind: 'airline',
       weight: 1,
       gates: [{ ref: 'A1', point: [0.2, -0.2] }],
+      types: ['B738'],
       identity: () => ({ callsign: 'TST1', type: 'B738', wake: 'M' }),
     },
   ],

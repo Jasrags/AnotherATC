@@ -113,6 +113,10 @@ export interface SpawnFleet {
   weight: number
   /** The stands this fleet parks on. */
   gates: readonly GateSlot[]
+  /** The ICAO type designators this fleet flies — the airframes {@link identity} draws from.
+   *  Exposed (not just captured inside the closure) so a consumer can enumerate what a field's
+   *  fleets contain: the dev sandbox lists these to let a tester pick a specific type to spawn. */
+  types: readonly string[]
   /** Produces a callsign/type for one aircraft of this fleet. */
   identity: (rng: Rng) => { callsign: string; type: string; wake: WakeCategory }
   /**

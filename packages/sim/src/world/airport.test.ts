@@ -81,7 +81,7 @@ const KTST: Airport = {
     ],
   },
   // One fleet is enough to be an airport: a field with a single class of traffic states one.
-  fleets: [{ kind: 'airline', weight: 1, gates: gatesFromSurface(surface), identity }],
+  fleets: [{ kind: 'airline', weight: 1, gates: gatesFromSurface(surface), types: ['E75L'], identity }],
   servicing: { services: [{ kind: 'fuel', sec: 20 }] },
   comms: { ground: '121.7', tower: '119.1', atis: '127.4' },
   traffic: { intervalSec: 15, maxAircraft: 4, initialDepartures: 2 },
