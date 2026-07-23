@@ -298,6 +298,12 @@ const CENTERLINE_EPS_NM = 0.004
  *  parallel and entering half a mile behind where it was holding. Past this bound the straight
  *  move onto the stripe in front of the aircraft is both correct and what a pilot would do. */
 const LINEUP_ENTRY_MAX_NM = 0.15
+/** Extra distance (nm) a line-up may travel over a straight pull onto the centerline before its
+ *  route is judged a detour and abandoned. LINEUP_ENTRY_MAX_NM bounds only the *straight-line*
+ *  distance to a charted entry node; a node that close can still sit on a connector across the
+ *  runway whose only graph route loops around the field and over the runway to reach it (the
+ *  C3→C4→cross→B2 report). ~900 ft covers a real connector's curve; the loop was ~3,500 ft. */
+const LINEUP_MAX_DETOUR_NM = 0.15
 /** How close (nm) counts as reaching a gate. */
 const GATE_EPS = 0.02
 /** Seconds an arrival dwells at the gate before it clears the stand. */
@@ -1280,7 +1286,15 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         const c = nearestRunwayPoint(n)
         return c !== null && dist(n, c) < CENTERLINE_EPS_NM
       })
-      const route = startKey && entryKey ? graph.route(startKey, entryKey) : []
+      const rawRoute = startKey && entryKey ? graph.route(startKey, entryKey) : []
+      // Take the charted route only when it is genuinely a short pull onto the stripe. The nearest
+      // centerline node can be within LINEUP_ENTRY_MAX_NM in a straight line yet reachable only by
+      // looping around the field and across the runway — because it sits on a connector on the far
+      // side. That route drives a departure over its own active runway uncleared; reject it and
+      // fall through to the straight projection below (as when there is no charted entry at all).
+      const straightAhead = dist([ac.x, ac.y], nearestRunwayPoint([ac.x, ac.y]) ?? lineup)
+      const route =
+        pathLength([[ac.x, ac.y], ...rawRoute]) <= straightAhead + LINEUP_MAX_DETOUR_NM ? rawRoute : []
       for (const p of route) {
         const last = pts[pts.length - 1]!
         if (dist(last, p) > 1e-6) pts.push(p)
