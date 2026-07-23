@@ -428,8 +428,25 @@ own coupling rule as a seam plug; neither is blocked.
   terminal, excluded). **Verdict: GO.** **Taxiway naming shipped** (`docs/BUR/taxiway-naming.md`):
   19 of the 29 runway-touching connectors patched by way-id to their designator (coverage
   20→39/115), the other 10 (run-up apron, C/D throats, SE terminal cluster, end stubs) left
-  unnamed by KSAN discipline. _Next themes: (1) the `Airport` bundle `world/kburAirport.ts` +
-  the crossing rule on the `runwaysInteract` seam; (2) copy `world/airport.test.ts` for KBUR._
+  unnamed by KSAN discipline. **Bundle + crossing rule shipped** (`world/kburAirport.ts`,
+  `world/kburAirport.test.ts`): both runway layouts drawn, all four directions, comms off the
+  chart (TWR 118.7 / GND 123.9 / ATIS 134.5), fleet at the SE terminal (14 gates). The crossing is
+  field data — `Airport.runwayDependencies` compiled into the `runwaysInteract` seam
+  (`compileRunwayDependencies`); `Airport.layout`→`layouts`. The rule is a **boolean occupancy
+  coupling** of 08/26↔15/33 (docs/atc-multi-runway.md §6 first cut): safe, position-blind. Proven
+  with teeth (an occupant on 15/33 refuses a takeoff on 08; independent field allows it) + a
+  departure play-through (takeoff crossing the intersection). **Engine fix on the way:**
+  `buildRunwayExits` now scopes turnoffs to the *landing* runway (via `runwayIdAt`) and refuses a
+  turnoff onto another runway — before it, an 08 arrival was "assigned" 15/33 as a turnoff and
+  taxied off down the crosser (the single-runway assumption the source flagged).
+  _Next themes, to make KBUR fully playable:
+  (1) **arrivals reach the SE terminal** — an 08 arrival vacates onto a real taxiway but auto-taxi
+  to the gate fails: the turnoff isn't chosen toward the gate side, and the route back to the SE
+  terminal crosses 15/33 with no arrival-issued crossing. Needs turnoff-side preference +
+  an arrival runway-crossing. (2) **two runways active at once** — `createAirportGame` is still
+  single-active; simultaneous 08+15 ops (where the crossing coupling really bites) + the runway
+  picker for a set is docs/atc-multi-runway.md §5. (3) **position-aware crossing** — release the
+  other runway once a departure is past the intersection (the refinement of the boolean coupling)._
 - ⬜ **KOAK — the parallel/dependent case**. Four runways, **zero intersections**: **10L/28R**
   (5,457 ft) and **10R/28L** (6,213 ft) are parallel and only **1,001 ft apart** — well under the
   ~2,500 ft dependent-approach threshold, so they are *not* independent and arrivals must be

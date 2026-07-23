@@ -14,8 +14,8 @@ const stands = buildStands(KSAN_SURFACE)
 /** Which side of runway 09/27 a point is on. The terminals are all on one side and the North
  *  Ramp and GA apron on the other, which is the whole reason this field has crossings. */
 function northOfRunway(p: readonly [number, number]): boolean {
-  const a = KSAN.layout.ends[0]!.pavementEnd
-  const b = KSAN.layout.ends[1]!.pavementEnd
+  const a = KSAN.layouts[0]!.ends[0]!.pavementEnd
+  const b = KSAN.layouts[0]!.ends[1]!.pavementEnd
   return (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]) > 0
 }
 

@@ -155,7 +155,7 @@ export const KSAN: Airport = {
   // 27 first: it is the normal configuration, and this order drives the destination list.
   runways: [KSAN_RUNWAYS['27'], KSAN_RUNWAYS['09']],
   defaultRunway: '27',
-  layout: KSAN_RUNWAY_LAYOUT,
+  layouts: [KSAN_RUNWAY_LAYOUT],
   // Three classes of traffic, and the parking each of them uses. The weights are movements,
   // not stands: the North Ramp and the GA apron are a good share of the field's parking and a
   // small share of its day. Both sit **north of runway 09/27**, while every passenger gate is

@@ -1,5 +1,12 @@
 import { createRng } from '../random'
-import { finalFix, FINAL_APPROACH_NM, type ActiveRunway, type RunwayLayout } from '../ground/runway'
+import {
+  finalFix,
+  FINAL_APPROACH_NM,
+  type ActiveRunway,
+  type RunwayLayout,
+  type RunwayInteractionKind,
+  type RunwaysInteract,
+} from '../ground/runway'
 import type {
   AircraftInit,
   GateSlot,
@@ -17,6 +24,40 @@ export interface AirportComms {
   ground: string
   tower: string
   atis: string
+}
+
+/**
+ * A declared coupling between two of a field's physical runways (docs/atc-multi-runway.md §6).
+ * This is the *field data* half of the dependency seam: the engine owns the rule's shape (which
+ * gates consult it, and how), the field states which runways interact and why. Symmetric — the
+ * order of the pair does not matter.
+ *
+ * KBUR's crossing is `occupancy`-coupled (traffic on one runway occupies the intersection the
+ * other runs through); KOAK's close parallels are `wake`/`landing`-coupled but not
+ * occupancy-coupled. A field with no dependency is fully independent, which is every single-runway
+ * field.
+ */
+export interface RunwayDependency {
+  /** The two physical runway ids that interact, e.g. `['08/26', '15/33']`. */
+  runways: readonly [string, string]
+  /** Why they interact — the reasons a gate consults the seam for. */
+  kinds: readonly RunwayInteractionKind[]
+}
+
+/**
+ * Compile a field's declared dependencies into the {@link RunwaysInteract} predicate the sim
+ * consults. No declaration → fully independent (`() => false`), identical to a single-runway
+ * field. The match is by runway id and symmetric in the pair.
+ */
+export function compileRunwayDependencies(deps?: readonly RunwayDependency[]): RunwaysInteract {
+  if (!deps || deps.length === 0) return () => false
+  return (mine, other, kind) =>
+    deps.some(
+      (d) =>
+        d.kinds.includes(kind) &&
+        ((d.runways[0] === mine && d.runways[1] === other) ||
+          (d.runways[1] === mine && d.runways[0] === other)),
+    )
 }
 
 /** How much traffic the field generates. */
@@ -56,8 +97,13 @@ export interface Airport {
   runways: readonly ActiveRunway[]
   /** Which direction is active on load. */
   defaultRunway: string
-  /** Both runway ends as painted, for the markings. */
-  layout: RunwayLayout
+  /** Each physical runway's ends as painted, for the markings. A single-runway field has one;
+   *  an intersecting field like KBUR has both, so both are drawn. */
+  layouts: readonly RunwayLayout[]
+  /** How this field's physical runways interact, if at all (docs/atc-multi-runway.md §6). Omit for
+   *  an independent field — every single-runway field, and any multi-runway field yet to state a
+   *  dependency. Compiled into the sim's {@link RunwaysInteract} seam by {@link createAirportGame}. */
+  runwayDependencies?: readonly RunwayDependency[]
   /** The classes of traffic this field generates, and where each of them parks. The first is
    *  used for the initial fill — the aircraft already on stand at t=0. */
   fleets: readonly SpawnFleet[]
@@ -107,6 +153,9 @@ export interface AirportGame {
   /** The field's slot policy, if it has one, with the game's seed folded in. */
   slots?: SlotConfig & { seed: number }
   runway: ActiveRunway
+  /** The field's inter-runway coupling, compiled from its declared dependencies; independent by
+   *  default. Passed straight to the sim (docs/atc-multi-runway.md §6). */
+  runwaysInteract: RunwaysInteract
 }
 
 /**
@@ -189,6 +238,7 @@ export function createAirportGame(airport: Airport, seed = 1, runwayIdent?: stri
     // above is salted for the same reason.
     ...(airport.slots ? { slots: { ...airport.slots, seed: seed + 7717 } } : {}),
     runway,
+    runwaysInteract: compileRunwayDependencies(airport.runwayDependencies),
     stands: buildStands(airport.surface),
   }
 }

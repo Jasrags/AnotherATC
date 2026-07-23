@@ -1,6 +1,6 @@
 import type { Point } from '../world/types'
 import type { TaxiTopology } from './taxiGraph'
-import { onRunway, type RunwayGuard } from './runwayGuard'
+import { onRunway, runwayIdAt, type RunwayGuard } from './runwayGuard'
 
 /**
  * A charted runway turnoff, as usable by an aircraft landing in one particular direction.
@@ -204,11 +204,14 @@ function toClearance(
  * rapid or standard. No new chart data is needed — but the result should still be eyeballed
  * against the airport diagram (docs/SAN/) before it is trusted.
  *
- * SINGLE-RUNWAY ASSUMPTION: `guard` covers every runway on the field, so with a second runway a
- * taxiway bridging the two would look like a turnoff whose `vacatePoint` sits on the *other*
- * runway's pavement — and the aircraft would be reported clear while sitting on it. KSAN is
- * single-runway (9/27); scope the guard to the landing runway before modelling a second one.
- * Likewise `best` dedupes by designator, which assumes a ref touches the runway in one place.
+ * MULTI-RUNWAY: exits are scoped to the *landing* runway (the one the threshold sits on), not to
+ * "any pavement". On an intersecting field the crossing runway would otherwise look like a giant
+ * turnoff — one endpoint on the landing runway at the intersection, the other up the crossing
+ * runway — and an arrival "assigned" it would taxi off down the other runway and be reported clear
+ * of its own while sitting on the crosser (KBUR arrivals did exactly this). So a turnoff must leave
+ * *this* runway onto a taxiway, never onto another runway. On a single-runway field this reduces
+ * exactly to the old any-pavement test. `best` still dedupes by designator (a ref touches the
+ * runway in one place).
  */
 export function buildRunwayExits(
   topology: TaxiTopology,
@@ -223,6 +226,18 @@ export function buildRunwayExits(
   const ux = rx / runLen
   const uy = ry / runLen
 
+  // The landing runway — every on/off test below is scoped to it. `buildRunwayGuard` gives every
+  // runway feature an id (a real ref, or a synthetic one), so this resolves on any real field; it
+  // is null only if the threshold sits off all guarded pavement (bad field data), and then the
+  // tests fall back to "any pavement" — exactly the old single-runway behaviour.
+  const thisId = runwayIdAt(threshold, guard)
+  const onThis = (p: Point): boolean => (thisId === null ? onRunway(p, guard) : runwayIdAt(p, guard) === thisId)
+  const onOtherRunway = (p: Point): boolean => {
+    if (thisId === null) return false
+    const id = runwayIdAt(p, guard)
+    return id !== null && id !== thisId
+  }
+
   const nodePoint = new Map(topology.nodes.map((n) => [n.key, n.point]))
   /** Best (shallowest) candidate per taxiway designator. */
   const best = new Map<string, RunwayExit>()
@@ -232,9 +247,12 @@ export function buildRunwayExits(
     const a = nodePoint.get(edge.a)
     const b = nodePoint.get(edge.b)
     if (!a || !b) continue
-    const aOn = onRunway(a, guard)
-    const bOn = onRunway(b, guard)
-    if (aOn === bOn) continue // both on or both off — not a runway turnoff
+    const aOn = onThis(a)
+    const bOn = onThis(b)
+    if (aOn === bOn) continue // both on or both off — not a turnoff off this runway
+    // The end that leaves this runway must leave onto a taxiway, not onto another runway — the
+    // crossing runway is not an exit (see the multi-runway note above).
+    if (onOtherRunway(aOn ? b : a)) continue
 
     // Orient the polyline so it leaves the runway, then measure the turn over a fixed distance.
     const geom: Point[] = aOn ? [...edge.geom] : [...edge.geom].reverse()

@@ -331,7 +331,15 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
   // mode, and the sandbox is where you go to stage exactly the situation it warns about.
   const hotspots = airport.surface.hotspots ?? []
   const sim = dev
-    ? createGroundSim([], { graph, guard, hotspots, runway: game.runway, frequencies, stands: game.stands })
+    ? createGroundSim([], {
+        graph,
+        guard,
+        hotspots,
+        runway: game.runway,
+        runwaysInteract: game.runwaysInteract,
+        frequencies,
+        stands: game.stands,
+      })
     : createGroundSim(game.inits, {
         graph,
         guard,
@@ -339,6 +347,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
         spawn: game.spawn,
         servicing: game.servicing,
         runway: game.runway,
+        runwaysInteract: game.runwaysInteract,
         frequencies,
         stands: game.stands,
         // Arrivals become the next departure off the same stand rather than vanishing, which is

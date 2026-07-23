@@ -435,7 +435,7 @@ export function GroundScope({ controller }: { controller: GroundController }) {
         drawSurface(ctx, view, prep, width, height)
         drawAreaLabels(ctx, view, prep)
         drawGates(ctx, view, prep)
-        drawRunwayMarkings(ctx, view, airport.layout)
+        for (const layout of airport.layouts) drawRunwayMarkings(ctx, view, layout)
         drawHotspots(ctx, view, airport.surface, snap.busyHotspots)
         drawApproachCourse(ctx, view, controller.approach())
         if (draft) {
@@ -447,7 +447,9 @@ export function GroundScope({ controller }: { controller: GroundController }) {
           }
         }
         // The painted designators replace the schematic map numbers once they're legible.
-        drawLabels(ctx, view, prep, !runwayMarkingsVisible(view, airport.layout))
+        const v = view
+        const markingsLegible = airport.layouts.some((l) => runwayMarkingsVisible(v, l))
+        drawLabels(ctx, view, prep, !markingsLegible)
         drawAircraft(ctx, view, snap.aircraft)
         const selected = selectedId ? snap.aircraft.find((a) => a.id === selectedId) : undefined
         // Turnoffs are only meaningful for the arrival being worked, so they are drawn for the

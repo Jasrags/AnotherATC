@@ -367,14 +367,16 @@ describe('the controller runs whatever airport it is given', () => {
     surface,
     runways: [runway('36', [0, 0], [0, 2]), runway('18', [0, 2], [0, 0])],
     defaultRunway: '36',
-    layout: {
-      ident: '18/36',
-      widthFt: 150,
-      ends: [
-        { ident: '36', pavementEnd: [0, 0], threshold: [0, 0], emas: null },
-        { ident: '18', pavementEnd: [0, 2], threshold: [0, 2], emas: null },
-      ],
-    },
+    layouts: [
+      {
+        ident: '18/36',
+        widthFt: 150,
+        ends: [
+          { ident: '36', pavementEnd: [0, 0], threshold: [0, 0], emas: null },
+          { ident: '18', pavementEnd: [0, 2], threshold: [0, 2], emas: null },
+        ],
+      },
+    ],
     fleets: [
       {
         kind: 'airline',

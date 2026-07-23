@@ -72,14 +72,16 @@ const KTST: Airport = {
     },
   ],
   defaultRunway: '36',
-  layout: {
-    ident: '18/36',
-    widthFt: 150,
-    ends: [
-      { ident: '36', pavementEnd: [0, 0], threshold: [0, 0.25], emas: null },
-      { ident: '18', pavementEnd: [0, 2], threshold: [0, 2], emas: { lengthFt: 400, widthFt: 170 } },
-    ],
-  },
+  layouts: [
+    {
+      ident: '18/36',
+      widthFt: 150,
+      ends: [
+        { ident: '36', pavementEnd: [0, 0], threshold: [0, 0.25], emas: null },
+        { ident: '18', pavementEnd: [0, 2], threshold: [0, 2], emas: { lengthFt: 400, widthFt: 170 } },
+      ],
+    },
+  ],
   // One fleet is enough to be an airport: a field with a single class of traffic states one.
   fleets: [{ kind: 'airline', weight: 1, gates: gatesFromSurface(surface), types: ['E75L'], identity }],
   servicing: { services: [{ kind: 'fuel', sec: 20 }] },
