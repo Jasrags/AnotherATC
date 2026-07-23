@@ -27,6 +27,7 @@ import {
   type TransmissionFrom,
 } from './comms'
 import { wakeSeparationSec, WAKE_TIME_SCALE } from './wake'
+import { lookupAircraftType } from './aircraftTypes'
 import { onRunway, splitRouteAtRunway, type RunwayGuard } from './runwayGuard'
 import { detectIncursions, type RunwayIncursion, type RunwayUse } from './incursion'
 import { busyHotspots, hotspotAt } from './hotspot'
@@ -2927,7 +2928,10 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
                 const ap = approachNow()
                 return ap ? [ap.fix, ap.threshold] : [slot.point]
               })(),
-        targetSpeed: intent === 'departure' ? 0 : APPROACH_SPEED_KT,
+        // Arrivals cross the threshold at their own type's approach speed — a Heavy fast, a Light
+        // slow — which is what makes them occupy the runway for different times: the exit model
+        // brakes down from this speed to pick a turnoff (runwayExits.ts). Departures start stopped.
+        targetSpeed: intent === 'departure' ? 0 : lookupAircraftType(type).approachKt,
         ...(intent === 'departure' && slot.headingDeg !== undefined ? { heading: slot.headingDeg } : {}),
         airborne: intent === 'arrival',
         intent,

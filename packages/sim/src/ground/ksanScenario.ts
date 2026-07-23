@@ -3,18 +3,10 @@ import { KSAN_SURFACE } from '../world/ksan'
 import type { Point } from '../world/types'
 import type { AircraftInit, } from './sim'
 import type { WakeCategory } from './types'
+import { lookupAircraftType } from './aircraftTypes'
 
 const AIRLINES = ['AAL', 'UAL', 'DAL', 'SWA', 'ASA', 'NKS', 'JBU', 'SKW']
-const TYPES: readonly [string, WakeCategory][] = [
-  ['B738', 'M'],
-  ['A320', 'M'],
-  ['A321', 'M'],
-  ['B739', 'M'],
-  ['A20N', 'M'],
-  ['E75L', 'M'],
-  ['CRJ7', 'M'],
-  ['B763', 'H'],
-]
+const TYPES: readonly string[] = ['B738', 'A320', 'A321', 'B739', 'A20N', 'E75L', 'CRJ7', 'B763']
 
 function pathLength(pts: readonly Point[]): number {
   let d = 0
@@ -77,7 +69,8 @@ function callsign(rng: ReturnType<typeof createRng>): string {
 }
 
 function aircraftType(rng: ReturnType<typeof createRng>): [string, WakeCategory] {
-  return TYPES[rng.int(0, TYPES.length - 1)] ?? ['B738', 'M']
+  const type = TYPES[rng.int(0, TYPES.length - 1)] ?? 'B738'
+  return [type, lookupAircraftType(type).wake]
 }
 
 /**

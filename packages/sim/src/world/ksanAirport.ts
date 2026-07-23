@@ -5,6 +5,7 @@ import type { Rng } from '../random'
 import type { ServicingConfig } from '../ground/sim'
 import type { ActiveRunway, RunwayLayout } from '../ground/runway'
 import type { WakeCategory } from '../ground/types'
+import { lookupAircraftType } from '../ground/aircraftTypes'
 
 /**
  * Pre-push ground services, run in parallel (game seconds). Fueling is the long pole, so it
@@ -43,57 +44,41 @@ const GA_SERVICING: ServicingConfig = {
   ],
 }
 
+/** Each fleet lists only the ICAO type designators it flies; the wake category (and every other
+ *  capability) is looked up from the sim-owned catalog so there is one source of truth for what a
+ *  B763 is. See aircraftTypes.ts and the airport/engine split in CLAUDE.md. */
+function drawType(rng: Rng, designators: readonly string[], fallback: string): { type: string; wake: WakeCategory } {
+  const type = designators[rng.int(0, designators.length - 1)] ?? fallback
+  return { type, wake: lookupAircraftType(type).wake }
+}
+
 const AIRLINES = ['AAL', 'UAL', 'DAL', 'SWA', 'ASA', 'NKS', 'JBU', 'SKW']
-const TYPES: readonly [string, WakeCategory][] = [
-  ['B738', 'M'],
-  ['A320', 'M'],
-  ['A321', 'M'],
-  ['B739', 'M'],
-  ['A20N', 'M'],
-  ['E75L', 'M'],
-  ['CRJ7', 'M'],
-  ['B763', 'H'],
-]
+const AIRLINE_TYPES: readonly string[] = ['B738', 'A320', 'A321', 'B739', 'A20N', 'E75L', 'CRJ7', 'B763']
 
 function identity(rng: Rng): { callsign: string; type: string; wake: WakeCategory } {
   const airline = AIRLINES[rng.int(0, AIRLINES.length - 1)] ?? 'AAL'
-  const [type, wake] = TYPES[rng.int(0, TYPES.length - 1)] ?? ['B738', 'M']
-  return { callsign: `${airline}${rng.int(100, 1899)}`, type, wake }
+  return { callsign: `${airline}${rng.int(100, 1899)}`, ...drawType(rng, AIRLINE_TYPES, 'B738') }
 }
 
 /** The freight operators that serve SAN, and what they bring. Heavier on average than the
  *  airline fleet — which is the point: a Heavy on the North Ramp puts a real wake interval
  *  behind it, and the aircraft behind it is often a Light off the GA ramp. */
 const CARGO_OPERATORS = ['FDX', 'UPS', 'GTI', 'CLX']
-const CARGO_TYPES: readonly [string, WakeCategory][] = [
-  ['B763', 'H'],
-  ['A306', 'H'],
-  ['B752', 'M'],
-  ['AT76', 'M'],
-  ['C208', 'L'],
-]
+const CARGO_TYPES: readonly string[] = ['B763', 'A306', 'B752', 'AT76', 'C208']
 
 function cargoIdentity(rng: Rng): { callsign: string; type: string; wake: WakeCategory } {
   const operator = CARGO_OPERATORS[rng.int(0, CARGO_OPERATORS.length - 1)] ?? 'FDX'
-  const [type, wake] = CARGO_TYPES[rng.int(0, CARGO_TYPES.length - 1)] ?? ['B763', 'H']
-  return { callsign: `${operator}${rng.int(100, 1899)}`, type, wake }
+  return { callsign: `${operator}${rng.int(100, 1899)}`, ...drawType(rng, CARGO_TYPES, 'B763') }
 }
 
 /** General aviation: N-numbers rather than an operator code, and light types. */
-const GA_TYPES: readonly [string, WakeCategory][] = [
-  ['C172', 'L'],
-  ['SR22', 'L'],
-  ['PC12', 'L'],
-  ['BE20', 'L'],
-  ['C560', 'L'],
-]
+const GA_TYPES: readonly string[] = ['C172', 'SR22', 'PC12', 'BE20', 'C560']
 const GA_SUFFIX = 'ABCDEFGHJKLMNPQRSTUVWXYZ' // no I or O — they read as 1 and 0
 
 function gaIdentity(rng: Rng): { callsign: string; type: string; wake: WakeCategory } {
-  const [type, wake] = GA_TYPES[rng.int(0, GA_TYPES.length - 1)] ?? ['C172', 'L']
   const letter = (i: number): string => GA_SUFFIX[i] ?? 'A'
   const tail = `N${rng.int(100, 999)}${letter(rng.int(0, GA_SUFFIX.length - 1))}${letter(rng.int(0, GA_SUFFIX.length - 1))}`
-  return { callsign: tail, type, wake }
+  return { callsign: tail, ...drawType(rng, GA_TYPES, 'C172') }
 }
 
 /** The North Ramp — cargo and FBO parking, and the reason this field has runway crossings at
