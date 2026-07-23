@@ -85,12 +85,21 @@ export function GroundScope({ controller }: { controller: GroundController }) {
   // departure end together — you cannot land one way and depart the other. Read off the
   // published snapshot, not mirrored in local state: the sim can refuse a change, and anything
   // else that switches the runway has to be reflected here too.
-  const activeRunway = useSyncExternalStore(controller.subscribe, controller.getSnapshot).activeRunway
-  const toggleRunway = () => {
-    // Cycle the field's configurations, whatever they are — two on a single-runway airport.
-    const idents = controller.runwayIdents()
-    const next = idents[(idents.indexOf(activeRunway) + 1) % idents.length]
-    if (next) controller.setRunway(next)
+  const activeRunways = useSyncExternalStore(controller.subscribe, controller.getSnapshot).activeRunways
+  // Each physical runway (a layout, e.g. "08/26") is one control cycling through its states:
+  // its first direction → its second → off → first. A single-runway field never reaches "off"
+  // (a field always operates *somewhere*), so its one control just swaps the two directions, as
+  // before. A multi-runway field (KBUR) gets one control per runway, and turning a second one on
+  // is what puts both in use at once (docs/atc-multi-runway.md §5).
+  const cycleRunway = (dirs: string[]) => {
+    const [dirA, dirB] = dirs
+    if (!dirA || !dirB) return
+    const onDir = dirs.find((d) => activeRunways.includes(d))
+    if (!onDir) controller.setRunway(dirA)
+    else if (onDir === dirA) controller.setRunway(dirB)
+    else if (activeRunways.length <= 1)
+      controller.setRunway(dirA) // the field's last runway can't be turned off — wrap to its first
+    else controller.deactivateRunway(dirB)
   }
 
   // Time control. The ref drives the fixed-timestep loop; the state drives the buttons. 0 is
@@ -650,14 +659,26 @@ export function GroundScope({ controller }: { controller: GroundController }) {
       </div>
       <div className="hud hud-controls">
         {controller.dev && <span className="dev-tag mono">DEV</span>}
-        <button
-          type="button"
-          className="ctl-btn mono"
-          onClick={toggleRunway}
-          title="Switch the active runway. Arrivals and departures always use the same direction."
-        >
-          RWY {activeRunway}
-        </button>
+        {airport.layouts.map((layout) => {
+          const dirs = layout.ident.split('/')
+          const onDir = dirs.find((d) => activeRunways.includes(d))
+          const multi = airport.layouts.length > 1
+          return (
+            <button
+              key={layout.ident}
+              type="button"
+              className={`ctl-btn mono${onDir ? '' : ' ctl-btn-off'}`}
+              onClick={() => cycleRunway(dirs)}
+              title={
+                multi
+                  ? `Runway ${layout.ident}: click to change its direction, bring it online, or take it out of use.`
+                  : 'Switch the active runway. Arrivals and departures always use the same direction.'
+              }
+            >
+              RWY {onDir ?? `${layout.ident} OFF`}
+            </button>
+          )
+        })}
         <button
           type="button"
           className="ctl-btn mono"

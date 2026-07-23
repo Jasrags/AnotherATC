@@ -317,6 +317,14 @@ export interface GroundSim {
    *  arrival still on final goes around and re-establishes on the new approach, and departures
    *  yet to roll are retargeted to the new departure end. */
   setRunway(next: ActiveRunway): DispatchResult
+  /** Bring a runway online alongside the current one — activating a *different* physical runway
+   *  rather than swapping the direction of the current one, so both are then in use at once. This
+   *  is {@link setRunway}: it activates the given direction on its physical runway, leaving the
+   *  others untouched. The counterpart is {@link deactivateRunway}. (docs/atc-multi-runway.md §5.) */
+  /** Take a physical runway out of the active set (the counterpart to activating a second one).
+   *  Refused for the only active runway, and while any aircraft is still using the runway — a
+   *  first cut that requires a lull rather than reassigning its inbounds to another runway. */
+  deactivateRunway(dir: ActiveRunway): DispatchResult
   /** How much traffic the spawner generates, as a multiplier on the field's configured rate:
    *  1 = as configured, 0 = no new traffic at all. Scales both the interval between spawn
    *  attempts and the cap on simultaneous aircraft, so turning it down means a quieter field

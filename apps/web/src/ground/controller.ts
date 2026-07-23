@@ -195,6 +195,9 @@ export interface GroundControllerOptions {
 
 export interface StripSnapshot {
   aircraft: StripItem[]
+  /** Designators of every active runway direction — one per physical runway in use. A
+   *  single-runway field has one; KBUR with both runways up has two (docs/atc-multi-runway.md §5). */
+  activeRunways: string[]
   /** Designator of the runway direction in use. Published rather than mirrored in component
    *  state so it cannot drift from the sim, whatever changes it. */
   activeRunway: string
@@ -224,10 +227,16 @@ export interface GroundController {
   approach(): ApproachConfig
   /** Designator of the runway direction in use, e.g. "27". */
   activeRunway(): string
-  /** Switch the airport configuration. Single runway: this moves *both* the arrival final and
-   *  the departure end, because they are always the same direction. Refused (with a notice)
-   *  while traffic is committed to the runway in use. */
+  /** Every active runway direction — one per physical runway in use. */
+  activeRunways(): string[]
+  /** Activate a runway direction. On its own physical runway this swaps the direction; on a
+   *  *different* physical runway it brings that runway online *alongside* the current one, so both
+   *  are then active (docs/atc-multi-runway.md §5). Refused (with a notice) while traffic is
+   *  committed to the runway being changed. */
   setRunway(ident: string): void
+  /** Take a runway direction's physical runway back out of the active set. Refused for the only
+   *  active runway, and while any aircraft is still using it. */
+  deactivateRunway(ident: string): void
   /** The runway directions this field can be configured to, in display order. */
   runwayIdents(): string[]
   /** How much traffic the field is generating, as a multiplier on its configured rate
@@ -429,6 +438,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
     position: 'ground',
     draft: null,
     activeRunway: game.runway.ident,
+    activeRunways: [game.runway.ident],
     comms: [],
   }
   let sig = ''
@@ -465,7 +475,13 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
         .map((a) => [a.id, sim.exitOptions(a.id)] as const),
     )
     // The transcript only ever appends, so its last sequence number is a complete change key.
-    let nextSig = `${position}|${selected ?? '-'}|${sim.runway()?.ident ?? '-'}|${comms.at(-1)?.seq ?? 0}`
+    // The whole active set enters the key, not just the primary, so bringing a second runway
+    // online (or taking one back out) re-publishes even though the primary is unchanged.
+    let nextSig = `${position}|${selected ?? '-'}|${sim
+      .runways()
+      .map((r) => r.ident)
+      .sort() // set membership is what the UI cares about, not the order setRunway last touched it
+      .join('+')}|${comms.at(-1)?.seq ?? 0}`
     nextSig += draft ? `~${draft.id}:${draft.via.join('.')}` : ''
     // Range-to-threshold is continuous, so it enters the signature at display precision
     // (0.1 nm ≈ one re-render every ~2.5 s on final) rather than every frame.
@@ -477,6 +493,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
       selectedId: selected,
       position,
       activeRunway: sim.runway()?.ident ?? game.runway.ident,
+      activeRunways: sim.runways().map((r) => r.ident),
       draft: draft ? { id: draft.id, via: [...draft.via] } : null,
       comms,
       aircraft: acs.map((a) => ({
@@ -545,6 +562,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
       flashNotice(level ? `Traffic ${level.label}` : `Traffic rate ${rate}×`)
     },
     activeRunway: () => sim.runway()?.ident ?? game.runway.ident,
+    activeRunways: () => sim.runways().map((r) => r.ident),
     runwayIdents: () => airport.runways.map((r) => r.ident),
     setRunway: (ident) => {
       const next = findRunway(airport, ident)
@@ -552,11 +570,24 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
         flashNotice(`${airport.icao} has no runway ${ident}`)
         return
       }
+      // setRunway swaps the direction on `next`'s physical runway, or — if that runway is not yet
+      // active — brings it online alongside the current one. The sim decides which; the notice is
+      // the same "now in use" either way.
       const res = sim.setRunway(next)
-      // Announce either way. A successful change silently moves every arrival's final and every
+      // Announce either way. A successful change silently moves an arrival's final and a
       // departure's roll direction, so it needs saying as much as a refusal does — and the
       // notice lands in an aria-live region, which is the only announcement a screen reader gets.
       flashNotice(res.ok ? `RWY ${ident} now in use — arrivals and departures` : res.reason)
+      publish()
+    },
+    deactivateRunway: (ident) => {
+      const dir = findRunway(airport, ident)
+      if (!dir) {
+        flashNotice(`${airport.icao} has no runway ${ident}`)
+        return
+      }
+      const res = sim.deactivateRunway(dir)
+      flashNotice(res.ok ? `RWY ${ident} closed` : res.reason)
       publish()
     },
     exitOptions: (id) => sim.exitOptions(id),

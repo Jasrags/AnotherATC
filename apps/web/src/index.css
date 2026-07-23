@@ -270,6 +270,13 @@ body {
   color: #efe8ff;
 }
 
+/* A runway that is not currently in use — dimmed, so the active ones read as active. */
+.ctl-btn-off {
+  color: #5b5480;
+  border-color: #201b3d;
+  border-style: dashed;
+}
+
 /* The developer tools, set off from the two gameplay controls beside them. */
 .ctl-group {
   display: flex;

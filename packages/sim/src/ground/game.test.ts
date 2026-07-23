@@ -58,6 +58,22 @@ describe('traffic flow', () => {
     expect(sim.snapshot().aircraft.length).toBeLessThanOrEqual(spawn.maxAircraft)
   })
 
+  it('establishes arrivals on the configured approach even with no active runway', () => {
+    // A sim given only a spawn config (no `runway`/`runways`) still spawns arrivals airborne on
+    // final at `spawn.approach.fix` — not sitting at their gate. Regression guard for the
+    // two-runway spawner rework, which briefly dropped this fallback.
+    const sim = createGroundSim([], { graph, guard, spawn })
+    let arrival
+    for (let i = 0; i < 2000 && !arrival; i += 1) {
+      sim.step(0.1)
+      arrival = sim.snapshot().aircraft.find((a) => a.intent === 'arrival')
+    }
+    expect(arrival).toBeDefined()
+    expect(arrival!.status).toBe('onFinal')
+    // At the approach fix (x ≈ -4), a long way from the gate at [0.2, -0.2].
+    expect(arrival!.x).toBeLessThan(-1)
+  })
+
   it('is deterministic for a given seed', () => {
     const run = () => {
       const sim = createGroundSim([], { graph, guard, spawn })

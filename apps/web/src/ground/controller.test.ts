@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildStands, lookupAircraftType } from '@anotheratc/sim'
+import { buildStands, lookupAircraftType, KBUR } from '@anotheratc/sim'
 import { createGroundController } from './controller'
 import type { Airport, AirportSurface, Point, Rng } from '@anotheratc/sim'
 import { visibleComms } from './CommsLog'
@@ -628,5 +628,20 @@ describe('read-back verification is live', () => {
     // It may not be holding short yet — that refusal is a different one, and the point here is
     // only that the unverified code is never what lets it through.
     expect(res.ok).toBe(false)
+  })
+
+  it('brings a second runway online and takes it back out (KBUR)', () => {
+    // The UI-facing contract for two runways active at once: KBUR starts on 08, activating 15
+    // adds it alongside (a *different* physical runway), and it can be deactivated again.
+    const c = createGroundController({ airport: KBUR })
+    expect(c.activeRunways()).toEqual(['08'])
+    c.setRunway('15')
+    expect(c.activeRunways()).toEqual(['08', '15'])
+    // The snapshot reflects the set, so the RWY controls re-render.
+    expect(c.getSnapshot().activeRunways).toEqual(['08', '15'])
+    c.deactivateRunway('15')
+    expect(c.activeRunways()).toEqual(['08'])
+    // A single-runway field still exposes exactly one active runway.
+    expect(createGroundController().activeRunways()).toHaveLength(1)
   })
 })

@@ -88,6 +88,30 @@ rather than swapping the single one.
 - The sim↔UI contract additions (`runways(): ActiveRunway[]`, per-runway activate) are additive;
   the single-runway accessors stay so the KSAN web layer needs no change.
 
+### §5 shipped (two runways active at once)
+
+The spawner distributes new traffic across the active set (`trySpawn` draws a runway from `active`,
+only when there is more than one, so the single-runway RNG stream is unchanged); per-aircraft reads
+that used to take the primary runway now take the aircraft's own — `runwayIdentFor(ac)` for
+phraseology, and `runwayAtThreshold` for an arrival's glide path, so a 15 arrival (3.25°) and an 08
+arrival (3.0°) can be on final together. `deactivateRunway` is the counterpart to activating a
+second runway. The web control is one button per physical runway, cycling dir → recip → off (a
+single-runway field never reaches "off"). `?airport=KBUR` runs the field; bring 15 online alongside
+08 to see both in use.
+
+**Known follow-ups (not yet done), flagged in review:**
+
+- **Turnarounds still go to the primary runway.** `turnRound` sends a turnaround departure to
+  `runway.departureStart` (the primary), not to a runway drawn from the active set — so a flight
+  that arrived on 15 departs off 08. Distribute it the way `trySpawn` now does.
+- **`deactivateRunway` refuses only on *assigned* traffic** (`targetRunwayId(ac) === id`), a lull
+  requirement. Draining an active runway — reassigning its inbounds to another, the `setRunway`
+  cascade in reverse — is a later slice. Traffic mid-*crossing* of a runway is not counted as
+  "using" it (its target is elsewhere); this is safe, because occupancy/hold-short protection keys
+  off the physical `RunwayGuard`, not the active set.
+- **The scope draws one final** (the primary's approach course). With two runways active, the
+  second runway's final is not drawn yet.
+
 ## 6. The dependency seam (the crux)
 
 Two runways interact in field-specific ways the foundation must *not* hardcode: KBUR's departures

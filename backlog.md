@@ -448,9 +448,14 @@ own coupling rule as a seam plug; neither is blocked.
   (regression-guarded). _Watch: the 26-end runway guard band is wide, so terminal pavement near
   x0.42 reads as on-runway — pre-existing band width, no incursion observed in play, but worth an
   eye. Also the remaining 8-node unnamed SW apron island (94 ft gap) has no gates — left as-is._
-  _Next themes: (1) **two runways active at once** — `createAirportGame` is still
-  single-active; simultaneous 08+15 ops (where the crossing coupling really bites) + the runway
-  picker for a set is docs/atc-multi-runway.md §5. (3) **position-aware crossing** — release the
+  **Two runways active at once shipped** (`docs/atc-multi-runway.md` §5): the spawner distributes
+  traffic across the active set (guarded so single-runway RNG is unchanged), per-aircraft
+  phraseology + glide path replace the primary-runway reads, `deactivateRunway` is the counterpart
+  to activating a second runway, and the web control is one button per physical runway
+  (dir→recip→off). `?airport=KBUR` runs the field. Reviewer follow-ups recorded in the doc:
+  turnarounds still launch off the primary; deactivate needs a lull (no inbound-reassignment);
+  the scope draws only the primary final.
+  _Remaining: **position-aware crossing** — release the
   other runway once a departure is past the intersection (the refinement of the boolean coupling)._
 - ⬜ **KOAK — the parallel/dependent case**. Four runways, **zero intersections**: **10L/28R**
   (5,457 ft) and **10R/28L** (6,213 ft) are parallel and only **1,001 ft apart** — well under the

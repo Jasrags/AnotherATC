@@ -3,7 +3,7 @@ import { createAirportGame, compileRunwayDependencies } from './airport'
 import { createGroundSim, type AircraftInit } from '../ground/sim'
 import { buildTaxiGraph } from '../ground/taxiGraph'
 import { buildRunwayGuard, runwayIdAt } from '../ground/runwayGuard'
-import { displacedNm } from '../ground/runway'
+import { displacedNm, finalFix, FINAL_APPROACH_NM } from '../ground/runway'
 import { KBUR, KBUR_RUNWAYS } from './kburAirport'
 import { KSAN } from './ksanAirport'
 
@@ -236,3 +236,83 @@ describe('the crossing rule has teeth: 15/33 traffic gates a takeoff on 08 (docs
     expect(sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'd' })).toEqual({ ok: true })
   })
 })
+
+describe('two runways active at once (docs/atc-multi-runway.md §5)', () => {
+  const near = (a: readonly [number, number], b: readonly [number, number]): boolean =>
+    Math.hypot(a[0] - b[0], a[1] - b[1]) < 0.05
+
+  it('the spawner distributes arrivals across both active runways', () => {
+    const game = createAirportGame(KBUR, 5)
+    // Both 08 and 15 active at once — a different physical runway each.
+    const sim = createGroundSim([], {
+      graph,
+      guard,
+      spawn: game.spawn,
+      servicing: game.servicing,
+      runways: [KBUR_RUNWAYS['08'], KBUR_RUNWAYS['15']],
+      runwaysInteract: game.runwaysInteract,
+    })
+    expect(sim.runways().map((r) => r.ident)).toEqual(['08', '15'])
+    sim.setTrafficRate(4) // heavy, so both runways get traffic within the run
+
+    const fix08 = finalFix(KBUR_RUNWAYS['08'], FINAL_APPROACH_NM)
+    const fix15 = finalFix(KBUR_RUNWAYS['15'], FINAL_APPROACH_NM)
+    const seen = new Set<string>()
+    let on08 = 0
+    let on15 = 0
+    for (let i = 0; i < 8000 && (on08 === 0 || on15 === 0); i += 1) {
+      sim.step(0.1)
+      for (const a of sim.snapshot().aircraft) {
+        if (a.status !== 'onFinal' || seen.has(a.id)) continue
+        seen.add(a.id)
+        if (near([a.x, a.y], fix08)) on08 += 1
+        else if (near([a.x, a.y], fix15)) on15 += 1
+      }
+    }
+    // Arrivals appeared established on *both* finals — the whole point of two active runways.
+    expect(on08).toBeGreaterThan(0)
+    expect(on15).toBeGreaterThan(0)
+  })
+
+  it('a runway can be taken back out of the set, but not the last one, nor one in use', () => {
+    const sim = createGroundSim([], {
+      graph,
+      guard,
+      runways: [KBUR_RUNWAYS['08'], KBUR_RUNWAYS['15']],
+      runwaysInteract: game_runwaysInteract(),
+    })
+    // Cannot close the sole-remaining runway.
+    expect(sim.deactivateRunway(KBUR_RUNWAYS['08']).ok).toBe(true)
+    expect(sim.runways().map((r) => r.ident)).toEqual(['15'])
+    expect(sim.deactivateRunway(KBUR_RUNWAYS['15'])).toEqual({ ok: false, reason: expect.stringMatching(/only active/i) })
+  })
+
+  it('refuses to close a runway that has traffic committed to it', () => {
+    const finalFix08 = finalFix(KBUR_RUNWAYS['08'], FINAL_APPROACH_NM)
+    const sim = createGroundSim(
+      [
+        {
+          id: 'a',
+          callsign: 'SWA111',
+          type: 'B738',
+          wake: 'M',
+          path: [finalFix08, KBUR_RUNWAYS['08'].threshold],
+          targetSpeed: 140,
+          airborne: true,
+          intent: 'arrival',
+          goalPoint: KBUR.fleets[0]!.gates[0]!.point,
+          gate: KBUR.fleets[0]!.gates[0]!.ref,
+        },
+      ],
+      { graph, guard, runways: [KBUR_RUNWAYS['08'], KBUR_RUNWAYS['15']], runwaysInteract: game_runwaysInteract() },
+    )
+    // An arrival is inbound to 08, so 08 cannot be closed under it; 15 (idle) still can.
+    expect(sim.deactivateRunway(KBUR_RUNWAYS['08']).ok).toBe(false)
+    expect(sim.deactivateRunway(KBUR_RUNWAYS['15']).ok).toBe(true)
+  })
+})
+
+/** The compiled crossing coupling, reused across the two-runway tests. */
+function game_runwaysInteract() {
+  return createAirportGame(KBUR, 1).runwaysInteract
+}

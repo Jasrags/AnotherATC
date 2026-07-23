@@ -587,6 +587,14 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     const hit = id !== null ? active.find((a) => a.id === id) : undefined
     return hit?.dir ?? (active.length === 1 ? active[0]!.dir : undefined)
   }
+  /** The active runway an arrival established on `thr` is landing on — matched by threshold point,
+   *  which the spawner sets to the runway's own. For resolving per-runway facts (the glide path)
+   *  at construction, before the aircraft is in the fleet for {@link activeRunwayFor}. Falls back
+   *  to the primary runway for a threshold that matches none (a dev/hand-authored arrival). */
+  const runwayAtThreshold = (thr: Point | null): ActiveRunway | undefined => {
+    if (!thr) return runway
+    return active.find((a) => a.dir.threshold[0] === thr[0] && a.dir.threshold[1] === thr[1])?.dir ?? runway
+  }
   /** Where arrivals are established, derived from the active runway when there is one. */
   const approachNow = (): ApproachConfig | null =>
     runway
@@ -656,11 +664,14 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     return commsView
   }
 
-  /** Runway designator as spoken: no leading zero ("09" → "9"). */
-  const runwayIdent = (): string | null => runway?.ident.replace(/^0/, '') ?? null
+  /** The runway this aircraft is using, spoken — its own, not the primary, so with two runways
+   *  active a 15 departure is cleared for "runway 15" and an 08 one for "runway 8". Falls back to
+   *  the primary when the aircraft resolves to none (docs/atc-multi-runway.md §5). */
+  const runwayIdentFor = (ac: Internal): string | null =>
+    (activeRunwayFor(ac)?.ident ?? runway?.ident)?.replace(/^0/, '') ?? null
 
   function phraseContext(ac: Internal): PhraseContext {
-    const rwy = runwayIdent()
+    const rwy = runwayIdentFor(ac)
     return {
       callsign: ac.callsign,
       runway: rwy,
@@ -825,7 +836,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
 
   /** The pilot's first call on a new frequency, right after a handoff. */
   function checkIn(ac: Internal): void {
-    const rwy = runwayIdent()
+    const rwy = runwayIdentFor(ac)
     if (ac.controlledBy === 'tower') {
       const where = rwy ? `holding short runway ${rwy}` : 'holding short'
       transmit('pilot', 'tower', ac, `Tower, ${ac.callsign}, ${where}.`)
@@ -855,9 +866,13 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     const heading = init.heading ?? (next ? bearing(start[0], start[1], next[0], next[1]) : 0)
     const threshold = airborne ? (path[path.length - 1] ?? null) : null
     const finalLenNm = threshold ? pathLength(path) : 0
-    // The descent is the runway's *published* glide path, not one hard-coded angle: KSAN is
-    // 3.3° to 09 and a notably steep 3.5° to 27 (docs/SAN/runway-9-27.md).
-    const finalAltFt = glideAltitudeFt(runway?.glidePathDeg ?? DEFAULT_GLIDE_DEG, finalLenNm)
+    // The descent is the *arrival's own* runway's published glide path, not one hard-coded angle
+    // and not the primary runway's: KSAN is 3.3° to 09 and 3.5° to 27, and with two runways active
+    // a 15 arrival (3.25°) and an 08 arrival (3.0°) are on final at once (docs/atc-multi-runway.md).
+    const finalAltFt = glideAltitudeFt(
+      (runwayAtThreshold(threshold) ?? runway)?.glidePathDeg ?? DEFAULT_GLIDE_DEG,
+      finalLenNm,
+    )
     return {
       id: init.id,
       callsign: init.callsign,
@@ -2967,7 +2982,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     const traffic = find(ac.lineUpBehind)
     const cancel = (): void => {
       ac.lineUpBehind = null
-      const rwy = runwayIdent()
+      const rwy = runwayIdentFor(ac)
       const where = rwy ? ` runway ${rwy}` : ''
       transmit('controller', ac.controlledBy, ac, `${ac.callsign}, cancel line up and wait, hold short of${where}.`)
       transmit('pilot', ac.controlledBy, ac, `Holding short of${where}, ${ac.callsign}.`)
@@ -2981,7 +2996,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     if (!canLineUpNow(ac)) return cancel()
     enterRunway(ac)
     ac.lineUpBehind = null
-    const rwy = runwayIdent()
+    const rwy = runwayIdentFor(ac)
     transmit('pilot', ac.controlledBy, ac, `Lining up${rwy ? ` runway ${rwy}` : ''}, ${ac.callsign}.`)
   }
 
@@ -3156,6 +3171,11 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     const slot = free[spawnRng.int(0, free.length - 1)]
     if (!slot) return
     const intent: GroundIntent = spawnRng.next() < 0.5 ? 'departure' : 'arrival'
+    // Which active runway this flight uses. A single active runway (or none) draws nothing, so the
+    // single-runway spawn stream is byte-for-byte unchanged; only when a second runway is brought
+    // online does the extra draw distribute traffic across the set (docs/atc-multi-runway.md §5).
+    const chosen =
+      active.length > 1 ? active[spawnRng.int(0, active.length - 1)]!.dir : (active[0]?.dir ?? runway)
     const { callsign, type, wake } = traffic.identity(spawnRng)
     fleet.push(
       makeInternal({
@@ -3166,10 +3186,14 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         path:
           intent === 'departure'
             ? [slot.point]
-            : (() => {
-                const ap = approachNow()
-                return ap ? [ap.fix, ap.threshold] : [slot.point]
-              })(),
+            : chosen
+              ? [finalFix(chosen, FINAL_APPROACH_NM), chosen.threshold]
+              : // No active runway (a sim given only a spawn config) still establishes arrivals on
+                // the configured approach — the same fallback approachNow() has always provided.
+                (() => {
+                  const ap = approachNow()
+                  return ap ? [ap.fix, ap.threshold] : [slot.point]
+                })(),
         // Arrivals cross the threshold at their own type's approach speed — a Heavy fast, a Light
         // slow — which is what makes them occupy the runway for different times: the exit model
         // brakes down from this speed to pick a turnoff (runwayExits.ts). Departures start stopped.
@@ -3182,7 +3206,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         // including after a turnaround, when the spawner is long out of the picture.
         fleet: traffic.kind,
         goalPoint:
-          intent === 'departure' ? (runway?.departureStart ?? spawn.departureTarget) : slot.point,
+          intent === 'departure' ? (chosen?.departureStart ?? spawn.departureTarget) : slot.point,
       }),
     )
   }
@@ -3386,6 +3410,24 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
           ac.goalPoint = next.departureStart
         }
       }
+      return ACCEPTED
+    },
+    deactivateRunway(dir: ActiveRunway): DispatchResult {
+      // Take a physical runway out of the active set — the counterpart to activating a second one
+      // with setRunway (docs/atc-multi-runway.md §5). Refused while anything is still using it:
+      // a runway is not turned off under its own traffic. The last active runway cannot be turned
+      // off — a field always lands and departs *somewhere*. First cut: the runway must be clear of
+      // assigned traffic (a lull), because draining an active runway means reassigning its inbounds
+      // to another one, which is the setRunway cascade in reverse and its own slice.
+      const id = physicalIdOf(dir)
+      const entry = active.find((a) => a.id === id)
+      if (!entry) return refused(`RWY ${dir.ident} is not in use`)
+      if (active.length <= 1) return refused(`cannot close the only active runway`)
+      const user = fleet.find((ac) => targetRunwayId(ac) === id)
+      if (user) return refused(`RWY ${entry.dir.ident} in use — ${user.callsign} is using it`)
+      active = active.filter((a) => a.id !== id)
+      runway = active[0]?.dir
+      exitCache.clear()
       return ACCEPTED
     },
     exitOptions(aircraftId: string): RunwayExit[] {
