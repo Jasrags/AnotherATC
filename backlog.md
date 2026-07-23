@@ -439,11 +439,16 @@ own coupling rule as a seam plug; neither is blocked.
   `buildRunwayExits` now scopes turnoffs to the *landing* runway (via `runwayIdAt`) and refuses a
   turnoff onto another runway — before it, an 08 arrival was "assigned" 15/33 as a turnoff and
   taxied off down the crosser (the single-runway assumption the source flagged).
-  _Next themes, to make KBUR fully playable:
-  (1) **arrivals reach the SE terminal** — an 08 arrival vacates onto a real taxiway but auto-taxi
-  to the gate fails: the turnoff isn't chosen toward the gate side, and the route back to the SE
-  terminal crosses 15/33 with no arrival-issued crossing. Needs turnoff-side preference +
-  an arrival runway-crossing. (2) **two runways active at once** — `createAirportGame` is still
+  **Arrivals reach the SE terminal** (done): an 08 arrival now turns off toward the gate side
+  (gate-side preference in `chooseExit`), taxis in, holds short of 15/33, is cleared across, and
+  reaches its gate. Two fixes made it work: the turnoff preference, and a **34 ft ingest bridge**
+  (`build-kbur-surface.mjs` `BRIDGES`) welding the SE terminal — a graph island — to taxiway D at
+  the 26 end where OSM split the junction (lessons-from-ksan #27; the merge threshold can't widen
+  because both fields have real junctions ~31 ft apart). All 14 gates now route to the runway
+  (regression-guarded). _Watch: the 26-end runway guard band is wide, so terminal pavement near
+  x0.42 reads as on-runway — pre-existing band width, no incursion observed in play, but worth an
+  eye. Also the remaining 8-node unnamed SW apron island (94 ft gap) has no gates — left as-is._
+  _Next themes: (1) **two runways active at once** — `createAirportGame` is still
   single-active; simultaneous 08+15 ops (where the crossing coupling really bites) + the runway
   picker for a set is docs/atc-multi-runway.md §5. (3) **position-aware crossing** — release the
   other runway once a departure is past the intersection (the refinement of the boolean coupling)._

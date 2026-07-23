@@ -103,6 +103,31 @@ const REF_PATCH = {
 // their exact centres are read off that chart during the naming theme.
 const HOTSPOTS = []
 
+// Missing centreline connections — the lessons-from-ksan.md #27 data fix. Where two OSM ways
+// that meet in reality were digitised with their endpoints a few dozen feet apart, the taxi
+// graph keys nodes by exact coordinates and leaves two disconnected nodes, severing whatever is
+// beyond. The node-merge in taxiGraph.ts folds gaps within ~30 ft, but both KSAN and KBUR have
+// genuinely-distinct junctions ~31–32 ft apart, so the threshold cannot be widened without
+// welding real pavement — the fix belongs in the field data instead.
+//
+// Each bridge is a short taxiway between two points that ARE already graph nodes (endpoints of
+// existing ways), added as its own feature so no existing geometry moves. Coordinates are the
+// ingest-rounded local-nm values; a bridge whose endpoints do not both land on a node connects
+// nothing, so verify against the surface after regenerating.
+const BRIDGES = [
+  {
+    // The SE passenger terminal (gates A1–A9, B1–B5) reaches the movement area only through a
+    // stub that ends on runway 08/26 at the 26 threshold, 34 ft from where taxiway D ends on the
+    // same pavement — OSM split that junction in two. Without this the whole terminal is an
+    // island: no arrival can taxi in and no departure can taxi out. Links the stub end to D's end.
+    ref: 'D',
+    points: [
+      [0.4195, -0.1825], // stub end (terminal side)
+      [0.4251, -0.1825], // taxiway D end (main network)
+    ],
+  },
+]
+
 let raw
 try {
   raw = JSON.parse(readFileSync(RAW, 'utf8'))
@@ -150,6 +175,21 @@ for (const el of raw.elements) {
     feature.closed = true
   }
   features.push(feature)
+}
+
+// Append the hand-authored bridges (see BRIDGES) as their own taxiway features. Each must land
+// both endpoints on an existing node, so assert every bridge endpoint coincides with a projected
+// vertex already in the surface — a bridge that connects nothing is a silent no-op otherwise.
+const vertexKeys = new Set(features.flatMap((f) => f.points.map((p) => `${p[0]},${p[1]}`)))
+for (const bridge of BRIDGES) {
+  for (const p of bridge.points) {
+    if (!vertexKeys.has(`${round(p[0])},${round(p[1])}`)) {
+      throw new Error(
+        `bridge endpoint [${p}] does not coincide with any existing surface vertex — it would connect nothing; re-check against the surface`,
+      )
+    }
+  }
+  features.push({ kind: 'taxiway', points: bridge.points.map((p) => [round(p[0]), round(p[1])]), ...(bridge.ref ? { ref: bridge.ref } : {}) })
 }
 
 // Fail loudly rather than write partial/mislabeled data into the deterministic core.

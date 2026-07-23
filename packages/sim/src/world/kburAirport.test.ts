@@ -106,12 +106,14 @@ const departure08 = (): AircraftInit => ({
 })
 
 describe('KBUR plays (the lessons-from-ksan #17 anchor)', () => {
-  it('an arrival flies 08’s final, lands, and turns off onto a real taxiway — never up the crossing runway', () => {
-    // The regression guard for the multi-runway exit fix (runwayExits.ts): before it, an arrival
-    // landing on 08 was "assigned" the intersecting runway 15/33 as a turnoff and taxied off down
-    // it, reported clear of 08 while sitting on the crosser. It must now vacate onto 08/26 pavement
-    // or a taxiway, and be handed to Ground there. (Auto-taxi on to the SE terminal — which needs a
-    // turnoff toward the gate side and an arrival runway-crossing — is the next slice; see backlog.)
+  it('an arrival flies 08’s final, lands, turns off toward the terminal, crosses 15/33 and reaches its gate', () => {
+    // The full loop on the intersecting field. Two things had to be true for this to work, and
+    // both are guarded here: (a) the rollout turns off onto a real taxiway toward the gate side —
+    // never up the crossing runway 15/33 (the runwayExits multi-runway fix + the gate-side turnoff
+    // preference in chooseExit); (b) the SE terminal is actually connected to the taxi network (the
+    // 34 ft bridge at the 26 end in the ingest — before it the terminal was a graph island and no
+    // taxi route to a gate existed). The route to the gate crosses 15/33, so the controller clears
+    // it across — modelled here by issuing the crossing when the aircraft holds short for it.
     const game = createAirportGame(KBUR, 3)
     const gate = KBUR.fleets[0]!.gates[0]!
     const sim = createGroundSim(
@@ -141,24 +143,42 @@ describe('KBUR plays (the lessons-from-ksan #17 anchor)', () => {
     expect(sim.dispatch({ type: 'clearedToLand', aircraftId: 'a' })).toEqual({ ok: true })
 
     const seen = new Set<string>()
-    let handedToGround = false
-    let vacatedOn: string | null | undefined
-    for (let i = 0; i < 8000 && !handedToGround; i += 1) {
+    let taxiCleared = false
+    for (let i = 0; i < 20000 && sim.snapshot().arrived < 1; i += 1) {
       sim.step(0.1)
       const a = sim.snapshot().aircraft.find((x) => x.id === 'a')
       if (!a) break
       seen.add(a.status)
       if (a.status === 'rollout') sim.dispatch({ type: 'contactGround', aircraftId: 'a' })
       if (a.controlledBy === 'ground') {
-        handedToGround = true
-        vacatedOn = runwayIdAt([a.x, a.y], guard)
+        if (!taxiCleared) {
+          taxiCleared = true
+          // The turnoff never goes up 15/33 — the aircraft is on 08/26 pavement or a taxiway.
+          expect(runwayIdAt([a.x, a.y], guard)).not.toBe('15/33')
+          expect(sim.dispatch({ type: 'taxiToGoal', aircraftId: 'a' })).toEqual({ ok: true })
+        }
+        // Clear the 15/33 crossing when it holds short for it (a no-op otherwise).
+        sim.dispatch({ type: 'crossRunway', aircraftId: 'a' })
       }
     }
     expect(seen.has('landing')).toBe(true)
     expect(seen.has('rollout')).toBe(true)
-    expect(handedToGround).toBe(true)
-    // The whole point: it did not turn off down runway 15/33.
-    expect(vacatedOn).not.toBe('15/33')
+    expect(sim.snapshot().arrived).toBe(1)
+  })
+
+  it('every terminal gate can taxi to the departure runway (the terminal is not a graph island)', () => {
+    // Regression guard for the ingest bridge (tools/ingest/build-kbur-surface.mjs): the SE terminal
+    // reaches the taxi network only through a 34 ft weld at the 26 end. If an OSM re-fetch moves
+    // that junction the bridge stops connecting, and every gate silently loses its route out — this
+    // catches it. (The ingest also asserts the bridge endpoints land on real vertices.)
+    const game = createAirportGame(KBUR, 3)
+    const endNode = graph.nearestNode(game.runway.departureStart)
+    expect(endNode).not.toBeNull()
+    for (const g of KBUR.fleets[0]!.gates) {
+      const from = graph.nearestNode(g.point)
+      expect(from, `gate ${g.ref} has no graph node`).not.toBeNull()
+      expect(graph.route(from!, endNode!).length, `gate ${g.ref} cannot route to RWY 08`).toBeGreaterThan(0)
+    }
   })
 
   it('a lone departure takes off on 08, crossing the intersection on its roll', () => {

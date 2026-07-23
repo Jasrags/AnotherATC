@@ -2833,10 +2833,31 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
    * This is the "unable, we'll take the next one" fall-through: an aircraft that is too fast for
    * the turnoff it was planning declines it and continues instead of wrenching off at speed.
    */
+  /** Which side of the landing runway this arrival's gate is on — so the rollout turns off toward
+   *  the terminal rather than away from it. Undefined when it does not apply (a departure, no goal,
+   *  or no resolvable runway), leaving the choice on rollout time alone. The sign convention matches
+   *  `buildRunwayExits`' `turn`: cross(landing-direction, gate − threshold) > 0 is a left exit. */
+  function gateSideFor(ac: Internal): 'left' | 'right' | undefined {
+    if (ac.intent !== 'arrival' || !ac.goalPoint) return undefined
+    const rwy = activeRunwayFor(ac)
+    if (!rwy) return undefined
+    const ux = rwy.farEnd[0] - rwy.threshold[0]
+    const uy = rwy.farEnd[1] - rwy.threshold[1]
+    if (Math.hypot(ux, uy) < 1e-9) return undefined
+    const gx = ac.goalPoint[0] - rwy.threshold[0]
+    const gy = ac.goalPoint[1] - rwy.threshold[1]
+    return ux * gy - uy * gx > 0 ? 'left' : 'right'
+  }
+
   function planRollout(ac: Internal): void {
     const options = exitOptionsFor(ac)
     const assigned = options.find((e) => e.ref === ac.assignedExitRef)
-    const preferred = chooseExit(options, ac.groundspeed, alongRunway(ac.threshold ?? [ac.x, ac.y], [ac.x, ac.y]))
+    const preferred = chooseExit(
+      options,
+      ac.groundspeed,
+      alongRunway(ac.threshold ?? [ac.x, ac.y], [ac.x, ac.y]),
+      gateSideFor(ac),
+    )
     for (const candidate of [assigned, preferred, ...options]) {
       if (candidate && planExitRoll(ac, candidate)) return
     }

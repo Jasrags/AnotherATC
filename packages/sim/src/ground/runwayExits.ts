@@ -346,11 +346,18 @@ const ROT_TIE_SEC = 5
  * {@link MAX_BRAKE_KT_S}, the one that gets it off the runway soonest — and among those that
  * are effectively tied, the one it can take fastest. That naturally prefers a rapid exit over
  * rolling to a distant right-angle one, which is exactly why RETs exist.
+ *
+ * `preferTurn` biases the tie-break toward the side the aircraft's gate is on: two turnoffs a
+ * few seconds apart are operationally equivalent, so leaving toward the terminal beats leaving
+ * away from it and then having to route the long way round (or, on a turn-aware taxi graph, being
+ * unable to at all because the vacate heading points away). It only ever reorders *tied* exits —
+ * it never sends an aircraft to a materially slower turnoff to change sides.
  */
 export function chooseExit(
   exits: readonly RunwayExit[],
   fromKt: number,
   atDistanceNm: number,
+  preferTurn?: 'left' | 'right',
 ): RunwayExit | null {
   const scored: { exit: RunwayExit; sec: number }[] = []
   for (const e of exits) {
@@ -364,9 +371,12 @@ export function chooseExit(
   if (scored.length === 0) return null
   const fastest = Math.min(...scored.map((s) => s.sec))
   const tied = scored.filter((s) => s.sec <= fastest + ROT_TIE_SEC)
-  // Deterministic ordering: fastest turn, then earliest on the runway, then by designator.
+  // Deterministic ordering: the gate's side first (when asked), then fastest turn, then earliest
+  // on the runway, then by designator.
+  const sideRank = (e: RunwayExit): number => (preferTurn && e.turn === preferTurn ? 0 : 1)
   tied.sort(
     (p, q) =>
+      sideRank(p.exit) - sideRank(q.exit) ||
       q.exit.speedKt - p.exit.speedKt ||
       p.exit.distanceNm - q.exit.distanceNm ||
       (p.exit.ref < q.exit.ref ? -1 : 1),
