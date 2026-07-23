@@ -142,6 +142,39 @@ describe('occupancy is per-runway (docs/atc-multi-runway.md §3)', () => {
   })
 })
 
+describe('the dependency seam carries a rule (docs/atc-multi-runway.md §6)', () => {
+  it('a field that couples two runways for occupancy blocks a line-up under an occupant', () => {
+    // Same geometry as the per-runway independence test above, but this field declares that its
+    // two runways interact for occupancy — the crossing case a real intersecting field states. Now
+    // the occupant on 09/27 *does* bear on a line-up on 18/36: the seam is the only difference.
+    const sim = createGroundSim(
+      [
+        {
+          id: 'blocker',
+          callsign: 'XRW900',
+          type: 'B738',
+          wake: 'M',
+          path: [[-0.5, 0]],
+          targetSpeed: 0,
+          intent: 'departure',
+          goalPoint: [1, 0],
+        },
+        departureHoldingShort('b', 'XRW200', 'M', [0.5, -1], [0.3, -1], [0.1, -1]),
+      ],
+      {
+        graph,
+        guard,
+        runway: RWY_36,
+        runwaysInteract: (_mine, _other, kind) => kind === 'occupancy',
+      },
+    )
+    expect(sim.dispatch({ type: 'contactTower', aircraftId: 'b' })).toEqual({ ok: true })
+    const res = sim.dispatch({ type: 'lineUpAndWait', aircraftId: 'b' })
+    expect(res.ok).toBe(false)
+    if (!res.ok) expect(res.reason).toMatch(/occupied/i)
+  })
+})
+
 describe('two runways active at once (docs/atc-multi-runway.md §5)', () => {
   // Both directions active. A departure on each — 36 rolls north, 27 rolls west. With a single
   // active `runway` the sim refused a takeoff on whichever direction wasn't configured; the active

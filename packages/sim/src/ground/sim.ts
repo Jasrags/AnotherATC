@@ -42,6 +42,8 @@ import {
   FINAL_APPROACH_NM,
   SHORT_FINAL_NM,
   type ActiveRunway,
+  type RunwayInteractionKind,
+  type RunwaysInteract,
 } from './runway'
 import {
   brakeRateFor,
@@ -211,6 +213,11 @@ export interface GroundSimOptions {
    *  direction per physical runway (docs/atc-multi-runway.md §5). A single-runway field passes
    *  `runway` instead; this is its generalisation, and the two are mutually exclusive. */
   runways?: readonly ActiveRunway[]
+  /** How this field couples its runways (docs/atc-multi-runway.md §6): whether traffic on one
+   *  runway is relevant to a clearance on another, and why. Omit for independent runways — every
+   *  runway minds only its own traffic, which is every single-runway field and any multi-runway
+   *  field that has not stated a dependency. KBUR's crossing and KOAK's parallels plug in here. */
+  runwaysInteract?: RunwaysInteract
 }
 
 // ─── Wheels-up time windows (EDCT) ───────────────────────────────────────────
@@ -562,6 +569,17 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
    *  arrive with per-runway spawning, so the first active runway stands in until then. Kept in
    *  sync with `active` (see setRunway) so the many config-level reads below need no change. */
   let runway: ActiveRunway | undefined = active[0]?.dir
+  /** How this field couples its runways; independent by default (docs/atc-multi-runway.md §6). */
+  const runwaysInteract: RunwaysInteract = opts.runwaysInteract ?? (() => false)
+  /** Whether traffic on runway `other` bears on a clearance protecting runway `mine`, for `kind`:
+   *  the same runway always does, and a coupled pair does when the field says so. The single
+   *  choke point every per-runway gate goes through, so "same runway, or interacting" is stated
+   *  once. Null on either side means unresolved — treated as unrelated (the caller field-wides). */
+  const runwaysRelated = (
+    mine: string | null,
+    other: string | null,
+    kind: RunwayInteractionKind,
+  ): boolean => mine !== null && other !== null && (mine === other || runwaysInteract(mine, other, kind))
   /** The active direction on the runway `ac` is using — its takeoff/landing geometry — matched by
    *  the aircraft's own runway id, falling back to the single active runway. */
   const activeRunwayFor = (ac: Internal): ActiveRunway | undefined => {
@@ -1164,16 +1182,16 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
 
   /**
    * Whether `o` blocks a clearance on runway `runwayId`: the per-runway form of {@link blocksRunway}.
-   * An occupant or a short-final arrival threatens only its *own* runway — traffic on a different
-   * runway is invisible here, until the dependency seam couples two (docs/atc-multi-runway.md §6).
-   * With `runwayId` null (a runway that can't be resolved) it falls back to the field-wide
-   * predicate, which is also exactly the single-runway behaviour.
+   * An occupant or a short-final arrival threatens its *own* runway, and any runway the field has
+   * coupled to it for `kind` (docs/atc-multi-runway.md §6) — by default none, so traffic on an
+   * unrelated runway is invisible here. With `runwayId` null (a runway that can't be resolved) it
+   * falls back to the field-wide predicate, which is also exactly the single-runway behaviour.
    */
-  function blocksRunwayFor(o: Internal, runwayId: string | null): boolean {
+  function blocksRunwayFor(o: Internal, runwayId: string | null, kind: RunwayInteractionKind): boolean {
     if (runwayId === null) return blocksRunway(o)
-    if (onShortFinal(o)) return approachRunwayOf(o) === runwayId
-    if (o.rollingOut && !o.vacated) return approachRunwayOf(o) === runwayId
-    return occupiesForTakeoff(o) && physicalRunwayOf(o) === runwayId
+    if (onShortFinal(o)) return runwaysRelated(approachRunwayOf(o), runwayId, kind)
+    if (o.rollingOut && !o.vacated) return runwaysRelated(approachRunwayOf(o), runwayId, kind)
+    return occupiesForTakeoff(o) && runwaysRelated(physicalRunwayOf(o), runwayId, kind)
   }
 
   /** Every runway a holding-short aircraft's held (crossing) route runs across — each one a
@@ -1226,10 +1244,12 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     // Scope every bar to the runway `ac` is lining up on. A single-runway field resolves R to its
     // one runway, so each `R === null ||` short-circuit is never taken and this is the old check.
     const R = targetRunwayId(ac)
-    const onThisRunway = (o: Internal): boolean => R === null || physicalRunwayOf(o) === R
-    const forThisRunway = (o: Internal): boolean => R === null || targetRunwayId(o) === R
+    const onThisRunway = (o: Internal): boolean =>
+      R === null || runwaysRelated(physicalRunwayOf(o), R, 'occupancy')
+    const forThisRunway = (o: Internal): boolean =>
+      R === null || runwaysRelated(targetRunwayId(o), R, 'occupancy')
     const shortFinalHere = (o: Internal): boolean =>
-      onShortFinal(o) && (R === null || approachRunwayOf(o) === R)
+      onShortFinal(o) && (R === null || runwaysRelated(approachRunwayOf(o), R, 'occupancy'))
     const leavingTheRunway = (o: Internal): boolean =>
       (o.departing || o.rollingOut) && o.groundspeed > ROLLING_KT
     return !fleet.some(
@@ -1499,9 +1519,22 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     return 'insufficient runway remaining for takeoff'
   }
 
-  /** The wake-separation leader on the runway `ac` departs from — its own runway only. */
+  /** The departure whose wake `ac` must wait behind: the most recent on its own runway, and on any
+   *  runway the field couples to it for wake (close parallels — docs/atc-multi-runway.md §6),
+   *  whichever binds `ac` longest. With no coupling this is just `ac`'s own runway's leader. */
   function wakeLeaderFor(ac: Internal): { wake: WakeCategory; atTime: number } | undefined {
-    return lastDepartureByRunway.get(targetRunwayId(ac) ?? '')
+    const mine = targetRunwayId(ac) ?? ''
+    let leader: { wake: WakeCategory; atTime: number } | undefined
+    let longest = -Infinity
+    for (const [rid, dep] of lastDepartureByRunway) {
+      if (!runwaysRelated(mine, rid, 'wake')) continue
+      const remaining = wakeSeparationSec(dep.wake, ac.wake) * WAKE_TIME_SCALE - (time - dep.atTime)
+      if (remaining > longest) {
+        longest = remaining
+        leader = dep
+      }
+    }
+    return leader
   }
 
   /** Seconds of wake separation still owed before this holding-short departure may roll. */
@@ -2437,7 +2470,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
           const blocked =
             crossed.length === 0
               ? fleet.some((o) => o !== ac && blocksRunway(o))
-              : fleet.some((o) => o !== ac && crossed.some((r) => blocksRunwayFor(o, r)))
+              : fleet.some((o) => o !== ac && crossed.some((r) => blocksRunwayFor(o, r, 'occupancy')))
           if (blocked) return refused('runway occupied')
         }
         clearDiversion(ac)
@@ -2621,7 +2654,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         // The runway must be clear of blocking traffic — its own runway — but a preceding
         // departure that has rotated (near liftoff) no longer blocks, so the next may be cleared
         // behind it.
-        if (guard && fleet.some((o) => o !== ac && blocksRunwayFor(o, targetRunwayId(ac))))
+        if (guard && fleet.some((o) => o !== ac && blocksRunwayFor(o, targetRunwayId(ac), 'occupancy')))
           return refused('runway occupied')
         // Wake-turbulence hold: a following departure can't roll until the interval behind
         // the previous departure *on its own runway* has elapsed (see docs/wake-turbulence.md).
@@ -2724,7 +2757,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         if (!ac.airborne) return refused('not on final')
         if (ac.controlledBy !== 'tower') return refused('not on tower frequency')
         if (ac.clearedToLand) return refused('already cleared to land')
-        if (guard && fleet.some((o) => o !== ac && blocksRunwayFor(o, targetRunwayId(ac))))
+        if (guard && fleet.some((o) => o !== ac && blocksRunwayFor(o, targetRunwayId(ac), 'occupancy')))
           return refused('runway occupied')
         ac.clearedToLand = true
         return ACCEPTED
@@ -3289,9 +3322,9 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       const committed = fleet.find((a) =>
         soleSwap
           ? blocksRunway(a) || onRunwayNow(a)
-          : (onShortFinal(a) && approachRunwayOf(a) === nextId) ||
-            (a.rollingOut && !a.vacated && approachRunwayOf(a) === nextId) ||
-            (onRunwayNow(a) && physicalRunwayOf(a) === nextId),
+          : (onShortFinal(a) && runwaysRelated(approachRunwayOf(a), nextId, 'occupancy')) ||
+            (a.rollingOut && !a.vacated && runwaysRelated(approachRunwayOf(a), nextId, 'occupancy')) ||
+            (onRunwayNow(a) && runwaysRelated(physicalRunwayOf(a), nextId, 'occupancy')),
       )
       if (committed)
         return refused(

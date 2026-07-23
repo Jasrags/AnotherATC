@@ -63,6 +63,22 @@ export interface ActiveRunway {
 }
 
 /**
+ * Why one runway's traffic is being weighed against another's — the reason a field couples two
+ * runways (docs/atc-multi-runway.md §6). A field can couple a pair for one reason and not another:
+ * close parallels are `wake`- and `landing`-dependent (staggered approaches) but not
+ * `occupancy`-coupled, while a crossing is `occupancy`-coupled.
+ */
+export type RunwayInteractionKind = 'occupancy' | 'landing' | 'wake'
+
+/**
+ * Whether traffic committed to runway `other` is relevant to a clearance protecting runway `mine`,
+ * for the given reason. This is the seam a multi-runway field plugs its inter-runway rules into;
+ * the engine owns the *shape* (this signature, and the gates that consult it), the field owns the
+ * *which-runways-and-how*. The default is independent — every runway minds only its own traffic.
+ */
+export type RunwaysInteract = (mine: string, other: string, kind: RunwayInteractionKind) => boolean
+
+/**
  * The designator of the opposite direction: 09 ↔ 27. Runway numbers are the magnetic heading in
  * tens, so the reciprocal is 18 away, wrapping at 36.
  */
