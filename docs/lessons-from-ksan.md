@@ -269,3 +269,26 @@ tests taxied an aircraft to the runway and then told it to drive back to its sta
 **Check.** When a new physical rule breaks a test, work out whether the *test* was describing
 something impossible before relaxing the rule. Note this cuts both ways — one of my own new tests
 passed against the old buggy code and had to be rewritten until it discriminated.
+
+### 27. OSM junctions don't always share a vertex
+
+**What happened.** A departure told to taxi to a point just east of it on the same taxiway planned
+a route around the entire field — north, past the point, a U-turn at the far end, and back: a
+**0.70 nm loop for a 0.15 nm hop**. It only surfaced in the sandbox, on an arbitrary clicked
+destination.
+
+**Why.** The taxi graph keys nodes by exact coordinates and leans on OSM features sharing one
+vertex at every junction, so connectivity falls out for free (`taxiGraph.ts`). But **8 KSAN
+junctions** meet with their endpoints a few dozen feet apart instead of coinciding — leaving two
+*disconnected* nodes where there should be one. The click snapped to the wrong twin: a stub whose
+only edge points away, which a taxiing aircraft cannot turn straight onto (a reversal, past the
+turn limit — see #24), so the router looped the long way to reach it from the side it *could*
+enter. The direct path existed the whole time; the destination node was the problem.
+
+**Check.** Merge near-coincident nodes when building the graph, and survey the pair-distance
+distribution on a new field before copying the threshold. KSAN's 8 duplicate pairs are all within
+~30 ft with a clean gap before any genuinely distinct node, which is what makes 0.005 nm safe — a
+field without that gap needs the threshold justified, not copied (the same discipline as the turn
+limit in #24). Assert no disconnected pair of near-coincident nodes survives (`taxiGraph.test.ts`).
+A looping route is easy to miss when most routes are fine; a click-to-taxi sandbox is what exposed
+it, so exercise arbitrary destinations, not just gate→runway.
