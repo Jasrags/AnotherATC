@@ -156,6 +156,56 @@ export function buildTaxiGraph(surface: AirportSurface): TaxiGraph {
     }
   }
 
+  // Fold near-coincident nodes together. The vertex-sharing assumption above holds *almost*
+  // everywhere, but a handful of OSM junctions meet with their endpoints a few dozen feet apart
+  // rather than at one shared vertex, leaving two disconnected nodes where there should be one.
+  // Routing to the wrong twin then loops the long way round the field to reach a stub it cannot
+  // turn straight onto. Merge each such node into a canonical partner so the junction routes as
+  // one node. The threshold sits in a clear gap — real duplicates are within ~30 ft, the nearest
+  // genuinely distinct nodes are far wider — so this joins only the gaps, never distinct pavement.
+  const MERGE_EPS_NM = 0.005
+  const canon = new Map<Key, Key>()
+  const keyList = [...nodes.keys()]
+  for (let i = 0; i < keyList.length; i += 1) {
+    const ki = keyList[i]!
+    if (canon.has(ki)) continue
+    canon.set(ki, ki)
+    const pi = nodes.get(ki)!
+    for (let j = i + 1; j < keyList.length; j += 1) {
+      const kj = keyList[j]!
+      if (canon.has(kj)) continue
+      const pj = nodes.get(kj)!
+      if (Math.hypot(pi[0] - pj[0], pi[1] - pj[1]) <= MERGE_EPS_NM) canon.set(kj, ki)
+    }
+  }
+  if (keyList.some((k) => canon.get(k) !== k)) {
+    const mergedNodes = new Map<Key, Point>()
+    const mergedAdj = new Map<Key, Edge[]>()
+    for (const k of keyList) {
+      const c = canon.get(k)!
+      if (!mergedNodes.has(c)) {
+        mergedNodes.set(c, nodes.get(c)!)
+        mergedAdj.set(c, [])
+      }
+    }
+    const seen = new Set<string>()
+    for (const [k, edges] of adj) {
+      const ck = canon.get(k)!
+      for (const e of edges) {
+        const ce = canon.get(e.to)!
+        if (ck === ce) continue // a within-cluster edge collapses to a self-loop
+        const sig = `${ck}|${ce}|${e.ref ?? ''}`
+        if (seen.has(sig)) continue
+        seen.add(sig)
+        mergedAdj.get(ck)!.push(e.ref === undefined ? { to: ce, w: e.w } : { to: ce, w: e.w, ref: e.ref })
+      }
+    }
+    nodes.clear()
+    for (const [k, p] of mergedNodes) nodes.set(k, p)
+    adj.clear()
+    for (const [k, e] of mergedAdj) adj.set(k, e)
+  }
+
   const refBetween = (a: Key, b: Key): string | undefined => adj.get(a)?.find((e) => e.to === b)?.ref
   const neighbours = (key: Key): Key[] => [...new Set((adj.get(key) ?? []).map((e) => e.to))]
 

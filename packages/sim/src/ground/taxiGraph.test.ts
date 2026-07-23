@@ -158,3 +158,39 @@ describe('buildTaxiGraph', () => {
     expect(g.route(west, east).length).toBeGreaterThan(2)
   })
 })
+
+describe('near-coincident nodes are merged so junctions route as one', () => {
+  const dist = (a: readonly number[], b: readonly number[]): number => Math.hypot(a[0]! - b[0]!, a[1]! - b[1]!)
+
+  it('leaves no disconnected pair of near-coincident nodes on KSAN', () => {
+    // OSM taxiway features occasionally meet at a junction with endpoints a few dozen feet apart
+    // rather than sharing a vertex. Left unmerged, the two nodes are disconnected and routing to
+    // the wrong twin loops around the field to reach a stub it cannot turn onto (the DEV04 report).
+    const g = buildTaxiGraph(KSAN_SURFACE)
+    const { nodes, edges } = g.topology()
+    const connected = new Set<string>()
+    for (const e of edges) connected.add(edgeKey(e.a, e.b))
+    const MERGE_EPS_NM = 0.005
+    for (let i = 0; i < nodes.length; i += 1) {
+      for (let j = i + 1; j < nodes.length; j += 1) {
+        if (dist(nodes[i]!.point, nodes[j]!.point) > MERGE_EPS_NM) continue
+        expect(
+          connected.has(edgeKey(nodes[i]!.key, nodes[j]!.key)),
+          `nodes ${nodes[i]!.point} and ${nodes[j]!.point} are near-coincident but disconnected`,
+        ).toBe(true)
+      }
+    }
+  })
+
+  it('routes directly between two nearby points on the north taxiway, not the long way round', () => {
+    // C3 area to a point ~0.15 nm east on the same taxiway. Snapping to a disconnected stub used
+    // to route ~0.70 nm (4.7x) around the field; the merged junction routes it near-straight.
+    const g = buildTaxiGraph(KSAN_SURFACE)
+    const from = g.nearestNode([0.27, -0.05])!
+    const to = g.nearestNode([0.42, -0.05])!
+    const route = g.route(from, to)
+    let len = 0
+    for (let i = 1; i < route.length; i += 1) len += dist(route[i - 1]!, route[i]!)
+    expect(len).toBeLessThan(0.3) // straight-line is ~0.15; the loop was ~0.70
+  })
+})
