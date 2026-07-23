@@ -412,12 +412,23 @@ shared prerequisite — ✅ **now shipped** — was the same for either: runways
 an inter-runway `runwaysInteract` seam (`docs/atc-multi-runway.md`). Each field now adds exactly its
 own coupling rule as a seam plug; neither is blocked.
 
-- ⬜ **KBUR — the intersecting case** *(recommended first)*. Two runways: **08/26** 5,802 ft
+- 🚧 **KBUR — the intersecting case** *(recommended first)*. Two runways: **08/26** 5,802 ft
   (091°/271°, ILS on 08) and **15/33** 6,886 ft (167°/347°), **crossing at 66% along 08/26 and 79%
   along 15/33**. Needs a time-and-position conflict model at the crossing, hold-short-of-the-
   intersecting-runway, and timed departures between arrivals; LAHSO optional. Because the crossing
   is past both midpoints, intersection departures before it fall out of the mechanic we already
   have. Compact field, one new rule on top of the foundation. _+3–5 days._
+  **Data pipeline shipped** (cycle 2607): NASR + d-TPP + OSM pulled, verified and written up in
+  `docs/BUR/` (`runways.md` = surveyed facts; `README.md` = chart index + surface scan; charts
+  `00067AD`/`SW3LAHSO`/`SW3HOTSPOT`). Ingest inputs committed (`tools/ingest/kbur.overpass.ql`,
+  `kbur-osm.raw.json`, `build-kbur-surface.mjs` → `world/kbur.surface.json`). The crossing point
+  re-derives to **66.3% / 79.2%** from the survey; **08 is the only precision end, no displaced
+  threshold**; **15/33 both displaced** (909/350 ft); **EMAS 170×350 at DER 08 = the east end**.
+  Surface scan: **14/14 gates+stands** (better than KSAN), ~29 unnamed runway-touching connectors
+  to name, 44 `construction` features (new terminal, excluded). **Verdict: GO.** _Next themes:
+  (1) taxiway naming — patch the ~29 connectors by way-id against `00067AD.PDF` into `REF_PATCH`,
+  document in `docs/BUR/taxiway-naming.md`; (2) the `Airport` bundle `world/kburAirport.ts` +
+  the crossing rule on the `runwaysInteract` seam; (3) copy `world/airport.test.ts` for KBUR._
 - ⬜ **KOAK — the parallel/dependent case**. Four runways, **zero intersections**: **10L/28R**
   (5,457 ft) and **10R/28L** (6,213 ft) are parallel and only **1,001 ft apart** — well under the
   ~2,500 ft dependent-approach threshold, so they are *not* independent and arrivals must be
