@@ -399,16 +399,18 @@ Design note: `docs/atc-tower.md` (one sim, two projections; Ground and Tower own
   north–south field from scratch and plays a full arrival and departure on it. Adding a
   **single-runway** field is now a data exercise — see `docs/adding-an-airport.md` (~1.5–2.5
   days, dominated by OSM taxiway-naming quality and whether the field has tagged gate nodes).
-  _Blocked for multi-runway fields: occupancy is field-wide, `ActiveRunway` is one direction, and
-  wake separation tracks a single global `lastDeparture` — see §5 of that doc._
+  _**Multi-runway foundation shipped** (`docs/atc-multi-runway.md`): occupancy and wake are
+  per-runway behind a `runwayIdAt` guard, the active runway is a *set*, and inter-runway coupling
+  rides a `runwaysInteract` seam — all proven on a fictional intersecting field, KSAN unchanged.
+  So a second field is now "+its one rule" rather than blocked — see the candidates below._
 
 ### ⬜ Second airport (multi-runway) — candidates
 
-Both measured from the FAA survey (NASR), not assumed. They are **not the same problem**, and the
-shared prerequisite is the same for either: runways become first-class objects with their own
-guard, occupancy goes per-runway, wake separation goes per-runway, and the configuration becomes a
-*set* of active runways rather than one `ActiveRunway`. **≈ 1 week** before either field is
-touchable.
+Both measured from the FAA survey (NASR), not assumed. They are **not the same problem**, but the
+shared prerequisite — ✅ **now shipped** — was the same for either: runways first-class behind a
+`runwayIdAt` guard, occupancy and wake per-runway, the configuration a *set* of active runways, and
+an inter-runway `runwaysInteract` seam (`docs/atc-multi-runway.md`). Each field now adds exactly its
+own coupling rule as a seam plug; neither is blocked.
 
 - ⬜ **KBUR — the intersecting case** *(recommended first)*. Two runways: **08/26** 5,802 ft
   (091°/271°, ILS on 08) and **15/33** 6,886 ft (167°/347°), **crossing at 66% along 08/26 and 79%
