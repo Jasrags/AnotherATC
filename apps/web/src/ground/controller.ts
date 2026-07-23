@@ -10,6 +10,7 @@ import {
   lookupAircraftType,
 } from '@anotheratc/sim'
 import type {
+  AircraftDebug,
   Airport,
   ApproachConfig,
   ControllerPosition,
@@ -288,6 +289,9 @@ export interface GroundController {
    *  Fleet membership is an airport property, so it comes from the airport's fleets rather than
    *  the (airport-independent) type catalog. */
   spawnTypeGroups(): { kind: string; types: { designator: string; wake: WakeCategory }[] }[]
+  /** Dev sandbox: the selected aircraft's internal routing/runway state (the fields the gameplay
+   *  snapshot hides), or null if nothing is selected. Backs the LOG inspector. */
+  inspectSelected(): AircraftDebug | null
   /** Remove the selected aircraft, if any. */
   removeSelected(): void
   /** Remove a specific aircraft by id (for click-to-delete). Clears the selection if it was
@@ -617,6 +621,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
           kind: f.kind,
           types: f.types.map((designator) => ({ designator, wake: lookupAircraftType(designator).wake })),
         })),
+    inspectSelected: () => (selected ? sim.inspect(selected) : null),
     removeSelected: () => {
       if (!selected) return
       sim.remove(selected)

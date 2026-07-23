@@ -1,6 +1,7 @@
 import { createRng, type Rng } from '../random'
 import type { Hotspot, Point } from '../world/types'
 import type {
+  AircraftDebug,
   ControllerPosition,
   PushbackOption,
   StandOption,
@@ -3173,6 +3174,33 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     taxiwaysOf(aircraftId: string): string[] {
       const ac = find(aircraftId)
       return ac ? taxiwaysFor(ac) : []
+    },
+    inspect(aircraftId: string): AircraftDebug | null {
+      const ac = find(aircraftId)
+      if (!ac) return null
+      return {
+        id: ac.id,
+        callsign: ac.callsign,
+        type: ac.type,
+        intent: ac.intent,
+        controlledBy: ac.controlledBy,
+        pos: { x: ac.x, y: ac.y, heading: ac.heading },
+        targetSpeed: ac.targetSpeed,
+        groundspeed: ac.groundspeed,
+        goalPoint: ac.goalPoint,
+        leg: ac.leg,
+        path: ac.path,
+        held: ac.held,
+        holdShort: ac.holdShort,
+        holdingForTakeoff: holdingForTakeoff(ac),
+        heldRouteCrosses: heldRouteCrosses(ac),
+        onRunway: onRunwayNow(ac),
+        lineUpWait: ac.lineUpWait,
+        rollWhenLinedUp: ac.rollWhenLinedUp,
+        departing: ac.departing,
+        rollingOut: ac.rollingOut,
+        runwayAuth: ac.runwayAuth,
+      }
     },
   }
 }

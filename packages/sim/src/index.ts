@@ -60,6 +60,7 @@ export { EDCT_EARLY_SEC } from './ground/sim'
 export { detectConverging, CONVERGE_HORIZON_SEC } from './ground/converging'
 export type { TrafficConflict, ConflictSeverity, ConflictView } from './ground/converging'
 export type {
+  AircraftDebug,
   GroundAircraft,
   GroundSnapshot,
   GroundSim,

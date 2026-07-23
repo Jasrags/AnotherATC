@@ -336,4 +336,41 @@ export interface GroundSim {
    *  Every stand has two, so this is a real choice: the direction it ends up facing is the
    *  direction it must taxi off in, since it cannot turn around on the alley. */
   pushbackOptions(aircraftId: string): PushbackOption[]
+  /** A dev/debug snapshot of an aircraft's internal routing and runway-authority state — the
+   *  fields the public {@link GroundAircraft} deliberately hides. For the sandbox inspector; not
+   *  for gameplay. Null if the id is unknown. */
+  inspect(aircraftId: string): AircraftDebug | null
+}
+
+/** Internal routing/runway state exposed for the dev sandbox inspector (see {@link GroundSim.inspect}).
+ *  A window into the fields that decide taxi routing and takeoff-vs-crossing behaviour, which the
+ *  gameplay snapshot does not carry. Shapes may change freely — this is a debugging aid. */
+export interface AircraftDebug {
+  id: string
+  callsign: string
+  type: string
+  intent: GroundIntent
+  controlledBy: ControllerPosition
+  /** Local nm position and true heading. */
+  pos: { x: number; y: number; heading: number }
+  targetSpeed: number
+  groundspeed: number
+  /** Where it ultimately wants to be (runway end for departures, gate for arrivals). */
+  goalPoint: Point | null
+  /** The route it is driving now, and which leg it is on. */
+  leg: number
+  path: readonly Point[]
+  /** Route beyond a hold-short line, waiting on a crossing clearance (null if none). */
+  held: readonly Point[] | null
+  holdShort: boolean
+  /** How the sim currently classifies this hold: a takeoff hold vs. a crossing. The two
+   *  predicates behind that decision, surfaced so a misclassification is visible. */
+  holdingForTakeoff: boolean
+  heldRouteCrosses: boolean
+  onRunway: boolean
+  lineUpWait: boolean
+  rollWhenLinedUp: boolean
+  departing: boolean
+  rollingOut: boolean
+  runwayAuth: 'issued' | 'on' | null
 }

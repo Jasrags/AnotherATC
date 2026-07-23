@@ -225,6 +225,22 @@ describe('ground controller — dev sandbox', () => {
     expect(cargo.types.find((t) => t.designator === 'B763')!.wake).toBe('H')
   })
 
+  it('inspectSelected exposes the selected aircraft internal state, or null when nothing is selected', () => {
+    const c = createGroundController({ dev: true })
+    expect(c.inspectSelected()).toBeNull()
+    c.setDevType('B763')
+    c.spawnAt([0, 0])
+    const d = c.inspectSelected()!
+    expect(d.type).toBe('B763')
+    expect(d.intent).toBe('departure')
+    // The fields the gameplay snapshot hides — enough to see how a hold is being classified.
+    expect(d).toHaveProperty('holdingForTakeoff')
+    expect(d).toHaveProperty('heldRouteCrosses')
+    expect(d).toHaveProperty('goalPoint')
+    c.clearAll()
+    expect(c.inspectSelected()).toBeNull()
+  })
+
   it('removeSelected and clearAll empty the surface', () => {
     const c = createGroundController({ dev: true })
     c.spawnAt([0, 0])

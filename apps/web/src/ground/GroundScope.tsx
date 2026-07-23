@@ -120,11 +120,32 @@ export function GroundScope({ controller }: { controller: GroundController }) {
   type DevTool = 'none' | 'spawn' | 'delete' | 'probe'
   const [devTool, setDevTool] = useState<DevTool>('none')
   const devToolRef = useRef<DevTool>('none')
+  // Last LOG-inspector readout, shown in the dev HUD when no surface tool is armed. A ref, not
+  // state: the render loop already owns that HUD line and reads it there each frame.
+  const devInspectRef = useRef<string | null>(null)
   const armTool = (tool: DevTool) => {
     const next = devToolRef.current === tool ? 'none' : tool
     devToolRef.current = next
     setDevTool(next)
+    devInspectRef.current = null // a tool takes over the readout
     if (next !== 'probe') controller.clearProbe()
+  }
+  const logSelected = () => {
+    const d = controller.inspectSelected()
+    if (!d) {
+      devInspectRef.current = 'LOG — select an aircraft first'
+      return
+    }
+    // The full record goes to the browser console to copy; the HUD gets the fields that decide
+    // taxi routing and takeoff-vs-crossing, which is what the bug reports have been about.
+    // eslint-disable-next-line no-console
+    console.log(`[inspect ${d.callsign}]`, d)
+    const p = (pt: readonly number[] | null) => (pt ? `[${pt[0]!.toFixed(2)},${pt[1]!.toFixed(2)}]` : '—')
+    devInspectRef.current =
+      `${d.callsign} ${d.type} ${d.intent} hs=${d.holdShort} tko=${d.holdingForTakeoff} ` +
+      `cross=${d.heldRouteCrosses} luw=${d.lineUpWait} roll=${d.rollWhenLinedUp} dep=${d.departing} ` +
+      `auth=${d.runwayAuth} onRwy=${d.onRunway} leg=${d.leg}/${d.path.length - 1} held=${d.held?.length ?? 0} ` +
+      `goal=${p(d.goalPoint)} — full record in console`
   }
   // Dev sandbox: which airframe the next SPAWN/ARRIVAL uses. Local state mirrors the controller's
   // so the <select> is controlled; the groups are stable for the field, so memoize them.
@@ -560,6 +581,8 @@ export function GroundScope({ controller }: { controller: GroundController }) {
             else if (pr.path.length >= 2)
               t = `PROBE ${pr.lengthNm.toFixed(2)} nm (${Math.round(pr.lengthNm * 6076)} ft) · ${pr.taxiways.join(' · ') || '—'}`
             else t = 'PROBE — no route between those points'
+          } else if (devInspectRef.current) {
+            t = devInspectRef.current
           }
           setText(devRef.current, t)
         }
@@ -748,6 +771,14 @@ export function GroundScope({ controller }: { controller: GroundController }) {
               title="Put a test arrival on the final approach (airborne — it can't be placed by clicking the surface)"
             >
               ARRIVAL
+            </button>
+            <button
+              type="button"
+              className="ctl-btn mono"
+              onClick={logSelected}
+              title="Log the selected aircraft's internal routing/runway state to the console (and the readout above)"
+            >
+              LOG
             </button>
             <button
               type="button"
