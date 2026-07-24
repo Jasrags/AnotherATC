@@ -310,8 +310,11 @@ export interface GroundSim {
   /** Every active runway direction, one per physical runway in use (docs/atc-multi-runway.md §5).
    *  A single-runway field returns one; empty when there is no configuration. */
   runways(): readonly ActiveRunway[]
-  /** Where arrivals are established on final, derived from the active runway. */
+  /** Where arrivals are established on final, derived from the primary active runway. */
   approach(): ApproachConfig | null
+  /** One final per active runway — so a multi-runway field can draw every approach course, not
+   *  just the primary's (docs/atc-multi-runway.md §5). One entry on a single-runway field. */
+  approaches(): ApproachConfig[]
   /** Change the active runway direction — the airport's configuration. Refused while anything
    *  is committed to the current runway (on it, or on short final above it). On success every
    *  arrival still on final goes around and re-establishes on the new approach, and departures

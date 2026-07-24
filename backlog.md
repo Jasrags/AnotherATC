@@ -452,9 +452,13 @@ own coupling rule as a seam plug; neither is blocked.
   traffic across the active set (guarded so single-runway RNG is unchanged), per-aircraft
   phraseology + glide path replace the primary-runway reads, `deactivateRunway` is the counterpart
   to activating a second runway, and the web control is one button per physical runway
-  (dir→recip→off). `?airport=KBUR` runs the field. Reviewer follow-ups recorded in the doc:
-  turnarounds still launch off the primary; deactivate needs a lull (no inbound-reassignment);
-  the scope draws only the primary final.
+  (dir→recip→off). `?airport=KBUR` runs the field. **The three review follow-ups are now closed**
+  (`docs/atc-multi-runway.md` §5): turnarounds distribute across the active set (deterministic
+  id-hash), `deactivateRunway` drains inbounds onto a remaining runway instead of demanding a lull
+  (refusing only genuinely-committed traffic), and the scope draws every active runway's final via
+  `approaches()`. Residual, small and pre-existing (shared with `setRunway`): runway-crossing
+  traffic isn't counted by the committed check, and intersection-departure goals aren't re-aimed on
+  a close — both flagged in code, unreachable/safe today.
   _Remaining: **position-aware crossing** — release the
   other runway once a departure is past the intersection (the refinement of the boolean coupling)._
 - ⬜ **KOAK — the parallel/dependent case**. Four runways, **zero intersections**: **10L/28R**

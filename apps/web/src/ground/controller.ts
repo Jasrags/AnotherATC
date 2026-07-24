@@ -225,6 +225,9 @@ export interface GroundController {
   /** The final-approach geometry arrivals fly in on, so the scope can draw the course.
    *  Follows the active runway — it changes when the configuration does. */
   approach(): ApproachConfig
+  /** One final-approach course per active runway — so the scope can draw every approach, not just
+   *  the primary's. One entry on a single-runway field. */
+  approaches(): ApproachConfig[]
   /** Designator of the runway direction in use, e.g. "27". */
   activeRunway(): string
   /** Every active runway direction — one per physical runway in use. */
@@ -546,6 +549,10 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
     sim,
     destinations,
     approach: () => sim.approach() ?? game.spawn.approach,
+    approaches: () => {
+      const aps = sim.approaches()
+      return aps.length ? aps : [game.spawn.approach]
+    },
     holdShortSpots: () => {
       const r = sim.runway() ?? game.runway
       return buildRunwayIntersections(topology, guard, r.departureStart, r.farEnd).map((i) => ({

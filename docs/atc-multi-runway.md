@@ -99,18 +99,30 @@ second runway. The web control is one button per physical runway, cycling dir �
 single-runway field never reaches "off"). `?airport=KBUR` runs the field; bring 15 online alongside
 08 to see both in use.
 
-**Known follow-ups (not yet done), flagged in review:**
+**§5 follow-ups — now closed:**
 
-- **Turnarounds still go to the primary runway.** `turnRound` sends a turnaround departure to
-  `runway.departureStart` (the primary), not to a runway drawn from the active set — so a flight
-  that arrived on 15 departs off 08. Distribute it the way `trySpawn` now does.
-- **`deactivateRunway` refuses only on *assigned* traffic** (`targetRunwayId(ac) === id`), a lull
-  requirement. Draining an active runway — reassigning its inbounds to another, the `setRunway`
-  cascade in reverse — is a later slice. Traffic mid-*crossing* of a runway is not counted as
-  "using" it (its target is elsewhere); this is safe, because occupancy/hold-short protection keys
-  off the physical `RunwayGuard`, not the active set.
-- **The scope draws one final** (the primary's approach course). With two runways active, the
-  second runway's final is not drawn yet.
+- **Turnarounds distribute across the active set.** `turnRound` picks the departure runway with a
+  deterministic id-hash over the active set (no RNG, so the spawn stream is untouched), the same
+  spread `trySpawn` gives fresh departures — a flight that arrived on 15 no longer always departs
+  off 08. Single active runway ⇒ the hash is 0 ⇒ the primary, unchanged.
+- **`deactivateRunway` drains instead of demanding a lull.** It refuses only the last active runway
+  and traffic *physically committed* to the one being closed (on it, on short final, rolling out);
+  everything else inbound is reassigned to a remaining runway — arrivals go around onto its
+  approach, taxiing departures are re-aimed at its end — which is the `setRunway` cascade pointed
+  the other way.
+- **The scope draws every active final.** `approaches()` returns one per active runway and the
+  canvas draws them all, not just the primary's.
+
+**Still open (small, pre-existing parity gaps with `setRunway`):**
+
+- An aircraft physically *crossing* the runway being closed (or reconfigured) — whose own target is
+  a taxiway/gate, not the runway — is neither refused as committed nor drained, because the check
+  reads `targetRunwayId`, not position. Safe (occupancy/hold-short protection keys off the physical
+  `RunwayGuard`, not the active set), and shared with `setRunway`; worth closing if runway-crossing
+  traffic becomes a live concern.
+- Departure goals are always a runway's `departureStart`, so an intersection-departure aimed at a
+  point *on* a runway would not be re-aimed by a close/reconfigure. Unreachable today; flagged in
+  the code at both cascade sites.
 
 ## 6. The dependency seam (the crux)
 

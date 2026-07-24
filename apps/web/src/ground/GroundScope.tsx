@@ -446,7 +446,7 @@ export function GroundScope({ controller }: { controller: GroundController }) {
         drawGates(ctx, view, prep)
         for (const layout of airport.layouts) drawRunwayMarkings(ctx, view, layout)
         drawHotspots(ctx, view, airport.surface, snap.busyHotspots)
-        drawApproachCourse(ctx, view, controller.approach())
+        for (const ap of controller.approaches()) drawApproachCourse(ctx, view, ap)
         if (draft) {
           drawRouteDraft(ctx, view, airport.surface, draft.via)
           if (hovering) {

@@ -3070,8 +3070,22 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
    * the flight is a new one, so it needs its own IFR clearance and its own beacon code. Returns
    * false when the field has nowhere for a departure to go, in which case it clears as before.
    */
+  /** A stable index into `n` from a string, so a turnaround's departure runway is spread across
+   *  the active set deterministically — no RNG draw (which would perturb the spawn stream) and the
+   *  same field every replay. */
+  function hashIndex(s: string, n: number): number {
+    if (n <= 1) return 0
+    let h = 0
+    for (let i = 0; i < s.length; i += 1) h = (h * 31 + s.charCodeAt(i)) | 0
+    return ((h % n) + n) % n
+  }
+
   function turnRound(ac: Internal): boolean {
-    const target = runway?.departureStart ?? spawn?.departureTarget
+    // A turnaround departs off a runway from the active set, not always the primary — otherwise a
+    // flight that landed on 15 would depart off 08. Distributed deterministically by id so the two
+    // runways share the departures the way the spawner shares fresh ones (docs/atc-multi-runway.md §5).
+    const chosen = active.length ? active[hashIndex(ac.id, active.length)]!.dir : runway
+    const target = chosen?.departureStart ?? runway?.departureStart ?? spawn?.departureTarget
     if (!target) return false
     ac.intent = 'departure'
     ac.goalPoint = target
@@ -3332,6 +3346,11 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     runway: () => runway ?? null,
     runways: () => active.map((a) => a.dir),
     approach: () => approachNow(),
+    approaches: () => {
+      if (active.length) return active.map((a) => ({ fix: finalFix(a.dir, FINAL_APPROACH_NM), threshold: a.dir.threshold }))
+      const ap = approachNow()
+      return ap ? [ap] : []
+    },
     trafficRate() {
       return trafficRate
     },
@@ -3414,20 +3433,55 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     },
     deactivateRunway(dir: ActiveRunway): DispatchResult {
       // Take a physical runway out of the active set — the counterpart to activating a second one
-      // with setRunway (docs/atc-multi-runway.md §5). Refused while anything is still using it:
-      // a runway is not turned off under its own traffic. The last active runway cannot be turned
-      // off — a field always lands and departs *somewhere*. First cut: the runway must be clear of
-      // assigned traffic (a lull), because draining an active runway means reassigning its inbounds
-      // to another one, which is the setRunway cascade in reverse and its own slice.
+      // with setRunway (docs/atc-multi-runway.md §5). The last active runway cannot be closed (a
+      // field always lands and departs *somewhere*). Anything physically committed to the runway —
+      // on it, on short final above it, or rolling out on it — has to finish first, exactly as a
+      // direction change refuses; but everything else *inbound* to it is drained onto a remaining
+      // runway rather than blocking the close, which is the setRunway cascade pointed the other way.
       const id = physicalIdOf(dir)
       const entry = active.find((a) => a.id === id)
       if (!entry) return refused(`RWY ${dir.ident} is not in use`)
       if (active.length <= 1) return refused(`cannot close the only active runway`)
-      const user = fleet.find((ac) => targetRunwayId(ac) === id)
-      if (user) return refused(`RWY ${entry.dir.ident} in use — ${user.callsign} is using it`)
+      const committed = fleet.find(
+        (ac) =>
+          targetRunwayId(ac) === id &&
+          (onRunwayNow(ac) || onShortFinal(ac) || (ac.rollingOut && !ac.vacated)),
+      )
+      if (committed)
+        return refused(`RWY ${entry.dir.ident} in use — ${committed.callsign} is committed to it`)
+
+      const affected = fleet.filter((ac) => targetRunwayId(ac) === id)
       active = active.filter((a) => a.id !== id)
       runway = active[0]?.dir
       exitCache.clear()
+      const onto = runway // a remaining runway — the traffic being drained moves here
+      if (onto) {
+        for (const ac of affected) {
+          // Arrivals still on final for the closed runway go around and re-establish on the
+          // remaining runway's approach — the same handoff a direction change gives them.
+          if (ac.airborne && ac.intent === 'arrival') {
+            ac.path = [finalFix(onto, FINAL_APPROACH_NM), onto.threshold]
+            ac.threshold = onto.threshold
+            ac.finalLenNm = pathLength(ac.path)
+            ac.finalAltFt = glideAltitudeFt(onto.glidePathDeg, ac.finalLenNm)
+            goAround(ac)
+            continue
+          }
+          // A departure not yet rolling, aimed at the closed runway's end, is re-aimed at the
+          // remaining one; Ground taxis it round (its goal moves, it is not moved automatically).
+          // Departures only ever target a runway's `departureStart` today, so this catches them
+          // all; an intersection-departure goal (a point *on* the runway, ≠ its end) would slip
+          // through and need adding here — same assumption `setRunway`'s cascade above makes.
+          if (
+            ac.intent === 'departure' &&
+            !ac.departing &&
+            ac.goalPoint &&
+            dist(ac.goalPoint, dir.departureStart) < 1e-6
+          ) {
+            ac.goalPoint = onto.departureStart
+          }
+        }
+      }
       return ACCEPTED
     },
     exitOptions(aircraftId: string): RunwayExit[] {

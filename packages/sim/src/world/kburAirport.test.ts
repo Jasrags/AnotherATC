@@ -287,27 +287,52 @@ describe('two runways active at once (docs/atc-multi-runway.md §5)', () => {
     expect(sim.deactivateRunway(KBUR_RUNWAYS['15'])).toEqual({ ok: false, reason: expect.stringMatching(/only active/i) })
   })
 
-  it('refuses to close a runway that has traffic committed to it', () => {
-    const finalFix08 = finalFix(KBUR_RUNWAYS['08'], FINAL_APPROACH_NM)
-    const sim = createGroundSim(
-      [
-        {
-          id: 'a',
-          callsign: 'SWA111',
-          type: 'B738',
-          wake: 'M',
-          path: [finalFix08, KBUR_RUNWAYS['08'].threshold],
-          targetSpeed: 140,
-          airborne: true,
-          intent: 'arrival',
-          goalPoint: KBUR.fleets[0]!.gates[0]!.point,
-          gate: KBUR.fleets[0]!.gates[0]!.ref,
-        },
-      ],
-      { graph, guard, runways: [KBUR_RUNWAYS['08'], KBUR_RUNWAYS['15']], runwaysInteract: game_runwaysInteract() },
-    )
-    // An arrival is inbound to 08, so 08 cannot be closed under it; 15 (idle) still can.
-    expect(sim.deactivateRunway(KBUR_RUNWAYS['08']).ok).toBe(false)
+  const inboundTo = (id: string, atNm: number): AircraftInit => {
+    // An arrival established `atNm` out on the given runway's final.
+    const rwy = KBUR_RUNWAYS[id as '08' | '15']
+    const fix = finalFix(rwy, atNm)
+    return {
+      id: 'a',
+      callsign: 'SWA111',
+      type: 'B738',
+      wake: 'M',
+      path: [fix, rwy.threshold],
+      targetSpeed: 140,
+      airborne: true,
+      intent: 'arrival',
+      goalPoint: KBUR.fleets[0]!.gates[0]!.point,
+      gate: KBUR.fleets[0]!.gates[0]!.ref,
+    }
+  }
+
+  it('drains an inbound onto a remaining runway when its runway is closed', () => {
+    // An arrival well out (4 nm) on 08's final is not committed, so closing 08 does not refuse —
+    // it sends the arrival around and re-establishes it on 15's approach.
+    const sim = createGroundSim([inboundTo('08', FINAL_APPROACH_NM)], {
+      graph,
+      guard,
+      runways: [KBUR_RUNWAYS['08'], KBUR_RUNWAYS['15']],
+      runwaysInteract: game_runwaysInteract(),
+    })
+    expect(sim.deactivateRunway(KBUR_RUNWAYS['08']).ok).toBe(true)
+    expect(sim.runways().map((r) => r.ident)).toEqual(['15'])
+    // The arrival is now established on 15's final — its position moved to 15's approach fix.
+    const a = sim.snapshot().aircraft.find((x) => x.id === 'a')!
+    expect(near([a.x, a.y], finalFix(KBUR_RUNWAYS['15'], FINAL_APPROACH_NM))).toBe(true)
+  })
+
+  it('refuses to close a runway with an aircraft committed to it (short final)', () => {
+    // Inside short final (≈1 nm) the arrival owns the runway, so it cannot be closed under it.
+    const sim = createGroundSim([inboundTo('08', 1)], {
+      graph,
+      guard,
+      runways: [KBUR_RUNWAYS['08'], KBUR_RUNWAYS['15']],
+      runwaysInteract: game_runwaysInteract(),
+    })
+    const res = sim.deactivateRunway(KBUR_RUNWAYS['08'])
+    expect(res.ok).toBe(false)
+    if (!res.ok) expect(res.reason).toMatch(/committed|in use/i)
+    // The idle runway can still be closed.
     expect(sim.deactivateRunway(KBUR_RUNWAYS['15']).ok).toBe(true)
   })
 })
