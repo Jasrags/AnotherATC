@@ -294,6 +294,33 @@ body {
   border-style: dashed;
 }
 
+/* A runway control: the RWY button and, when it is in use, its operations badge, kept together as
+   one unit so they scroll and wrap as a pair. */
+.rwy-ctl {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 3px;
+}
+
+/* Operations designation badge (MIX / DEP / ARR) — narrower than a full button, tinted by role so
+   a departures/arrivals split reads at a glance (docs/atc-runway-operations.md §2). */
+.rwy-ops {
+  padding-left: 6px;
+  padding-right: 6px;
+  letter-spacing: 0.06em;
+}
+
+/* Mixed is the neutral default; departures lean cyan, arrivals lean green — the two flows. */
+.rwy-ops-departures {
+  color: #7fd4ff;
+  border-color: #2b5a72;
+}
+
+.rwy-ops-arrivals {
+  color: #7fe0a8;
+  border-color: #2b6a4a;
+}
+
 /* The developer tools, set off from the two gameplay controls beside them. */
 .ctl-group {
   display: flex;

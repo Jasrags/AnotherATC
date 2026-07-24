@@ -59,7 +59,8 @@ export {
   FT_PER_NM,
 } from './ground/runway'
 export { displacedNm } from './ground/runway'
-export type { ActiveRunway, RunwayLayout, RunwayEndLayout } from './ground/runway'
+export { runwayTakes } from './ground/runway'
+export type { ActiveRunway, RunwayLayout, RunwayEndLayout, RunwayOps } from './ground/runway'
 export { phonetic, COMMS_LOG_LIMIT } from './ground/comms'
 export type { Transmission, TransmissionFrom } from './ground/comms'
 export { buildStands, findStand } from './ground/stands'

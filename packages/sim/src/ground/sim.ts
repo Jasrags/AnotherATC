@@ -38,11 +38,13 @@ import {
   glideAltitudeFt,
   landingEnd,
   reciprocalIdent,
+  runwayTakes,
   takeoffEnd,
   FINAL_APPROACH_NM,
   SHORT_FINAL_NM,
   type ActiveRunway,
   type RunwayInteractionKind,
+  type RunwayOps,
   type RunwaysInteract,
   type RunwayCrossing,
 } from './runway'
@@ -571,9 +573,14 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     // canonical id, so a direction change is a swap on one runway, not the birth of a second.
     return [dir.ident, reciprocalIdent(dir.ident)].sort()[0]!
   }
-  let active: { dir: ActiveRunway; id: string }[] = (
+  // Each active runway carries an operations designation (docs/atc-runway-operations.md §2); a runway
+  // opens as `mixed`, which is the only designation a single-runway field ever has.
+  let active: { dir: ActiveRunway; id: string; ops: RunwayOps }[] = (
     opts.runways ?? (opts.runway ? [opts.runway] : [])
-  ).map((dir) => ({ dir, id: physicalIdOf(dir) }))
+  ).map((dir) => ({ dir, id: physicalIdOf(dir), ops: 'mixed' as RunwayOps }))
+  /** How the active runway with physical id `id` is being operated; `mixed` when it is not active
+   *  (the conservative default — every gate that consults this treats an unknown runway as mixed). */
+  const opsOf = (id: string | null): RunwayOps => (id === null ? 'mixed' : (active.find((a) => a.id === id)?.ops ?? 'mixed'))
   /** The primary active runway — the config-level default for approach, glide path and spawn.
    *  A single-runway field has one; on a multi-runway field these are per-runway concerns that
    *  arrive with per-runway spawning, so the first active runway stands in until then. Kept in
@@ -1709,6 +1716,10 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     const own = targetRunwayId(ac)
     if (physicalRunwayCount > 1 && own !== null && !active.some((a) => a.id === own)) {
       return `RWY ${own} is not in use — activate it to depart`
+    }
+    // A runway designated arrivals-only issues no takeoff clearances (docs/atc-runway-operations.md §2).
+    if (opsOf(own) === 'arrivals') {
+      return `RWY ${runwayIdentFor(ac) ?? own} is arrivals only`
     }
     const remaining = takeoffRunRemaining(ac)
     if (remaining >= MIN_TAKEOFF_RUN_NM) return null
@@ -2963,6 +2974,9 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         if (!ac.airborne) return refused('not on final')
         if (ac.controlledBy !== 'tower') return refused('not on tower frequency')
         if (ac.clearedToLand) return refused('already cleared to land')
+        // A runway designated departures-only issues no landing clearances (docs/atc-runway-operations.md §2).
+        if (opsOf(approachRunwayOf(ac)) === 'departures')
+          return refused(`RWY ${runwayIdentFor(ac) ?? approachRunwayOf(ac)} is departures only`)
         if (guard && fleet.some((o) => o !== ac && blocksRunwayFor(o, targetRunwayId(ac), 'occupancy')))
           return refused('runway occupied')
         ac.clearedToLand = true
@@ -3379,11 +3393,17 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     const slot = free[spawnRng.int(0, free.length - 1)]
     if (!slot) return
     const intent: GroundIntent = spawnRng.next() < 0.5 ? 'departure' : 'arrival'
-    // Which active runway this flight uses. A single active runway (or none) draws nothing, so the
-    // single-runway spawn stream is byte-for-byte unchanged; only when a second runway is brought
-    // online does the extra draw distribute traffic across the set (docs/atc-multi-runway.md §5).
+    // Which active runway this flight uses, restricted to those whose designation takes this intent
+    // (docs/atc-runway-operations.md §9.1) — a departures-only runway never receives an arrival, and
+    // vice versa. When every active runway is `mixed` (the default) the eligible set is the whole
+    // active set, so the spawn stream is byte-for-byte what it was: a single active runway draws
+    // nothing, two or more distribute across the set (docs/atc-multi-runway.md §5).
+    const eligible = active.filter((a) => runwayTakes(a.ops, intent))
+    // A configuration where no active runway takes this intent (all departures-only, and this draw
+    // is an arrival) simply produces no spawn this attempt — a valid consequence of the config.
+    if (active.length > 0 && eligible.length === 0) return
     const chosen =
-      active.length > 1 ? active[spawnRng.int(0, active.length - 1)]!.dir : (active[0]?.dir ?? runway)
+      eligible.length > 1 ? eligible[spawnRng.int(0, eligible.length - 1)]!.dir : (eligible[0]?.dir ?? runway)
     const { callsign, type, wake } = traffic.identity(spawnRng)
     fleet.push(
       makeInternal({
@@ -3540,6 +3560,15 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     dispatch,
     runway: () => runway ?? null,
     runways: () => active.map((a) => a.dir),
+    runwayOps: () => active.map((a) => ({ ident: a.dir.ident, ops: a.ops })),
+    setRunwayOps(dir: ActiveRunway, ops: RunwayOps): DispatchResult {
+      // Designate how an *active* runway is operated (docs/atc-runway-operations.md §2). The runway
+      // has to be in use first — you designate a runway you are using, not one that is off.
+      const id = physicalIdOf(dir)
+      if (!active.some((a) => a.id === id)) return refused(`RWY ${dir.ident} is not in use`)
+      active = active.map((a) => (a.id === id ? { ...a, ops } : a))
+      return ACCEPTED
+    },
     approach: () => approachNow(),
     approaches: () => {
       if (active.length) return active.map((a) => ({ fix: finalFix(a.dir, FINAL_APPROACH_NM), threshold: a.dir.threshold }))
@@ -3591,7 +3620,9 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         )
 
       const previous = current?.dir
-      active = [...active.filter((a) => a.id !== nextId), { dir: next, id: nextId }]
+      // Turning a runway around keeps its operations designation — a runway run for departures stays
+      // that way when the wind flips it end-for-end; a newly-activated runway opens `mixed`.
+      active = [...active.filter((a) => a.id !== nextId), { dir: next, id: nextId, ops: current?.ops ?? 'mixed' }]
       runway = active[0]?.dir
       exitCache.clear() // turnoffs are derived per landing direction
 

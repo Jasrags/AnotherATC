@@ -1,7 +1,7 @@
 import type { Point } from '../world/types'
 import type { AircraftInit } from './sim'
 import type { RunwayExit } from './runwayExits'
-import type { ActiveRunway } from './runway'
+import type { ActiveRunway, RunwayOps } from './runway'
 import type { ApproachConfig } from './sim'
 import type { Transmission } from './comms'
 import type { RunwayIncursion } from './incursion'
@@ -310,6 +310,13 @@ export interface GroundSim {
   /** Every active runway direction, one per physical runway in use (docs/atc-multi-runway.md §5).
    *  A single-runway field returns one; empty when there is no configuration. */
   runways(): readonly ActiveRunway[]
+  /** Each active runway's operations designation (docs/atc-runway-operations.md §2), keyed by
+   *  ident: `mixed` (both), `departures` (takeoffs only), or `arrivals` (landings only). */
+  runwayOps(): readonly { ident: string; ops: RunwayOps }[]
+  /** Designate how an active runway is operated. Refused for a runway that is not in use. A
+   *  `departures` runway issues no landing clearances; an `arrivals` runway issues no takeoff
+   *  clearances; and the spawner sends each intent only to a runway that takes it. */
+  setRunwayOps(dir: ActiveRunway, ops: RunwayOps): DispatchResult
   /** Where arrivals are established on final, derived from the primary active runway. */
   approach(): ApproachConfig | null
   /** One final per active runway — so a multi-runway field can draw every approach course, not

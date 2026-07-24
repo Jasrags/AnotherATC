@@ -3,7 +3,7 @@ import { createAirportGame, compileRunwayDependencies, runwayCrossingsFrom } fro
 import { createGroundSim, type AircraftInit } from '../ground/sim'
 import { buildTaxiGraph } from '../ground/taxiGraph'
 import { buildRunwayGuard, runwayIdAt } from '../ground/runwayGuard'
-import { displacedNm } from '../ground/runway'
+import { displacedNm, finalFix, runwayTakes, FINAL_APPROACH_NM } from '../ground/runway'
 import { KOAK, KOAK_RUNWAYS } from './koakAirport'
 import { KSAN } from './ksanAirport'
 import { KBUR } from './kburAirport'
@@ -407,5 +407,106 @@ describe('line up and wait needs the runway in use (docs/atc-multi-runway.md §5
     })
     toHoldShort(sim)
     expect(sim.dispatch({ type: 'lineUpAndWait', aircraftId: 'd' }).ok).toBe(true)
+  })
+})
+
+describe('runway operations designation — departures / arrivals / mixed (docs/atc-runway-operations.md §2)', () => {
+  const A = (sim: ReturnType<typeof createGroundSim>) => sim.snapshot().aircraft[0]!
+
+  // A departure holding short of a runway end, facing the roll, goal on the runway.
+  const departureAt = (id: '30' | '10R'): AircraftInit => {
+    const rwy = KOAK_RUNWAYS[id]
+    const ux = rwy.farEnd[0] - rwy.departureStart[0]
+    const uy = rwy.farEnd[1] - rwy.departureStart[1]
+    const len = Math.hypot(ux, uy)
+    const back: [number, number] = [rwy.departureStart[0] - (ux / len) * 0.05, rwy.departureStart[1] - (uy / len) * 0.05]
+    return { id: 'd', callsign: 'SWA1', type: 'B738', wake: 'M', path: [back, rwy.departureStart], targetSpeed: 5, intent: 'departure', goalPoint: rwy.departureStart }
+  }
+  const arrivalAt = (id: '30' | '28R'): AircraftInit => {
+    const rwy = KOAK_RUNWAYS[id]
+    return { id: 'a', callsign: 'SWA2', type: 'B738', wake: 'M', path: [finalFix(rwy, FINAL_APPROACH_NM), rwy.threshold], targetSpeed: 140, airborne: true, intent: 'arrival', goalPoint: rwy.threshold }
+  }
+
+  it('runwayTakes: mixed takes both; a designation takes only its own intent', () => {
+    expect(runwayTakes('mixed', 'departure')).toBe(true)
+    expect(runwayTakes('mixed', 'arrival')).toBe(true)
+    expect(runwayTakes('departures', 'departure')).toBe(true)
+    expect(runwayTakes('departures', 'arrival')).toBe(false)
+    expect(runwayTakes('arrivals', 'arrival')).toBe(true)
+    expect(runwayTakes('arrivals', 'departure')).toBe(false)
+  })
+
+  it('runways open mixed, and a designation must name a runway in use', () => {
+    const sim = createGroundSim([], { graph, guard, runways: [KOAK_RUNWAYS['30'], KOAK_RUNWAYS['28R']], runwaysInteract: () => false })
+    expect(sim.runwayOps()).toEqual([
+      { ident: '30', ops: 'mixed' },
+      { ident: '28R', ops: 'mixed' },
+    ])
+    // A runway that is not active cannot be designated.
+    expect(sim.setRunwayOps(KOAK_RUNWAYS['10R'], 'departures').ok).toBe(false)
+    expect(sim.setRunwayOps(KOAK_RUNWAYS['30'], 'departures').ok).toBe(true)
+    expect(sim.runwayOps().find((r) => r.ident === '30')?.ops).toBe('departures')
+  })
+
+  it('a departures-only runway issues no landing clearances; an arrivals-only runway no takeoff', () => {
+    // 30 for departures, 28R for arrivals.
+    const dep = createGroundSim([arrivalAt('30')], { graph, guard, runways: [KOAK_RUNWAYS['30'], KOAK_RUNWAYS['28R']], runwaysInteract: () => false })
+    expect(dep.setRunwayOps(KOAK_RUNWAYS['30'], 'departures').ok).toBe(true)
+    dep.dispatch({ type: 'contactTower', aircraftId: 'a' }) // arrivals are already Tower's; harmless
+    const land = dep.dispatch({ type: 'clearedToLand', aircraftId: 'a' })
+    expect(land.ok).toBe(false)
+    if (!land.ok) expect(land.reason).toMatch(/departures only/i)
+
+    const arr = createGroundSim([departureAt('30')], { graph, guard, runways: [KOAK_RUNWAYS['30'], KOAK_RUNWAYS['28R']], runwaysInteract: () => false })
+    expect(arr.setRunwayOps(KOAK_RUNWAYS['30'], 'arrivals').ok).toBe(true)
+    for (let i = 0; i < 3000 && !A(arr).holdShort; i += 1) arr.step(0.1)
+    expect(arr.dispatch({ type: 'contactTower', aircraftId: 'd' }).ok).toBe(true)
+    const luaw = arr.dispatch({ type: 'lineUpAndWait', aircraftId: 'd' })
+    expect(luaw.ok).toBe(false)
+    if (!luaw.ok) expect(luaw.reason).toMatch(/arrivals only/i)
+  })
+
+  it('mixed (the default) still clears both takeoff and landing', () => {
+    const sim = createGroundSim([arrivalAt('30')], { graph, guard, runways: [KOAK_RUNWAYS['30']], runwaysInteract: () => false })
+    expect(sim.dispatch({ type: 'clearedToLand', aircraftId: 'a' }).ok).toBe(true)
+  })
+
+  it('the spawner sends each intent only to a runway that takes it', () => {
+    // 30 departures-only, 28R arrivals-only (both parallels-independent here). Every arrival must
+    // establish on 28R and every departure aim at 30 — the classic split configuration.
+    const game = createAirportGame(KOAK, 9)
+    const sim = createGroundSim([], {
+      graph,
+      guard,
+      spawn: game.spawn,
+      servicing: game.servicing,
+      runways: [KOAK_RUNWAYS['30'], KOAK_RUNWAYS['28R']],
+      runwaysInteract: game.runwaysInteract,
+    })
+    expect(sim.setRunwayOps(KOAK_RUNWAYS['30'], 'departures').ok).toBe(true)
+    expect(sim.setRunwayOps(KOAK_RUNWAYS['28R'], 'arrivals').ok).toBe(true)
+    sim.setTrafficRate(4)
+    const thr28R = KOAK_RUNWAYS['28R'].threshold
+    const thr30 = KOAK_RUNWAYS['30'].threshold
+    const near = (p: readonly [number, number], q: readonly [number, number]) => Math.hypot(p[0] - q[0], p[1] - q[1])
+    let arrivals = 0
+    let departures = 0
+    const seen = new Set<string>()
+    for (let i = 0; i < 12000 && arrivals + departures < 16; i += 1) {
+      sim.step(0.1)
+      for (const a of sim.snapshot().aircraft) {
+        if (seen.has(a.id)) continue
+        seen.add(a.id)
+        if (a.intent === 'arrival') {
+          arrivals += 1
+          // Every arrival is established on 28R's approach (the arrivals runway), never 30's.
+          expect(near([a.x, a.y], thr28R)).toBeLessThan(near([a.x, a.y], thr30))
+        } else {
+          departures += 1
+        }
+      }
+    }
+    expect(arrivals).toBeGreaterThan(0) // arrivals do spawn — onto 28R
+    expect(departures).toBeGreaterThan(0) // and departures — parked at the terminal for runway 30
   })
 })

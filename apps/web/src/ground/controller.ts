@@ -22,6 +22,7 @@ import type {
   Point,
   PushbackOption,
   RunwayExit,
+  RunwayOps,
   ServiceProgress,
   StandOption,
   TaxiTopology,
@@ -198,6 +199,9 @@ export interface StripSnapshot {
   /** Designators of every active runway direction — one per physical runway in use. A
    *  single-runway field has one; KBUR with both runways up has two (docs/atc-multi-runway.md §5). */
   activeRunways: string[]
+  /** How each active runway is being operated, keyed by ident (docs/atc-runway-operations.md §2):
+   *  `mixed` (both), `departures` (takeoffs only), or `arrivals` (landings only). */
+  runwayOps: Record<string, RunwayOps>
   /** Designator of the runway direction in use. Published rather than mirrored in component
    *  state so it cannot drift from the sim, whatever changes it. */
   activeRunway: string
@@ -237,6 +241,9 @@ export interface GroundController {
    *  are then active (docs/atc-multi-runway.md §5). Refused (with a notice) while traffic is
    *  committed to the runway being changed. */
   setRunway(ident: string): void
+  /** Designate how an active runway is operated (departures / arrivals / mixed). Refused (with a
+   *  notice) for a runway that is not in use (docs/atc-runway-operations.md §2). */
+  setRunwayOps(ident: string, ops: RunwayOps): void
   /** Take a runway direction's physical runway back out of the active set. Refused for the only
    *  active runway, and while any aircraft is still using it. */
   deactivateRunway(ident: string): void
@@ -444,6 +451,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
     draft: null,
     activeRunway: game.runway.ident,
     activeRunways: [game.runway.ident],
+    runwayOps: { [game.runway.ident]: 'mixed' },
     comms: [],
   }
   let sig = ''
@@ -483,9 +491,9 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
     // The whole active set enters the key, not just the primary, so bringing a second runway
     // online (or taking one back out) re-publishes even though the primary is unchanged.
     let nextSig = `${position}|${selected ?? '-'}|${sim
-      .runways()
-      .map((r) => r.ident)
-      .sort() // set membership is what the UI cares about, not the order setRunway last touched it
+      .runwayOps()
+      .map((r) => `${r.ident}:${r.ops}`)
+      .sort() // set membership + designation is what the UI cares about, not setRunway's last order
       .join('+')}|${comms.at(-1)?.seq ?? 0}`
     nextSig += draft ? `~${draft.id}:${draft.via.join('.')}` : ''
     // Range-to-threshold is continuous, so it enters the signature at display precision
@@ -499,6 +507,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
       position,
       activeRunway: sim.runway()?.ident ?? game.runway.ident,
       activeRunways: sim.runways().map((r) => r.ident),
+      runwayOps: Object.fromEntries(sim.runwayOps().map((r) => [r.ident, r.ops])),
       draft: draft ? { id: draft.id, via: [...draft.via] } : null,
       comms,
       aircraft: acs.map((a) => ({
@@ -587,6 +596,17 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
       // departure's roll direction, so it needs saying as much as a refusal does — and the
       // notice lands in an aria-live region, which is the only announcement a screen reader gets.
       flashNotice(res.ok ? `RWY ${ident} now in use — arrivals and departures` : res.reason)
+      publish()
+    },
+    setRunwayOps: (ident, ops) => {
+      const dir = findRunway(airport, ident)
+      if (!dir) {
+        flashNotice(`${airport.icao} has no runway ${ident}`)
+        return
+      }
+      const res = sim.setRunwayOps(dir, ops)
+      const label = ops === 'mixed' ? 'arrivals and departures' : ops
+      flashNotice(res.ok ? `RWY ${ident} — ${label}` : res.reason)
       publish()
     },
     deactivateRunway: (ident) => {

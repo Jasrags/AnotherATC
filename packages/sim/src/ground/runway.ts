@@ -71,6 +71,19 @@ export interface ActiveRunway {
 export type RunwayInteractionKind = 'occupancy' | 'landing' | 'wake'
 
 /**
+ * How an active runway is being operated (docs/atc-runway-operations.md §2): both takeoffs and
+ * landings (`mixed`, the default and the only single-runway case), takeoffs only (`departures`), or
+ * landings only (`arrivals`). This is session *state* the controller sets — not field data — so it
+ * lives on the sim's active set, not on {@link ActiveRunway}.
+ */
+export type RunwayOps = 'mixed' | 'departures' | 'arrivals'
+
+/** Whether a runway operated as `ops` accepts traffic of the given intent. */
+export function runwayTakes(ops: RunwayOps, intent: 'departure' | 'arrival'): boolean {
+  return ops === 'mixed' || (intent === 'arrival' ? ops === 'arrivals' : ops === 'departures')
+}
+
+/**
  * Whether traffic committed to runway `other` is relevant to a clearance protecting runway `mine`,
  * for the given reason. This is the seam a multi-runway field plugs its inter-runway rules into;
  * the engine owns the *shape* (this signature, and the gates that consult it), the field owns the

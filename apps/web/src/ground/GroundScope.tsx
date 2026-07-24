@@ -91,7 +91,9 @@ export function GroundScope({ controller }: { controller: GroundController }) {
   // departure end together — you cannot land one way and depart the other. Read off the
   // published snapshot, not mirrored in local state: the sim can refuse a change, and anything
   // else that switches the runway has to be reflected here too.
-  const activeRunways = useSyncExternalStore(controller.subscribe, controller.getSnapshot).activeRunways
+  const runwaySnap = useSyncExternalStore(controller.subscribe, controller.getSnapshot)
+  const activeRunways = runwaySnap.activeRunways
+  const runwayOps = runwaySnap.runwayOps
   // Each physical runway (a layout, e.g. "08/26") is one control cycling through its states:
   // its first direction → its second → off → first. A single-runway field never reaches "off"
   // (a field always operates *somewhere*), so its one control just swaps the two directions, as
@@ -106,6 +108,14 @@ export function GroundScope({ controller }: { controller: GroundController }) {
     else if (activeRunways.length <= 1)
       controller.setRunway(dirA) // the field's last runway can't be turned off — wrap to its first
     else controller.deactivateRunway(dirB)
+  }
+  // Designate how an active runway is operated, cycling mixed → departures → arrivals → mixed
+  // (docs/atc-runway-operations.md §2). Only shown for a runway in use.
+  const OPS_CYCLE = { mixed: 'departures', departures: 'arrivals', arrivals: 'mixed' } as const
+  const OPS_LABEL = { mixed: 'MIX', departures: 'DEP', arrivals: 'ARR' } as const
+  const cycleOps = (onDir: string) => {
+    const current = runwayOps[onDir] ?? 'mixed'
+    controller.setRunwayOps(onDir, OPS_CYCLE[current])
   }
 
   // Time control. The ref drives the fixed-timestep loop; the state drives the buttons. 0 is
@@ -684,20 +694,32 @@ export function GroundScope({ controller }: { controller: GroundController }) {
           const dirs = layout.ident.split('/')
           const onDir = dirs.find((d) => activeRunways.includes(d))
           const multi = airport.layouts.length > 1
+          const ops = onDir ? (runwayOps[onDir] ?? 'mixed') : null
           return (
-            <button
-              key={layout.ident}
-              type="button"
-              className={`ctl-btn mono${onDir ? '' : ' ctl-btn-off'}`}
-              onClick={() => cycleRunway(dirs)}
-              title={
-                multi
-                  ? `Runway ${layout.ident}: click to change its direction, bring it online, or take it out of use.`
-                  : 'Switch the active runway. Arrivals and departures always use the same direction.'
-              }
-            >
-              RWY {onDir ?? `${layout.ident} OFF`}
-            </button>
+            <span key={layout.ident} className="rwy-ctl">
+              <button
+                type="button"
+                className={`ctl-btn mono${onDir ? '' : ' ctl-btn-off'}`}
+                onClick={() => cycleRunway(dirs)}
+                title={
+                  multi
+                    ? `Runway ${layout.ident}: click to change its direction, bring it online, or take it out of use.`
+                    : 'Switch the active runway. Arrivals and departures always use the same direction.'
+                }
+              >
+                RWY {onDir ?? `${layout.ident} OFF`}
+              </button>
+              {onDir && ops && (
+                <button
+                  type="button"
+                  className={`ctl-btn mono rwy-ops rwy-ops-${ops}`}
+                  onClick={() => cycleOps(onDir)}
+                  title={`Runway ${onDir} operations: ${ops === 'mixed' ? 'arrivals and departures' : ops}. Click to change (departures / arrivals / mixed).`}
+                >
+                  {OPS_LABEL[ops]}
+                </button>
+              )}
+            </span>
           )
         })}
         <button
