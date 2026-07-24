@@ -493,6 +493,19 @@ own coupling rule as a seam plug; neither is blocked.
   today** (a shared wake corridor across the 1,001-ft parallels); the test proves the loop plays
   (departure off 30, arrival 30 → gate, every gate routes to 30 across both fields) and the
   coupling compiles right. `?airport=KOAK` runs the field.
+  **Taxi runway-crossings shipped — position-aware, one runway at a time** (`docs/atc-runway-crossing.md`
+  §6/§8): reaching the South terminal from the North Field crosses the two independent parallels, and
+  a clearance to cross one runway no longer authorizes the next — on physically clearing a runway the
+  aircraft re-holds short of the next its route crosses and needs a fresh clearance
+  (`resolveRunwayCrossing` / `maybeReholdAtNextRunway`, edge-triggered). Never the aircraft's own
+  runway nor one occupancy-coupled to it, so an intersecting field (KBUR) is unaffected and a
+  single-runway field (KSAN) is a strict no-op. Occupancy was already position-aware
+  (`occupiesForTakeoff` holds a runway only while an aircraft is physically on it; `blocksRunwayFor`
+  scopes it to that runway) — a test pins it: a crosser on one parallel blocks a crossing of that
+  runway but not the independent one. Crossed-runway resolution made robust (`runwaysAlong` samples
+  along each segment, not just vertices). Crossing/hold-short **phraseology now names the runway being
+  crossed** (`crossingRunway`): a KOAK aircraft crossing 10R/28L is told "cross runway 28L", not the
+  primary; this also fixed KBUR (an arrival crossing 15/33 now names 15/33, not its landing runway).
   _Next, in order:_
   - **Taxiway naming** (`docs/OAK/taxiway-naming.md`): patch the ~26 unnamed runway-touching OSM
     ways to their designator by way-id, matched against `00294AD.PDF` — same theme KBUR/KSAN did.

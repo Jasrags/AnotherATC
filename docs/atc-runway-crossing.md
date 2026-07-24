@@ -138,7 +138,7 @@ status; nothing in this section is a plan, only an honest statement of the diver
 | "No delay" as a distinct instruction | ✅ Tower's crossing clearance carries it; Ground's does not. (`expedite` remains the separate, stronger instruction for an aircraft already moving.) |
 | Hold with a stated reason ("traffic on a 3 mile final") | ✅ The instruction names the traffic it is issued for — an inbound at its range in whole miles, or an occupant on the runway — and says nothing when nothing is in the way. Absent from the read-back: a cause is not a clearance. |
 | Return to Ground after crossing | ✅ "when clear of the runway, contact ground" — armed when issued mid-crossing, applied the moment the aircraft is off the pavement. Nothing is re-routed: a transit is already taxiing its own clearance. |
-| One runway at a time | ➖ Not yet meaningful: KSAN is single-runway. It becomes real at the first intersecting-runway field (backlog: second airport). |
+| One runway at a time | ✅ At KOAK — where a North-Field→terminal taxi crosses the two independent parallels — a crossing clearance authorizes exactly one runway: on physically clearing it the aircraft re-holds short of the next runway its route crosses and needs a fresh clearance (`resolveRunwayCrossing` / `maybeReholdAtNextRunway`). Never the aircraft's own runway, nor one occupancy-coupled to it, so an *intersecting* field (KBUR) is unaffected — there the coupling gates the shared intersection — and a single-runway field (KSAN) is a strict no-op. The occupancy that backs it is position-aware: an aircraft holds a runway only while physically on it (`occupiesForTakeoff`), and only *that* runway (`blocksRunwayFor`). |
 | Lights on when crossing | ➖ Not modelled; no aircraft lighting state exists. |
 
 ---
