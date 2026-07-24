@@ -1,12 +1,12 @@
 import { useRef } from 'react'
-import { KSAN, KBUR, type Airport } from '@anotheratc/sim'
+import { KSAN, KBUR, KOAK, type Airport } from '@anotheratc/sim'
 import { createGroundController, trafficLevelFor, type GroundController } from './controller'
 import { GroundScope } from './GroundScope'
 import { StripBay } from './StripBay'
 import { loadTrafficRate } from './prefs'
 
 /** The fields the app can run, keyed by ICAO. Pick one with `?airport=KBUR`; defaults to KSAN. */
-const AIRPORTS: Record<string, Airport> = { KSAN, KBUR }
+const AIRPORTS: Record<string, Airport> = { KSAN, KBUR, KOAK }
 
 /** The field named by `?airport=` (case-insensitive), or KSAN when absent/unknown. */
 function airportFromUrl(): Airport {

@@ -7,6 +7,14 @@ export { KBUR_SURFACE } from './world/kbur'
 export { KBUR, KBUR_RUNWAYS, KBUR_LAYOUT_0826, KBUR_LAYOUT_1533 } from './world/kburAirport'
 export { KOAK_SURFACE } from './world/koak'
 export {
+  KOAK,
+  KOAK_RUNWAYS,
+  KOAK_LAYOUT_10L28R,
+  KOAK_LAYOUT_10R28L,
+  KOAK_LAYOUT_1230,
+  KOAK_LAYOUT_1533,
+} from './world/koakAirport'
+export {
   createAirportGame,
   findRunway,
   gatesFromSurface,
