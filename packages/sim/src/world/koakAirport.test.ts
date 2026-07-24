@@ -345,4 +345,67 @@ describe('taxi runway-crossings — one runway at a time, position-aware (docs/a
     if (!qCross.ok) expect(qCross.reason).toMatch(/occupied|busy|runway/i)
     expect(sim.dispatch({ type: 'crossRunway', aircraftId: 'r' }).ok).toBe(true)
   })
+
+  it('re-holds at the second runway even when handed back to Ground mid-transit (Tower crossing)', () => {
+    // The Tower-run counterpart: a transit is handed to Tower, cleared across the first parallel,
+    // and told to contact Ground while it is off the first runway but short of the second. It must
+    // still re-hold — one runway at a time — not drive across the second on the first clearance.
+    const sim = createGroundSim([{ ...crossBothParallels(), intent: 'departure' }], {
+      graph,
+      guard,
+      runways: [KOAK_RUNWAYS['28R'], KOAK_RUNWAYS['28L']],
+      runwaysInteract,
+    })
+    expect(until(sim, () => A(sim, 'x').holdShort)).toBe(true)
+    expect(sim.dispatch({ type: 'contactTower', aircraftId: 'x' }).ok).toBe(true)
+    expect(sim.dispatch({ type: 'crossRunway', aircraftId: 'x' }).ok).toBe(true)
+    // Off the first runway, between the two parallels — hand it back to Ground here.
+    expect(until(sim, () => runwayIdAt([A(sim, 'x').x, A(sim, 'x').y], guard) === null && A(sim, 'x').y < 0.41)).toBe(true)
+    sim.dispatch({ type: 'contactGround', aircraftId: 'x' })
+    // It comes back on hold short of 10R/28L, needing a fresh clearance — not driven across it.
+    expect(until(sim, () => A(sim, 'x').holdShort && A(sim, 'x').y > 0.23)).toBe(true)
+    expect(runwayIdAt([A(sim, 'x').x, A(sim, 'x').y], guard)).toBeNull()
+  })
+})
+
+describe('line up and wait needs the runway in use (docs/atc-multi-runway.md §5)', () => {
+  const A = (sim: ReturnType<typeof createGroundSim>) => sim.snapshot().aircraft[0]!
+  // A departure holding short of a runway end, facing the roll, goal on the runway.
+  const departureAt = (id: '30' | '10R'): AircraftInit => {
+    const rwy = KOAK_RUNWAYS[id]
+    const ux = rwy.farEnd[0] - rwy.departureStart[0]
+    const uy = rwy.farEnd[1] - rwy.departureStart[1]
+    const len = Math.hypot(ux, uy)
+    const back: [number, number] = [rwy.departureStart[0] - (ux / len) * 0.05, rwy.departureStart[1] - (uy / len) * 0.05]
+    return { id: 'd', callsign: 'SWA1', type: 'B738', wake: 'M', path: [back, rwy.departureStart], targetSpeed: 5, intent: 'departure', goalPoint: rwy.departureStart }
+  }
+  const toHoldShort = (sim: ReturnType<typeof createGroundSim>): void => {
+    for (let i = 0; i < 3000 && !A(sim).holdShort; i += 1) sim.step(0.1)
+    expect(A(sim).holdShort).toBe(true)
+    expect(sim.dispatch({ type: 'contactTower', aircraftId: 'd' }).ok).toBe(true)
+  }
+
+  it('refuses a line-up on a runway that is not active — and names *that* runway, not the primary', () => {
+    // A departure at 10R while only 30 is active. Previously the refusal named the primary's
+    // reciprocal ("RWY 12"); it must name the runway the aircraft is actually on.
+    const sim = createGroundSim([departureAt('10R')], { graph, guard, runways: [KOAK_RUNWAYS['30']], runwaysInteract: () => false })
+    toHoldShort(sim)
+    const res = sim.dispatch({ type: 'lineUpAndWait', aircraftId: 'd' })
+    expect(res.ok).toBe(false)
+    if (!res.ok) {
+      expect(res.reason).toMatch(/10R\/28L/)
+      expect(res.reason).not.toMatch(/RWY 12\b/)
+    }
+  })
+
+  it('allows the line-up once that runway is activated', () => {
+    const sim = createGroundSim([departureAt('10R')], {
+      graph,
+      guard,
+      runways: [KOAK_RUNWAYS['30'], KOAK_RUNWAYS['10R']],
+      runwaysInteract: () => false,
+    })
+    toHoldShort(sim)
+    expect(sim.dispatch({ type: 'lineUpAndWait', aircraftId: 'd' }).ok).toBe(true)
+  })
 })

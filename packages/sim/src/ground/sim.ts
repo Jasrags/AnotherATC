@@ -1525,6 +1525,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
    * single-runway field, so KSAN and KBUR's own-runway crossings are unchanged.
    */
   function maybeReholdAtNextRunway(ac: Internal): void {
+    if (physicalRunwayCount <= 1) return // single-runway field: never a *second* runway to re-hold at
     if (ac.held !== null || ac.controlledBy !== 'ground') return
     if (ac.airborne || ac.rollingOut || ac.departing || ac.lineUpWait || onRunwayNow(ac)) return
     const next = nextCrossedRunwayId(ac)
@@ -1700,6 +1701,15 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
    * simply isn't the one in use — or it is on the right runway but too far along it.
    */
   function takeoffBlocked(ac: Internal): string | null {
+    // The aircraft's own physical runway has to be in use. On a multi-runway field it may be holding
+    // short of a runway that is not in the active set at all (KOAK: a departure at 10R while only 30
+    // is active) — that runway must be activated before anything departs it. Named here rather than
+    // left to the direction check below, whose `activeRunwayFor` fallback would otherwise report the
+    // wrong runway entirely. (Facing the wrong *direction* on an active runway is the case below.)
+    const own = targetRunwayId(ac)
+    if (physicalRunwayCount > 1 && own !== null && !active.some((a) => a.id === own)) {
+      return `RWY ${own} is not in use — activate it to depart`
+    }
     const remaining = takeoffRunRemaining(ac)
     if (remaining >= MIN_TAKEOFF_RUN_NM) return null
     const r = activeRunwayFor(ac)
@@ -2930,6 +2940,9 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
           }
           ac.controlledBy = 'ground'
           voidClearance(ac)
+          // If more runways lie ahead, come back on hold short of the next — one runway at a time,
+          // exactly as the deferred (groundPending) path does in resolveCrossingHandoff.
+          maybeReholdAtNextRunway(ac)
           return ACCEPTED
         }
         if (ac.intent !== 'arrival') return refused('only arrivals are handed to ground after landing')
