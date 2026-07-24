@@ -313,7 +313,7 @@ export function drawRunwayMarkings(ctx: Ctx, v: View, layout: RunwayLayout): voi
     }
 
     // ── EMAS bed beyond the pavement, chevroned ──
-    if (end.emas) drawEmas(ctx, v, end, ux, uy, px, py)
+    if (end.emas) drawEmas(ctx, v, end, ux, uy, px, py, halfWidthNm)
   }
   ctx.restore()
 }
@@ -327,11 +327,15 @@ function drawEmas(
   uy: number,
   px: number,
   py: number,
+  runwayHalfWidthNm: number,
 ): void {
   const emas = end.emas
   if (!emas) return
   const lengthNm = emas.lengthFt / FT_PER_NM
-  const halfNm = emas.widthFt / 2 / FT_PER_NM
+  // Drawn no wider than the runway it protects: the surveyed bed width can exceed the pavement
+  // (KBUR's is 350 ft on a 150 ft runway), and a chevron block spilling past both runway edges
+  // reads as a rendering fault rather than a marking. The true width stays in the data.
+  const halfNm = Math.min(emas.widthFt / 2 / FT_PER_NM, runwayHalfWidthNm)
   // The bed lies *outside* the pavement, so it runs against the into-runway direction.
   const at = (along: number, across: number): [number, number] =>
     toScreen(v, end.pavementEnd[0] - ux * along + px * across, end.pavementEnd[1] - uy * along + py * across)
