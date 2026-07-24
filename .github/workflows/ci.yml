@@ -28,11 +28,15 @@ jobs:
       - run: pnpm --filter @anotheratc/web build
 
   # Broader supply-chain advisory scan (OSV database) over the lockfile.
+  # The action lives in a subdirectory of the repo (the root action.yml is a stub, so a bare
+  # `google/osv-scanner-action@vX` fails to load with "Top level 'runs:' section is required").
+  # Pinned to a specific tag because the docs note the scanner-action's behaviour can change in a
+  # minor patch.
   osv-scan:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: google/osv-scanner-action@v2.2.4
+      - uses: google/osv-scanner-action/osv-scanner-action@v2.3.8
         with:
           scan-args: |-
             --lockfile=pnpm-lock.yaml
