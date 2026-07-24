@@ -1273,6 +1273,33 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     return occupiesForTakeoff(o)
   }
 
+  /** Every runway a route touches or crosses, in the order first met. Samples along each segment,
+   *  not just at its vertices: a runway zone is thin (~0.04 nm) and a route can cross it between two
+   *  vertices with neither inside it, which a vertex-only scan misses — leaving the crossed runway
+   *  unresolved and the gate falling back to a coarse field-wide check. The step is finer than a
+   *  runway is wide, so a genuine crossing is always caught. */
+  function runwaysAlong(route: readonly Point[]): string[] {
+    if (!guard) return []
+    const ids: string[] = []
+    const push = (id: string | null): void => {
+      if (id !== null && !ids.includes(id)) ids.push(id)
+    }
+    const SAMPLE_NM = 0.005
+    for (let i = 0; i < route.length; i += 1) {
+      const a = route[i]!
+      push(runwayIdAt(a, guard))
+      const b = route[i + 1]
+      if (!b) continue
+      const len = Math.hypot(b[0] - a[0], b[1] - a[1])
+      const steps = Math.ceil(len / SAMPLE_NM)
+      for (let s = 1; s < steps; s += 1) {
+        const t = s / steps
+        push(runwayIdAt([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t], guard))
+      }
+    }
+    return ids
+  }
+
   /** Every runway a holding-short aircraft's held (crossing) route runs across — each one a
    *  crossing clearance must find clear. A held route is the whole remainder to the gate, so it
    *  can cross more than one runway; checking only the first would drive the aircraft across an
@@ -1283,16 +1310,12 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       const target = targetRunwayId(ac)
       return target === null ? [] : [target]
     }
-    const ids = new Set<string>()
-    for (const p of ac.held) {
-      const id = runwayIdAt(p, guard)
-      if (id !== null) ids.add(id)
-    }
-    if (ids.size === 0) {
+    const ids = runwaysAlong(ac.held)
+    if (ids.length === 0) {
       const target = targetRunwayId(ac)
-      if (target !== null) ids.add(target)
+      if (target !== null) return [target]
     }
-    return [...ids]
+    return ids
   }
 
   /**
@@ -1436,6 +1459,71 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     return true
   }
 
+  /**
+   * Advance the crossing-permission latch by physical position, and enforce **one runway at a
+   * time** (docs/atc-runway-crossing.md §6). Runs each tick after movement.
+   *
+   * The latch: a crossing clearance grants `runwayAuth: 'issued'`; the aircraft drives onto the
+   * runway (`'issued'→'on'`) and off the far side (`'on'→null`). This is the position-aware part —
+   * permission to be on the pavement is held exactly while the aircraft is physically on it, and
+   * `occupiesForTakeoff` already blocks the crossed runway (and *only* it, per `blocksRunwayFor`)
+   * for the same window.
+   *
+   * The re-hold: a clearance to cross one runway does not authorize the next (§6, "one runway at a
+   * time"). A crossing clearance releases the aircraft's whole held remainder, which on a field like
+   * KOAK can span two runways; so once it has physically cleared the runway it was crossing, if its
+   * onward route still crosses another it is put back on hold short of that one, needing a fresh
+   * crossing clearance. The condition is self-limiting (re-holding sets `held`, which turns it off)
+   * and never fires on a single-runway field, where no second runway is ever ahead — so KSAN and
+   * KBUR's own-runway crossings behave exactly as before, guarded by test.
+   */
+  function resolveRunwayCrossing(ac: Internal): void {
+    if (ac.runwayAuth === 'issued' && onRunwayNow(ac)) {
+      ac.runwayAuth = 'on'
+    } else if (ac.runwayAuth === 'on' && !onRunwayNow(ac)) {
+      ac.runwayAuth = null
+      // Just physically cleared the runway it was crossing (a Ground-run crossing). The Tower-run
+      // case re-holds from resolveCrossingHandoff once the aircraft is handed back to Ground.
+      maybeReholdAtNextRunway(ac)
+    }
+  }
+
+  /**
+   * One runway at a time (docs/atc-runway-crossing.md §6): having cleared the runway it was
+   * crossing, an aircraft whose onward route still crosses **another** runway is put back on hold
+   * short of it, needing a fresh crossing clearance. Edge-triggered — called only at the moment an
+   * aircraft clears a runway, not each tick — so the route scan below costs nothing in the common
+   * case. Never the aircraft's own runway (see {@link nextCrossedRunwayId}); a no-op on a
+   * single-runway field, so KSAN and KBUR's own-runway crossings are unchanged.
+   */
+  function maybeReholdAtNextRunway(ac: Internal): void {
+    if (ac.held !== null || ac.controlledBy !== 'ground') return
+    if (ac.airborne || ac.rollingOut || ac.departing || ac.lineUpWait || onRunwayNow(ac)) return
+    const next = nextCrossedRunwayId(ac)
+    // Re-hold only at a runway that is genuinely *separate* from the aircraft's own — not its own
+    // runway, and not one occupancy-coupled to it. The second clause is what keeps this to KOAK's
+    // independent parallels: at an intersecting field like KBUR, "crossing" the other runway is the
+    // shared intersection, which the occupancy coupling already gates — a separate re-hold there
+    // would make an arrival wait for the busy departure runway twice. `runwaysRelated` folds in the
+    // same-runway case too, so a single-runway field is a no-op.
+    if (next !== null && !runwaysRelated(targetRunwayId(ac), next, 'occupancy')) reholdAtRunway(ac)
+  }
+
+  /**
+   * The id of the runway the aircraft's remaining route first genuinely **crosses** — enters and
+   * continues to the far side — or null if the route only ends on/near a runway (a gate inside a
+   * guard band is a destination, not a crossing) or crosses none.
+   */
+  function nextCrossedRunwayId(ac: Internal): string | null {
+    if (!guard) return null
+    const remaining: Point[] = [[ac.x, ac.y], ...ac.path.slice(ac.leg + 1)]
+    const { held } = splitRouteAtRunway(remaining, guard)
+    if (!held || held.length < 2) return null
+    const end = held[held.length - 1]
+    if (end === undefined || onRunway(end, guard)) return null
+    return runwaysAlong(held)[0] ?? null
+  }
+
   /** What an aircraft on the runway is doing there, or null when it isn't on it. Ordered by
    *  authority: a takeoff clearance outranks a line-up, which outranks a crossing. Anything on
    *  the pavement that matches none of them holds no permission to be there. */
@@ -1451,10 +1539,8 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
   /** Advance the crossing permission's little latch (see {@link Internal.runwayAuth}) and
    *  recompute who is in conflict on the runway. */
   function detectRunwayIncursions(): RunwayIncursion[] {
-    for (const ac of fleet) {
-      if (ac.runwayAuth === 'issued' && onRunwayNow(ac)) ac.runwayAuth = 'on'
-      else if (ac.runwayAuth === 'on' && !onRunwayNow(ac)) ac.runwayAuth = null
-    }
+    // The crossing-permission latch is advanced in `resolveRunwayCrossing` (earlier in the tick,
+    // right after movement), so by here `runwayAuth` already reflects this tick's position.
     const found = detectIncursions(
       fleet.map((ac) => ({
         id: ac.id,
@@ -3023,6 +3109,9 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     ac.groundPending = false
     voidClearance(ac) // Tower's business with it is finished; Ground has issued it nothing
     checkIn(ac)
+    // A Tower-run crossing that has more runways to cross comes back to Ground holding short of the
+    // next one — one runway at a time, the same as a Ground-run crossing (docs/atc-runway-crossing.md §6).
+    maybeReholdAtNextRunway(ac)
   }
 
   /**
@@ -3322,6 +3411,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         }
       }
       fleet.forEach((ac, i) => advance(ac, dt, caps[i] ?? Infinity))
+      for (const ac of fleet) resolveRunwayCrossing(ac)
       for (const ac of fleet) resolveApproach(ac)
       for (const ac of fleet) resolveCrossingHandoff(ac)
       for (const ac of fleet) resolveLineUp(ac)

@@ -228,3 +228,116 @@ describe('two runways active at once — a South runway and a North parallel (do
     expect(runwayCrossingsFrom(KOAK.runwayDependencies).length).toBe(0)
   })
 })
+
+describe('taxi runway-crossings — one runway at a time, position-aware (docs/atc-runway-crossing.md §6)', () => {
+  // The KOAK ground challenge: reaching the South terminal from the North Field crosses the two
+  // close parallels. They do not intersect (independent, not KBUR's occupancy-coupled crossing), so
+  // each crossing is its own clearance and holds only its own runway.
+  const runwaysInteract = createAirportGame(KOAK).runwaysInteract
+  const A = (sim: ReturnType<typeof createGroundSim>, id: string) => sim.snapshot().aircraft.find((a) => a.id === id)!
+  const until = (sim: ReturnType<typeof createGroundSim>, pred: () => boolean, steps = 6000): boolean => {
+    for (let i = 0; i < steps; i += 1) {
+      sim.step(0.1)
+      if (pred()) return true
+    }
+    return false
+  }
+
+  // A southbound taxi at x≈0.3 that crosses 10L/28R (centreline y≈0.41) then 10R/28L (y≈0.23),
+  // ending south of both. Hand-built so the test does not depend on the terminal-apron routing.
+  const crossBothParallels = (): AircraftInit => ({
+    id: 'x',
+    callsign: 'FDX700',
+    type: 'B738',
+    wake: 'M',
+    path: [
+      [0.3, 0.5],
+      [0.3, 0.45],
+      [0.3, 0.35],
+      [0.3, 0.28],
+      [0.3, 0.18],
+      [0.3, 0.1],
+    ],
+    targetSpeed: 15,
+    intent: 'arrival',
+    goalPoint: [0.3, 0.1],
+  })
+
+  it('holds short of the first parallel, and after crossing it re-holds short of the second', () => {
+    const sim = createGroundSim([crossBothParallels()], {
+      graph,
+      guard,
+      runways: [KOAK_RUNWAYS['28R'], KOAK_RUNWAYS['28L']],
+      runwaysInteract,
+    })
+    // 1. Taxis up to the first runway (10L/28R) and holds short — not on it.
+    expect(until(sim, () => A(sim, 'x').holdShort)).toBe(true)
+    const firstHoldY = A(sim, 'x').y
+    expect(runwayIdAt([A(sim, 'x').x, firstHoldY], guard)).toBeNull()
+    expect(firstHoldY).toBeGreaterThan(0.41) // north of 10L/28R's centreline
+
+    // 2. Cleared across the first — one runway.
+    expect(sim.dispatch({ type: 'crossRunway', aircraftId: 'x' }).ok).toBe(true)
+
+    // 3. It crosses 10L/28R and comes back on hold, now short of 10R/28L — a SECOND, separate
+    //    clearance is required (a clearance to cross one runway does not authorize the next).
+    expect(until(sim, () => A(sim, 'x').holdShort && A(sim, 'x').y < 0.41)).toBe(true)
+    const secondHoldY = A(sim, 'x').y
+    expect(secondHoldY).toBeLessThan(firstHoldY) // moved south, past the first runway
+    expect(secondHoldY).toBeGreaterThan(0.23) // holding short of 10R/28L, not on it
+    expect(runwayIdAt([A(sim, 'x').x, secondHoldY], guard)).toBeNull()
+
+    // 4. Cleared across the second — it reaches its goal south of both.
+    expect(sim.dispatch({ type: 'crossRunway', aircraftId: 'x' }).ok).toBe(true)
+    expect(until(sim, () => A(sim, 'x').y < 0.15)).toBe(true)
+  })
+
+  it('a crosser on one parallel blocks a crossing of that runway, but not the other', () => {
+    // Position-aware, per-runway occupancy: while an aircraft is physically on 10L/28R, a crossing
+    // of 10L/28R is refused (occupied) but a crossing of the independent 10R/28L is not.
+    const onFirst = (): AircraftInit => ({
+      ...crossBothParallels(),
+      id: 'p',
+      callsign: 'UPS1',
+    })
+    const shortOfFirst = (): AircraftInit => ({
+      id: 'q',
+      callsign: 'UPS2',
+      type: 'B738',
+      wake: 'M',
+      path: [[0.5, 0.42], [0.5, 0.38], [0.5, 0.28], [0.5, 0.22]], // crosses 10L/28R (y≈0.33) at x=0.5
+      targetSpeed: 15,
+      intent: 'arrival',
+      goalPoint: [0.5, 0.22],
+    })
+    const shortOfSecond = (): AircraftInit => ({
+      id: 'r',
+      callsign: 'UPS3',
+      type: 'B738',
+      wake: 'M',
+      path: [[0.5, 0.24], [0.5, 0.2], [0.5, 0.1], [0.5, 0.05]], // crosses only 10R/28L (y≈0.15) at x=0.5
+      targetSpeed: 15,
+      intent: 'arrival',
+      goalPoint: [0.5, 0.05],
+    })
+    const sim = createGroundSim([onFirst(), shortOfFirst(), shortOfSecond()], {
+      graph,
+      guard,
+      runways: [KOAK_RUNWAYS['28R'], KOAK_RUNWAYS['28L']],
+      runwaysInteract,
+    })
+    // Send p across 10L/28R and step until it is physically on that runway.
+    expect(until(sim, () => A(sim, 'p').holdShort)).toBe(true)
+    expect(sim.dispatch({ type: 'crossRunway', aircraftId: 'p' }).ok).toBe(true)
+    expect(until(sim, () => runwayIdAt([A(sim, 'p').x, A(sim, 'p').y], guard) === '10L/28R')).toBe(true)
+
+    // q and r are both waiting at their hold lines.
+    expect(A(sim, 'q').holdShort).toBe(true)
+    expect(A(sim, 'r').holdShort).toBe(true)
+    // Crossing the runway p occupies is refused; the independent parallel is clear.
+    const qCross = sim.dispatch({ type: 'crossRunway', aircraftId: 'q' })
+    expect(qCross.ok).toBe(false)
+    if (!qCross.ok) expect(qCross.reason).toMatch(/occupied|busy|runway/i)
+    expect(sim.dispatch({ type: 'crossRunway', aircraftId: 'r' }).ok).toBe(true)
+  })
+})
