@@ -10,6 +10,7 @@ import {
   lookupAircraftType,
 } from '@anotheratc/sim'
 import type {
+  ActiveRunway,
   AircraftDebug,
   Airport,
   ApproachConfig,
@@ -425,6 +426,24 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
   }
   /** Nearest placeable spot's point (for the placement/probe preview), or null. */
   const snapPoint = (p: Point): Point | null => nearestPlace(p).point
+  /** The active runway whose centreline is nearest a point — so a dev-placed departure aims at the
+   *  runway it was set down by, not always the primary (fixes a test aircraft placed by runway 33
+   *  rolling off toward the primary's end when both are in use). */
+  const nearestActiveRunway = (p: Point): ActiveRunway | null => {
+    const distToSeg = (a: Point, b: Point): number => {
+      const vx = b[0] - a[0]
+      const vy = b[1] - a[1]
+      const l2 = vx * vx + vy * vy
+      const t = l2 > 0 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * vx + (p[1] - a[1]) * vy) / l2)) : 0
+      return dist2([a[0] + t * vx, a[1] + t * vy], p)
+    }
+    let best: { dir: ActiveRunway; d: number } | null = null
+    for (const dir of sim.runways()) {
+      const d = distToSeg(dir.departureStart, dir.farEnd)
+      if (!best || d < best.d) best = { dir, d }
+    }
+    return best?.dir ?? null
+  }
   /** Named taxiways a node-point path traverses, in order (deduped). */
   const taxiwaysAlong = (pts: Point[]): string[] => {
     const out: string[] = []
@@ -637,11 +656,11 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
         // Parked on a stand it faces the way the lead-in points, like any other gate departure.
         ...(place.headingDeg !== undefined ? { heading: place.headingDeg } : {}),
         intent: 'departure' as const,
-        // Give it a departure-runway goal so it's a takeoff (not a crossing) when it holds
-        // short — otherwise the Tower handoff / takeoff flow can't engage in the sandbox.
-        // Follows the *active* runway, so a test aircraft spawned while 09 is in use aims at
-        // 09's departure end rather than whichever end was configured at startup.
-        ...(sim.runway() ? { goalPoint: sim.runway()!.departureStart } : {}),
+        // Give it a departure-runway goal so it's a takeoff (not a crossing) when it holds short —
+        // otherwise the Tower handoff / takeoff flow can't engage in the sandbox. Aim at the
+        // *nearest active* runway, not the primary: with two runways in use, a test aircraft placed
+        // by runway 33 should depart 33, not roll off across the field toward the primary's end.
+        ...(nearestActiveRunway(place.point) ? { goalPoint: nearestActiveRunway(place.point)!.departureStart } : {}),
       }
       sim.add(place.gate ? { ...base, gate: place.gate } : base)
       selected = id
