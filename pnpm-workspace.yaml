@@ -23,3 +23,10 @@ trustPolicy: no-downgrade
 # packages may run them. Every entry is a reviewed decision — see the policy doc.
 allowBuilds:
   esbuild: true # native binary fetch; required by vite + vitest
+
+# Security overrides: force a patched version of a transitive dependency past a known advisory.
+# Each entry is a reviewed response to a specific CVE/GHSA — see docs/security/dependency-policy.md.
+overrides:
+  # postcss <8.5.18: GHSA-r28c-9q8g-f849 (.map file disclosure, HIGH). Pulled in transitively via
+  # vite/vitest. Pinned to 8.5.22 (patched, and past the 24h cooldown; 8.5.23 was too fresh).
+  postcss@<8.5.18: 8.5.22
