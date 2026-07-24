@@ -687,6 +687,20 @@ body {
   color: #6fcf97;
 }
 
+/* TRACON departure release: amber while it is a call still owed or being coordinated, green once
+   granted — mirrors the slot's "working toward it / cleared" colour language (docs/atc-departure-release.md). */
+.strip-release {
+  margin-top: 5px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #d8a648;
+}
+
+.strip-release-ok {
+  color: #6fcf97;
+}
+
 /* Waiting on the controller: the same muted slate as its HUD line, so the strip and the scope
    are recognisably saying one thing. Not a warning colour — nothing is wrong yet. */
 .strip-awaiting {

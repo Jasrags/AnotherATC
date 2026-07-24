@@ -42,6 +42,8 @@ function strip(over: Partial<StripItem> = {}): StripItem {
     edctInSec: 0,
     services: [],
     serviceSec: 0,
+    release: 'none',
+    releaseVoidSec: null,
     ...over,
   }
 }
@@ -772,6 +774,60 @@ describe('a departure holding a wheels-up slot', () => {
     const { controller } = fakeController()
     const cmds = commandsFor(controller, holding({ edctSec: null, edctInSec: 0 }), [])
     expect(cmds.find((c) => c.key === 'takeoff')!.label).toBe('Cleared for takeoff')
+  })
+})
+
+describe('a departure needing a TRACON release (docs/atc-departure-release.md)', () => {
+  const needing = (over: Partial<StripItem> = {}) =>
+    strip({
+      status: 'holdShort',
+      controlledBy: 'tower',
+      intent: 'departure',
+      holdingForTakeoff: true,
+      release: 'required',
+      ...over,
+    })
+
+  it('offers the landline call and refuses the takeoff until released', () => {
+    const { controller, dispatched } = fakeController()
+    const cmds = commandsFor(controller, needing(), [])
+    const takeoff = cmds.find((c) => c.key === 'takeoff')!
+    expect(takeoff.label).toBe('Cleared for takeoff — call for release')
+    expect(takeoff.action.kind).toBe('soon')
+    const release = cmds.find((c) => c.key === 'release')!
+    expect(release.label).toBe('Call TRACON for release')
+    if (release.action.kind === 'run') release.action.run()
+    expect(dispatched).toContainEqual({ type: 'requestRelease', aircraftId: 'a' })
+  })
+
+  it('shows the request pending while TRACON coordinates', () => {
+    const { controller } = fakeController()
+    const cmds = commandsFor(controller, needing({ release: 'requested' }), [])
+    expect(cmds.find((c) => c.key === 'takeoff')!.label).toBe('Cleared for takeoff — hold for release')
+    expect(cmds.find((c) => c.key === 'release')!.label).toBe('Release requested — standby')
+  })
+
+  it('offers the clearance once released, and drops the release row', () => {
+    const { controller, dispatched } = fakeController()
+    const cmds = commandsFor(controller, needing({ release: 'released' }), [])
+    const takeoff = cmds.find((c) => c.key === 'takeoff')!
+    expect(takeoff.label).toBe('Cleared for takeoff')
+    expect(cmds.find((c) => c.key === 'release')).toBeUndefined()
+    if (takeoff.action.kind === 'run') takeoff.action.run()
+    expect(dispatched).toContainEqual({ type: 'clearedForTakeoff', aircraftId: 'a' })
+  })
+
+  it('offers the call from line-up-and-wait too', () => {
+    const { controller } = fakeController()
+    const cmds = commandsFor(controller, needing({ status: 'lineUpWait', release: 'required' }), [])
+    expect(cmds.find((c) => c.key === 'release')!.label).toBe('Call TRACON for release')
+  })
+
+  it('names the release ahead of the wheels-up window when both apply', () => {
+    // The sim checks the release before EDCT, so the menu should surface the release reason first.
+    const { controller } = fakeController()
+    const cmds = commandsFor(controller, needing({ release: 'required', edctSec: 900, edctInSec: 135 }), [])
+    expect(cmds.find((c) => c.key === 'takeoff')!.label).toBe('Cleared for takeoff — call for release')
   })
 })
 

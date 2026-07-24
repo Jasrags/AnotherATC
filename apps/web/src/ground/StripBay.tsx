@@ -231,6 +231,14 @@ export function StripBay({ controller }: { controller: GroundController }) {
                     {a.edctInSec > 0 ? ` · in ${clock(a.edctInSec)}` : ' · WINDOW OPEN'}
                   </div>
                 )}
+                {/* TRACON departure release (docs/atc-departure-release.md): amber while it is a
+                    call the controller still owes or TRACON is coordinating, green once granted —
+                    the same "working toward it / cleared to go" colour language as the slot above. */}
+                {a.release === 'required' && <div className="strip-release">⧗ CALL FOR RELEASE</div>}
+                {a.release === 'requested' && <div className="strip-release">⧗ RELEASE REQUESTED</div>}
+                {a.release === 'released' && a.releaseVoidSec !== null && (
+                  <div className="strip-release strip-release-ok">✓ RELEASED · void {clock(a.releaseVoidSec)}</div>
+                )}
                 {/* Waiting on the controller: it has been told nothing and cannot move until it
                     is. Shown from the first second, unlike the HUD advisory — on a strip this is
                     the aircraft's state, not a nag, and "what does this one need" is the whole

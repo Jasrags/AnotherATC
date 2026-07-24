@@ -170,4 +170,8 @@ export const KBUR: Airport = {
   // at KSAN (~4–5 min clearance → hold-short). The lead starts above that. Re-measure the field if
   // slots start biting on taxi time rather than on flow.
   slots: { rate: 0.3, leadMinSec: 6 * 60, leadMaxSec: 12 * 60 },
+  // The SoCal TRACON meters Burbank's departures: every IFR departure needs a release, granted about
+  // 10 s after Tower calls and no more often than one a minute per runway, good for 90 s before it
+  // voids (docs/atc-departure-release.md). Tune to taste — these are flow-system values, not survey.
+  releases: { coordSec: 10, intervalSec: 60, voidSec: 90 },
 }

@@ -164,6 +164,12 @@ export interface StripItem {
   services: readonly ServiceProgress[]
   /** Seconds until the long-pole service finishes and pushback unlocks; 0 when ready/none. */
   serviceSec: number
+  /** TRACON departure-release state (docs/atc-departure-release.md): `none` where the field has no
+   *  release requirement or the departure is not yet cleared; `required` once cleared and awaiting a
+   *  call; `requested` while TRACON coordinates; `released` when a valid release is held. */
+  release: 'none' | 'required' | 'requested' | 'released'
+  /** Sim time (s) a held release voids at, or null when none is held. */
+  releaseVoidSec: number | null
 }
 
 /** An in-progress "taxi via …" clearance the controller is assembling by taxiway clicks. */
@@ -360,6 +366,8 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
         runwayCrossings: game.runwayCrossings,
         frequencies,
         stands: game.stands,
+        // The sandbox honours the field's release policy too, so the mechanic is testable there.
+        ...(game.releases ? { releases: game.releases } : {}),
       })
     : createGroundSim(game.inits, {
         graph,
@@ -379,6 +387,8 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
         // Wheels-up windows, if this field's flow is constrained — the lead is the airport's
         // number, so it arrives with the game rather than being chosen here.
         ...(game.slots ? { slots: game.slots } : {}),
+        // Departure releases, if this field's TRACON meters them (docs/atc-departure-release.md).
+        ...(game.releases ? { releases: game.releases } : {}),
       })
   // A bad saved/URL value must not take the field down with it — fall back to the field's rate.
   if (opts.trafficRate !== undefined && Number.isFinite(opts.trafficRate) && opts.trafficRate >= 0) {
@@ -518,7 +528,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
     // Range-to-threshold is continuous, so it enters the signature at display precision
     // (0.1 nm ≈ one re-render every ~2.5 s on final) rather than every frame.
     for (const a of acs)
-      nextSig += `|${a.id}:${a.status}:${a.controlledBy}:${a.onRunway ? 'R' : ''}${a.blocksTakeoff ? 'B' : ''}${a.onShortFinal ? 'F' : ''}${a.vacated ? 'V' : ''}${a.handoffPending ? 'H' : ''}${a.incursion ? 'X' : ''}${a.expedite ? 'E' : ''}${a.canExpedite ? 'C' : ''}${a.canHoldShort ? 'S' : ''}:${a.exitRef ?? ''}:${(exitOpts.get(a.id) ?? []).map((e) => e.ref).join('+')}:${vias.get(a.id)!.join('.')}:${a.giveWayTo ?? ''}:${a.lineUpBehind ?? ''}:${a.waitingForStand ?? ''}:${a.gateBlocked ? 'O' : ''}:${a.squawk ?? ''}:${a.hasInstruction ? 'I' : ''}:${a.wakeHoldSec}:${a.awaitingSec}:${a.edctSec ?? ''}:${a.serviceSec}:${a.finalNm.toFixed(1)}`
+      nextSig += `|${a.id}:${a.status}:${a.controlledBy}:${a.onRunway ? 'R' : ''}${a.blocksTakeoff ? 'B' : ''}${a.onShortFinal ? 'F' : ''}${a.vacated ? 'V' : ''}${a.handoffPending ? 'H' : ''}${a.incursion ? 'X' : ''}${a.expedite ? 'E' : ''}${a.canExpedite ? 'C' : ''}${a.canHoldShort ? 'S' : ''}:${a.exitRef ?? ''}:${(exitOpts.get(a.id) ?? []).map((e) => e.ref).join('+')}:${vias.get(a.id)!.join('.')}:${a.giveWayTo ?? ''}:${a.lineUpBehind ?? ''}:${a.waitingForStand ?? ''}:${a.gateBlocked ? 'O' : ''}:${a.squawk ?? ''}:${a.hasInstruction ? 'I' : ''}:${a.wakeHoldSec}:${a.awaitingSec}:${a.edctSec ?? ''}:${a.serviceSec}:${a.release}:${a.finalNm.toFixed(1)}`
     if (nextSig === sig) return
     sig = nextSig
     snapshot = {
@@ -567,6 +577,8 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
         edctInSec: a.edctSec === null ? 0 : Math.ceil(a.edctSec - EDCT_EARLY_SEC - simSnap.time),
         services: a.services,
         serviceSec: a.serviceSec,
+        release: a.release,
+        releaseVoidSec: a.releaseVoidSec,
       })),
     }
     for (const cb of listeners) cb()

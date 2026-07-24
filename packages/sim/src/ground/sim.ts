@@ -174,6 +174,21 @@ export interface SlotConfig {
   leadMaxSec: number
 }
 
+/**
+ * Departure releases: TRACON's permission for Tower to launch, metered one at a time during a push
+ * (docs/atc-departure-release.md). A field with a release config requires every departure to be
+ * released before takeoff; a field without one behaves exactly as before. The three numbers are the
+ * flow system's, tuned per field for how tightly its overlying TRACON meters departures.
+ */
+export interface ReleaseConfig {
+  /** Coordination delay (s): how long TRACON takes to answer a release request. */
+  coordSec: number
+  /** Minimum spacing (s) between successive releases on one runway — the metering. */
+  intervalSec: number
+  /** How long a granted release is valid before it lapses and must be re-requested (s). */
+  voidSec: number
+}
+
 /** Ground-servicing model: the parallel services a parked departure must complete before it
  *  may push back (fueling is usually the long pole). Omit to disable servicing entirely. */
 export interface ServicingConfig {
@@ -208,6 +223,9 @@ export interface GroundSimOptions {
    *  is slot-constrained. See docs/atc-flight-cycle.md for the window and the penalty, which are
    *  the flow system's rules rather than the field's. */
   slots?: SlotConfig & { seed: number }
+  /** Departure releases: Tower must have a TRACON release before a takeoff clearance, metered one
+   *  at a time per runway (docs/atc-departure-release.md). Omit and no departure needs a release. */
+  releases?: ReleaseConfig
   /** The runway direction in use. Supplies the real landing threshold (which is *not* the end
    *  of the pavement where the threshold is displaced) and the far end a takeoff rolls toward,
    *  instead of guessing both from the polyline endpoints. Sugar for a one-runway `runways`. */
@@ -433,6 +451,9 @@ interface Internal
     // Derived at snapshot time from the stand's occupancy.
     | 'waitingForStand'
     | 'gateBlocked'
+    // Derived at snapshot time from the release state (needsRelease / releasedSec + the config).
+    | 'release'
+    | 'releaseVoidSec'
   > {
   path: readonly Point[]
   leg: number
@@ -546,6 +567,15 @@ interface Internal
    *  Re-issued further out when the window is missed — the slot is a standing constraint on the
    *  flight, not a one-shot that expires. */
   edctSec: number | null
+  /** This departure needs a TRACON release before takeoff (docs/atc-departure-release.md). Set at
+   *  clearance at a release-configured field; false everywhere else. */
+  needsRelease: boolean
+  /** Sim time (s) Tower called TRACON for this aircraft's release, or null when none is outstanding.
+   *  Cleared when the release is granted, and again if the void window lapses. */
+  releaseReqSec: number | null
+  /** Sim time (s) TRACON granted the release, or null when unreleased. The release is valid until
+   *  this + the field's void window; past that it lapses and must be re-requested. */
+  releasedSec: number | null
 }
 
 /**
@@ -555,7 +585,7 @@ interface Internal
  * in place each tick; {@link GroundSim.snapshot} hands out fresh immutable objects.
  */
 export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimOptions = {}): GroundSim {
-  const { graph, guard, spawn, servicing, frequencies, readback, slots, turnaround } = opts
+  const { graph, guard, spawn, servicing, frequencies, readback, slots, releases, turnaround } = opts
   const hotspots = opts.hotspots ?? []
   const stands = opts.stands ?? []
   /**
@@ -635,6 +665,9 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
    *  one runway does not gate a departure on another (docs/atc-multi-runway.md §4). A single-runway
    *  field has one key, so this is exactly the old single leader. */
   const lastDepartureByRunway = new Map<string, { wake: WakeCategory; atTime: number }>()
+  /** When TRACON last granted a release on each runway — the metering clock for the release rate
+   *  (docs/atc-departure-release.md). Per-runway, because independent runways release independently. */
+  const lastReleaseByRunway = new Map<string, number>()
   let seq = 0
   const spawnRng = spawn ? createRng(spawn.seed) : null
   /** Multiplier on the field's configured traffic — see {@link GroundSim.setTrafficRate}. */
@@ -786,6 +819,47 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     if (time < ac.edctSec - EDCT_EARLY_SEC) return 'early'
     if (time > ac.edctSec + EDCT_LATE_SEC) return 'late'
     return 'open'
+  }
+
+  // ─── Departure releases (docs/atc-departure-release.md) ──────────────────────
+  /** Whether this aircraft currently holds a valid (granted, unexpired) release. */
+  function releaseValid(ac: Internal): boolean {
+    return releases !== undefined && ac.releasedSec !== null && time - ac.releasedSec <= releases.voidSec
+  }
+  /** What state this departure's release is in, for the strip and the takeoff gate. `none` when the
+   *  field issues no releases or the aircraft is not a needs-release departure. */
+  function releaseState(ac: Internal): 'none' | 'required' | 'requested' | 'released' {
+    if (!releases || !ac.needsRelease) return 'none'
+    if (releaseValid(ac)) return 'released'
+    return ac.releaseReqSec !== null ? 'requested' : 'required'
+  }
+  /** TRACON's schedule: grant each pending release once the coordination delay has passed and the
+   *  runway's metering interval since the last release has elapsed, earliest request first. Also
+   *  lapse a release whose void window has run out — it goes back to needing a fresh request. Runs
+   *  each tick; a no-op at a field with no release config. */
+  function resolveReleases(): void {
+    if (!releases) return
+    for (const ac of fleet) {
+      if (ac.needsRelease && ac.releasedSec !== null && time - ac.releasedSec > releases.voidSec) {
+        // The void window lapsed before this one got airborne — call for release again.
+        ac.releasedSec = null
+        ac.releaseReqSec = null
+        transmit('controller', 'tower', ac, `${ac.callsign}, release void, call TRACON for a new release.`)
+      }
+    }
+    // Grant pending requests, earliest first (id breaks a same-tick tie — determinism).
+    const pending = fleet
+      .filter((ac) => ac.needsRelease && ac.releaseReqSec !== null && ac.releasedSec === null)
+      .sort((a, b) => a.releaseReqSec! - b.releaseReqSec! || (a.id < b.id ? -1 : 1))
+    for (const ac of pending) {
+      if (time - ac.releaseReqSec! < releases.coordSec) continue // TRACON still coordinating
+      const rid = targetRunwayId(ac) ?? ''
+      const last = lastReleaseByRunway.get(rid)
+      if (last !== undefined && time - last < releases.intervalSec) continue // metered — one at a time
+      ac.releasedSec = time
+      lastReleaseByRunway.set(rid, time)
+      transmit('controller', 'tower', ac, `${ac.callsign}, released for departure, void ${clockTime(time + releases.voidSec)}.`)
+    }
   }
 
   /** Corrupt what the pilot heard, saving the correct value for a later correction. Returns
@@ -981,6 +1055,9 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       lastClearance: null,
       issuedSquawk: null,
       edctSec: null,
+      needsRelease: false,
+      releaseReqSec: null,
+      releasedSec: null,
     }
   }
 
@@ -2776,6 +2853,9 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         ac.squawk = nextSquawk()
         ac.issuedSquawk = ac.squawk
         maybeSlot(ac)
+        // At a release-configured field every IFR departure needs a TRACON release before takeoff
+        // (docs/atc-departure-release.md).
+        if (releases) ac.needsRelease = true
         return ACCEPTED
       case 'contactTower': {
         // Ground → Tower handoff: transfer a departure holding short of its own runway to
@@ -2850,6 +2930,18 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         enterRunway(ac)
         return ACCEPTED
       }
+      case 'requestRelease': {
+        // Tower calls TRACON for a departure's release (docs/atc-departure-release.md). A landline
+        // call, so it is not a radio transmission; the strip shows it pending and TRACON answers on
+        // its own schedule (resolveReleases). Only a departure that needs one and does not already
+        // hold a valid one — re-requesting after a void is exactly what this is for.
+        if (ac.intent !== 'departure' || !ac.needsRelease) return refused('no release required')
+        if (ac.controlledBy !== 'tower') return refused('not on tower frequency')
+        if (releaseValid(ac)) return refused('already released')
+        if (!ac.holdShort && !ac.lineUpWait) return refused('not ready for departure')
+        ac.releaseReqSec = time
+        return ACCEPTED
+      }
       case 'clearedForTakeoff': {
         // Tower: release a departure for the takeoff roll — directly from holding short (the
         // fast path) or from line-up-and-wait. It accelerates to the far runway end and lifts
@@ -2881,6 +2973,13 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
             return refused(`wake turbulence — ${Math.ceil(remaining)}s behind ${category}`)
           }
         }
+        // TRACON release: a departure into controlled airspace can't launch without one
+        // (docs/atc-departure-release.md). "Call for release" if none is outstanding, "hold for
+        // release" while TRACON coordinates — the coordination is a landline, so this is a HUD
+        // notice, not a transmission. A valid release is spent by the takeoff.
+        if (ac.needsRelease && !releaseValid(ac)) {
+          return refused(ac.releaseReqSec !== null ? 'hold for release — TRACON coordinating' : 'not released — call for release')
+        }
         // The wheels-up window, checked last of the gates: it is the only one that is about the
         // clock rather than about the runway, so an aircraft refused for it is otherwise ready
         // to go — which is exactly the hold the docs describe, and exactly why it is expensive.
@@ -2908,10 +3007,22 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         // Already lined up: apply power now. Still holding short: this is "taxi into position
         // and roll" — it taxis onto the centerline first and the roll starts on arrival. The
         // clearance is one transmission either way; only the geometry differs.
+        //
+        // Spend the release at the moment the roll is committed (both paths below): the aircraft
+        // is now leaving, so it must not re-enter release accounting. Without this, a departure
+        // still holding `needsRelease` while it rolls and climbs out would trip the void-lapse
+        // check in `resolveReleases` if its roll outlasts the window, firing a spurious "release
+        // void" at an airborne aircraft (docs/atc-departure-release.md — the release is spent by
+        // the takeoff).
         if (!runway && !farRunwayEnd([ac.x, ac.y])) return refused('no runway end found')
-        if (ac.lineUpWait) return beginTakeoffRoll(ac) ? ACCEPTED : refused('no runway end found')
+        if (ac.lineUpWait) {
+          if (!beginTakeoffRoll(ac)) return refused('no runway end found')
+          ac.needsRelease = false
+          return ACCEPTED
+        }
         enterRunway(ac)
         ac.rollWhenLinedUp = true
+        ac.needsRelease = false
         return ACCEPTED
       }
       case 'assignExit': {
@@ -3477,6 +3588,7 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       for (const ac of fleet) resolveCrossingHandoff(ac)
       for (const ac of fleet) resolveLineUp(ac)
       for (const ac of fleet) resolveConditionalLineUp(ac)
+      resolveReleases() // TRACON grants/voids releases across the fleet, metered per runway
       for (const id of resolveGoals(dt)) {
         const i = fleet.findIndex((a) => a.id === id)
         if (i >= 0) fleet.splice(i, 1)
@@ -3552,6 +3664,8 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
           wakeHoldSec: wakeHoldFor(ac),
           awaitingSec: Math.floor(ac.awaitingSec),
           edctSec: ac.edctSec,
+          release: releaseState(ac),
+          releaseVoidSec: releases && ac.releasedSec !== null ? ac.releasedSec + releases.voidSec : null,
           services: ac.services.map((s) => ({ kind: s.kind, total: s.total, remaining: s.remaining })),
           serviceSec: Math.ceil(serviceRemaining(ac)),
         })),

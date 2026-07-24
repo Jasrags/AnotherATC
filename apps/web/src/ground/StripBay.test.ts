@@ -41,6 +41,8 @@ function strip(over: Partial<StripItem> = {}): StripItem {
     edctInSec: 0,
     services: [],
     serviceSec: 0,
+    release: 'none',
+    releaseVoidSec: null,
     ...over,
   }
 }

@@ -207,16 +207,36 @@ function phaseCommandsFor(controller: GroundController, item: StripItem, aircraf
       ? { key: 'takeoff', label: 'Cleared for takeoff — runway busy', action: { kind: 'soon' } }
       : item.wakeHoldSec > 0
         ? { key: 'takeoff', label: `Cleared for takeoff — wake ${item.wakeHoldSec}s`, action: { kind: 'soon' } }
-        : // The wheels-up window, in the same voice as the wake hold beside it: the sim would
-          // refuse this clearance, so the menu names the reason rather than offering a button
-          // that fails. It goes last because it is the only one of the three the controller
-          // cannot do anything about — the aircraft is ready, the runway is free, and it waits.
-          item.edctSec !== null && item.edctInSec > 0
-          ? { key: 'takeoff', label: `Cleared for takeoff — EDCT ${clock(item.edctInSec)}`, action: { kind: 'soon' } }
-          : { key: 'takeoff', label: 'Cleared for takeoff', action: { kind: 'run', run: () => send({ type: 'clearedForTakeoff', aircraftId: id }) } }
+        : // TRACON release: checked after wake and before EDCT, mirroring the sim's gate order.
+          // "call for release" if none is outstanding (the controller acts via the release row
+          // below), "hold for release" while TRACON coordinates (docs/atc-departure-release.md).
+          item.release === 'required' || item.release === 'requested'
+          ? {
+              key: 'takeoff',
+              label: `Cleared for takeoff — ${item.release === 'requested' ? 'hold for release' : 'call for release'}`,
+              action: { kind: 'soon' },
+            }
+          : // The wheels-up window, in the same voice as the wake hold beside it: the sim would
+            // refuse this clearance, so the menu names the reason rather than offering a button
+            // that fails. It goes last because it is the only one of these the controller
+            // cannot do anything about — the aircraft is ready, the runway is free, and it waits.
+            item.edctSec !== null && item.edctInSec > 0
+            ? { key: 'takeoff', label: `Cleared for takeoff — EDCT ${clock(item.edctInSec)}`, action: { kind: 'soon' } }
+            : { key: 'takeoff', label: 'Cleared for takeoff', action: { kind: 'run', run: () => send({ type: 'clearedForTakeoff', aircraftId: id }) } }
+
+    // The landline to TRACON for a departure release. Actionable only when one is required and not
+    // yet requested; while TRACON coordinates it is a standby status, and once released or where no
+    // release is needed there is no row (the takeoff button above carries the state). Only a
+    // needs-release field ever surfaces this — `release` is `none` everywhere else.
+    const releaseRow: MenuCommand | null =
+      item.release === 'required'
+        ? { key: 'release', label: 'Call TRACON for release', action: { kind: 'run', run: () => send({ type: 'requestRelease', aircraftId: id }) } }
+        : item.release === 'requested'
+          ? { key: 'release', label: 'Release requested — standby', action: { kind: 'soon' } }
+          : null
 
     if (item.status === 'lineUpWait') {
-      return [takeoff, holdPosition]
+      return [takeoff, ...(releaseRow ? [releaseRow] : []), holdPosition]
     }
     if (item.status === 'holdShort') {
       // A transit is holding short to *cross*, not to depart: Local Control owns the runway for
@@ -260,7 +280,13 @@ function phaseCommandsFor(controller: GroundController, item: StripItem, aircraf
                 })),
               },
             }
-      return [lineup, ...(lineupBehind ? [lineupBehind] : []), takeoff, holdShort(controller, item)]
+      return [
+        lineup,
+        ...(lineupBehind ? [lineupBehind] : []),
+        ...(releaseRow ? [releaseRow] : []),
+        takeoff,
+        holdShort(controller, item),
+      ]
     }
     // Tower-owned and no longer holding short: a crossing it cleared and now has to give back.
     // Offered while the aircraft is still on the runway too — that is the real "when clear of

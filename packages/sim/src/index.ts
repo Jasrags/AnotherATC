@@ -45,6 +45,8 @@ export type {
   GroundSimOptions,
   ServiceSpec,
   ServicingConfig,
+  SlotConfig,
+  ReleaseConfig,
 } from './ground/sim'
 export { buildKsanGroundScenario } from './ground/ksanScenario'
 export { buildKsanGroundGame } from './ground/ksanGame'

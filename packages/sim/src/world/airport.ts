@@ -11,6 +11,7 @@ import {
 import type {
   AircraftInit,
   GateSlot,
+  ReleaseConfig,
   ServicingConfig,
   SlotConfig,
   SpawnConfig,
@@ -127,6 +128,9 @@ export interface Airport {
    *  stated here rather than in the engine — measure the field (clearance → hold-short line) and
    *  set it above that. Omit for a field the flow system does not constrain. */
   slots?: SlotConfig
+  /** Departure releases: how the overlying TRACON meters this field's departures
+   *  (docs/atc-departure-release.md). Omit for a field whose departures need no release. */
+  releases?: ReleaseConfig
   comms: AirportComms
   traffic: TrafficConfig
   /** Nudges (nm) for area labels whose centroid sits over pavement, keyed by label. */
@@ -166,6 +170,8 @@ export interface AirportGame {
   servicing: ServicingConfig
   /** The field's slot policy, if it has one, with the game's seed folded in. */
   slots?: SlotConfig & { seed: number }
+  /** The field's departure-release policy, if it has one (docs/atc-departure-release.md). */
+  releases?: ReleaseConfig
   runway: ActiveRunway
   /** The field's inter-runway coupling, compiled from its declared dependencies; independent by
    *  default. Passed straight to the sim (docs/atc-multi-runway.md §6). */
@@ -253,6 +259,7 @@ export function createAirportGame(airport: Airport, seed = 1, runwayIdent?: stri
     // which flights get slots to what the spawner happened to draw. The initial-identity stream
     // above is salted for the same reason.
     ...(airport.slots ? { slots: { ...airport.slots, seed: seed + 7717 } } : {}),
+    ...(airport.releases ? { releases: airport.releases } : {}),
     runway,
     runwaysInteract: compileRunwayDependencies(airport.runwayDependencies),
     runwayCrossings: runwayCrossingsFrom(airport.runwayDependencies),

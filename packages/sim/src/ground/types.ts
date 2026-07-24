@@ -57,6 +57,7 @@ export type GroundCommand =
    *  explicit clearances only. Armed at issue and applied when the named traffic has landed and
    *  passed the holding point; cancelled if it stops being a landing aircraft. */
   | { type: 'lineUpAndWait'; aircraftId: string; behind?: string }
+  | { type: 'requestRelease'; aircraftId: string }
   | { type: 'clearedForTakeoff'; aircraftId: string }
   | { type: 'clearedToLand'; aircraftId: string }
   /** "Go around" — the controller's call, not the pilot's. The lever the runway-incursion
@@ -233,6 +234,12 @@ export interface GroundAircraft {
    * docs/atc-flight-cycle.md.
    */
   edctSec: number | null
+  /** This departure's TRACON release state (docs/atc-departure-release.md): `none` when the field
+   *  issues no releases, `required` (needs one, not yet called for), `requested` (Tower has called,
+   *  TRACON coordinating), or `released`. */
+  release: 'none' | 'required' | 'requested' | 'released'
+  /** Sim time (s) a granted release is void at, or null when not released — for the strip countdown. */
+  releaseVoidSec: number | null
   /**
    * Whole seconds this aircraft has been stopped with no clearance to run — waiting on the
    * controller, not on traffic, a gate or a runway. 0 when it is not.
