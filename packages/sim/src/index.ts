@@ -5,6 +5,7 @@ export { KSAN_SURFACE } from './world/ksan'
 export { KSAN, KSAN_RUNWAYS, KSAN_RUNWAY_LAYOUT } from './world/ksanAirport'
 export { KBUR_SURFACE } from './world/kbur'
 export { KBUR, KBUR_RUNWAYS, KBUR_LAYOUT_0826, KBUR_LAYOUT_1533 } from './world/kburAirport'
+export { KOAK_SURFACE } from './world/koak'
 export {
   createAirportGame,
   findRunway,
