@@ -276,8 +276,11 @@ describe('taxi runway-crossings — one runway at a time, position-aware (docs/a
     expect(runwayIdAt([A(sim, 'x').x, firstHoldY], guard)).toBeNull()
     expect(firstHoldY).toBeGreaterThan(0.41) // north of 10L/28R's centreline
 
-    // 2. Cleared across the first — one runway.
+    // 2. Cleared across the first — one runway. The transmission names the runway being crossed
+    //    (10L/28R → "28R", the active direction), not the field's primary or the aircraft's own.
     expect(sim.dispatch({ type: 'crossRunway', aircraftId: 'x' }).ok).toBe(true)
+    const cross1 = sim.snapshot().comms.filter((c) => c.from === 'controller').at(-1)
+    expect(cross1?.text).toMatch(/cross runway 28R/i)
 
     // 3. It crosses 10L/28R and comes back on hold, now short of 10R/28L — a SECOND, separate
     //    clearance is required (a clearance to cross one runway does not authorize the next).
@@ -287,8 +290,10 @@ describe('taxi runway-crossings — one runway at a time, position-aware (docs/a
     expect(secondHoldY).toBeGreaterThan(0.23) // holding short of 10R/28L, not on it
     expect(runwayIdAt([A(sim, 'x').x, secondHoldY], guard)).toBeNull()
 
-    // 4. Cleared across the second — it reaches its goal south of both.
+    // 4. Cleared across the second — its own, separate clearance, naming 10R/28L → "28L".
     expect(sim.dispatch({ type: 'crossRunway', aircraftId: 'x' }).ok).toBe(true)
+    const cross2 = sim.snapshot().comms.filter((c) => c.from === 'controller').at(-1)
+    expect(cross2?.text).toMatch(/cross runway 28L/i)
     expect(until(sim, () => A(sim, 'x').y < 0.15)).toBe(true)
   })
 

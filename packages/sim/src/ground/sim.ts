@@ -581,6 +581,9 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
   let runway: ActiveRunway | undefined = active[0]?.dir
   /** How this field couples its runways; independent by default (docs/atc-multi-runway.md §6). */
   const runwaysInteract: RunwaysInteract = opts.runwaysInteract ?? (() => false)
+  /** How many physically distinct runways the field has. On a single-runway field an aircraft never
+   *  crosses a runway *other* than its own, so the crossing phraseology never needs a separate name. */
+  const physicalRunwayCount = guard ? new Set(guard.segments.map((s) => s.runwayId)).size : 0
   /** Where coupled runways cross, for the position-aware refinement of the occupancy coupling. */
   const runwayCrossings: readonly RunwayCrossing[] = opts.runwayCrossings ?? []
   /** Whether traffic on runway `other` bears on a clearance protecting runway `mine`, for `kind`:
@@ -682,8 +685,29 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
   const runwayIdentFor = (ac: Internal): string | null =>
     (activeRunwayFor(ac)?.ident ?? runway?.ident)?.replace(/^0/, '') ?? null
 
+  /** The runway a crossing/hold-short clearance names, spoken — the runway being crossed, which on a
+   *  multi-runway field is not the aircraft's own. Null when the held route does not cross a runway
+   *  (a departure holding short of its destination runway, which {@link runwayIdentFor} already
+   *  names) or the field has one runway. A crossed physical runway ("10R/28L") is spoken by its
+   *  active direction if one is active, else its first designator. */
+  const crossingRunwayFor = (ac: Internal): string | null => {
+    if (!guard || physicalRunwayCount <= 1 || ac.held === null || !heldRouteCrosses(ac)) return null
+    const crossed = crossedRunwayIds(ac)[0]
+    if (crossed === undefined) return null
+    // The aircraft's own physical runway is already named by `runwayIdentFor` (rwy); only a
+    // *different* crossed runway needs naming. On a single-runway field the crossed runway is always
+    // the own runway, so this is null there.
+    const ownDir = activeRunwayFor(ac)
+    if (ownDir && runwayIdAt(ownDir.threshold, guard) === crossed) return null
+    // Speak the crossed physical runway by its active direction if one is in use, else the first
+    // designator of its id.
+    const activeOnCrossed = active.find((a) => runwayIdAt(a.dir.threshold, guard) === crossed)
+    return ((activeOnCrossed?.dir.ident ?? crossed.split('/')[0]) ?? crossed).replace(/^0/, '')
+  }
+
   function phraseContext(ac: Internal): PhraseContext {
     const rwy = runwayIdentFor(ac)
+    const crossingRunway = crossingRunwayFor(ac)
     return {
       callsign: ac.callsign,
       runway: rwy,
@@ -710,8 +734,10 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
       // itself differently.
       crossing: onCrossing(ac),
       // The runway this aircraft's clearance stops short of, if any — the clause that makes a
-      // taxi clearance readable back as the procedure requires.
-      holdingShortOf: ac.held !== null ? rwy : null,
+      // taxi clearance readable back as the procedure requires. The runway it crosses when the
+      // route crosses one (not the aircraft's own runway), else its destination runway.
+      holdingShortOf: ac.held !== null ? (crossingRunway ?? rwy) : null,
+      crossingRunway,
       holdReason: holdReasonFor(ac),
       onRunway: onRunwayNow(ac),
     }
@@ -798,8 +824,10 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
    *  crossing it is announcing — would otherwise be worded from the state it just created. */
   function situationBefore(ac: Internal | undefined): Partial<PhraseContext> {
     if (!ac) return {}
-    const { crossing, onRunway } = phraseContext(ac)
-    return { crossing, onRunway }
+    // crossingRunway is captured here because `crossRunway` nulls the held route before the phrase
+    // is built — after the mutation the aircraft no longer knows which runway it just crossed.
+    const { crossing, onRunway, crossingRunway } = phraseContext(ac)
+    return { crossing, onRunway, crossingRunway }
   }
 
   /** Log the exchange for a command that was just applied. `position` and `before` are captured

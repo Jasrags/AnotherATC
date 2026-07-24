@@ -19,6 +19,7 @@ const ctx = (over: Partial<PhraseContext> = {}): PhraseContext => ({
   crossing: false,
   onRunway: false,
   holdingShortOf: null,
+  crossingRunway: null,
   holdReason: null,
   ...over,
 })

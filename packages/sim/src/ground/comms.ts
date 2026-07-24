@@ -119,6 +119,11 @@ export interface PhraseContext {
   /** Designator of the runway this aircraft's clearance stops short of, or null. The clause a
    *  taxi clearance has to carry, and which the procedure makes mandatory to read back. */
   holdingShortOf: string | null
+  /** The runway a crossing or hold-short clearance is *about* — the one being crossed — spoken. On a
+   *  multi-runway field this is not the aircraft's own runway ({@link runway}): an arrival that
+   *  landed on 28R crosses runway 10R/28L to reach its gate, and the clearance names the runway it
+   *  crosses, not the one it landed on. Null when the clearance is about the aircraft's own runway. */
+  crossingRunway: string | null
   /** Why this aircraft is being held, worded for the air ("traffic on a 3 mile final"), or null
    *  when nothing is in the way. A cause, not a clearance — it is transmitted with the
    *  instruction and deliberately absent from the read-back. */
@@ -154,6 +159,10 @@ export function phraseFor(cmd: GroundCommand, ctx: PhraseContext): Exchange | nu
   const cs = ctx.callsign
   const rwy = ctx.runway ? `runway ${ctx.runway}` : 'the runway'
   const Rwy = cap(rwy)
+  // A crossing/hold-short clearance names the runway being crossed, which on a multi-runway field
+  // is not the aircraft's own runway. Falls back to the own runway (single-runway fields, and a
+  // departure holding short of its destination runway).
+  const crossRwy = ctx.crossingRunway ? `runway ${ctx.crossingRunway}` : rwy
   const via = ctx.taxiways.length ? ` via ${ctx.taxiways.map(phonetic).join(', ')}` : ''
   const say = (instruction: string, readback: string): Exchange => ({
     instruction: `${cs}, ${instruction}.`,
@@ -194,7 +203,7 @@ export function phraseFor(cmd: GroundCommand, ctx: PhraseContext): Exchange | nu
     case 'holdShort':
       // The reason rides on the instruction and not on the read-back: a pilot reads back what
       // they must comply with, and "traffic on a 3 mile final" is why, not what.
-      return say(`hold short of ${rwy}${ctx.holdReason ? `, ${ctx.holdReason}` : ''}`, `Hold short of ${rwy}`)
+      return say(`hold short of ${crossRwy}${ctx.holdReason ? `, ${ctx.holdReason}` : ''}`, `Hold short of ${crossRwy}`)
     case 'hold':
       return say('hold position', 'Hold position')
     case 'resume':
@@ -203,7 +212,7 @@ export function phraseFor(cmd: GroundCommand, ctx: PhraseContext): Exchange | nu
       // Local Control owns the runway, and its crossing clearance carries the instruction that
       // says so: get across and get off. "No delay" is phraseology, not emphasis.
       const delay = ctx.position === 'tower' ? ', no delay' : ''
-      return say(`cross ${rwy}${delay}`, `Cross ${rwy}${delay}`)
+      return say(`cross ${crossRwy}${delay}`, `Cross ${crossRwy}${delay}`)
     }
     case 'giveWay': {
       const traffic = ctx.giveWayTo ?? 'the traffic'
