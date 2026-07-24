@@ -497,6 +497,19 @@ own coupling rule as a seam plug; neither is blocked.
   - **Taxiway naming** (`docs/OAK/taxiway-naming.md`): patch the ~26 unnamed runway-touching OSM
     ways to their designator by way-id, matched against `00294AD.PDF` — same theme KBUR/KSAN did.
     Route-building works on the spines without it; this is quality, not a blocker.
+  - **Terminal-apron routing mesh — gate 32 zigzag** (reported in play, 2026-07-24). A taxi to gate
+    32 does not "continue straight" into the stand; it detours through the apron junction just south
+    of the terminal (near taxiway U). The GRAPH overlay shows why: OSM has digitised that ramp as a
+    web of short **unnamed** taxi/apron ways, so the contracted graph has ~7 nodes of degree 3–5
+    packed within ~300 ft (`0.22..0.27, -0.72..-0.77`) with several near-straight crossing chords
+    (the X in the overlay). Shortest-path across that mesh reads as a zigzag. Gate 32's lead-in
+    (stop `[0.356,-0.758]`, entry `[0.313,-0.744]`) attaches to the mesh at a node that forces the
+    detour. **Fix belongs with the naming theme** — it needs the `00294AD.PDF` ramp layout to decide
+    which apron ways are real taxi routes vs. mesh clutter, then prune/patch centrelines in
+    `build-koak-surface.mjs` (and possibly snap the gate-32 entry to the straight-in node). Not a
+    one-liner; do it against the chart, and re-check every terminal gate still routes (the existing
+    guard) plus a turn-survey so a prune doesn't strand a stand. Same class as KSAN #27 /
+    `docs/airport-data-pipeline.md`.
   - **The `landing` staggering rule — the genuinely new engine slice** (`docs/atc-multi-runway.md`
     §6). The `landing` interaction kind exists and KOAK *declares* it, but **nothing in the sim
     consults it yet** (grep: only `occupancy` and `wake` are passed to `runwaysRelated`). Dependent
