@@ -468,13 +468,49 @@ own coupling rule as a seam plug; neither is blocked.
   waits). Stationary occupants, arrivals on final, and couplings with no crossing point stay
   conservative. **KBUR's intersecting epic is complete** — data pipeline, taxiway naming, bundle +
   crossing, SE-terminal arrivals, two runways active, and the position-aware crossing.
-- ⬜ **KOAK — the parallel/dependent case**. Four runways, **zero intersections**: **10L/28R**
+- 🚧 **KOAK — the parallel/dependent case**. Four runways, **zero intersections**: **10L/28R**
   (5,457 ft) and **10R/28L** (6,213 ft) are parallel and only **1,001 ft apart** — well under the
   ~2,500 ft dependent-approach threshold, so they are *not* independent and arrivals must be
-  staggered; plus **12/30** (10,520 ft, ILS both ends) on the separate South Field 5,688 ft away,
+  staggered; plus **12/30** (10,520 ft, ILS both ends) on the separate South Field ~1 nm away,
   and **15/33** (3,376 ft). Needs two runways active simultaneously, separation-keyed dependency
   rules, wake between parallels, and a scope/Ground flow that copes with two physically separate
   fields. _+5–8 days, and much easier once KBUR has proven the foundation._
+  **Data pipeline shipped** (cycle 2607): NASR + d-TPP + OSM pulled, verified and written up in
+  `docs/OAK/` (`runways.md` = surveyed facts; `README.md` = chart index + surface scan; charts
+  `00294AD`/`SW2HOTSPOT`). Ingest inputs committed (`tools/ingest/koak.overpass.ql`,
+  `koak-osm.raw.json`, `build-koak-surface.mjs` → `world/koak.surface.json`). The **1,001 ft
+  parallel separation re-derives from the survey** (10L/28R ↔ 10R/28L); **only 30 is displaced**
+  (114 ft, and the CAT II/III end); **EMAS 162×154 at DER 28L = the west/10R end**; runway ends
+  within **2–7 ft** of NASR (28R at 40). Surface scan: **29 gates + 285 stand lines** (spawning
+  works out of the box), 0 construction, ~26 unnamed runway-touching ways (the naming workload),
+  span 1.94 × 2.42 nm (two separate fields). **Verdict: GO.**
+  **Bundle + dependent-parallel coupling shipped** (`world/koakAirport.ts`,
+  `world/koakAirport.test.ts`): eight runway directions, four layouts drawn, split N/S comms
+  (South-Field pair for the terminal fleet), airline fleet at the South terminal (gates 1–32),
+  default **30** (short taxi, clean base loop). The coupling is a **`wake`/`landing`
+  `RunwayDependency` with no crossing point** (`compileRunwayDependencies`) — the coarse boolean,
+  contrasted with KBUR's position-aware `occupancy` crossing. **`wake` is honoured by the engine
+  today** (a shared wake corridor across the 1,001-ft parallels); the test proves the loop plays
+  (departure off 30, arrival 30 → gate, every gate routes to 30 across both fields) and the
+  coupling compiles right. `?airport=KOAK` runs the field.
+  _Next, in order:_
+  - **Taxiway naming** (`docs/OAK/taxiway-naming.md`): patch the ~26 unnamed runway-touching OSM
+    ways to their designator by way-id, matched against `00294AD.PDF` — same theme KBUR/KSAN did.
+    Route-building works on the spines without it; this is quality, not a blocker.
+  - **The `landing` staggering rule — the genuinely new engine slice** (`docs/atc-multi-runway.md`
+    §6). The `landing` interaction kind exists and KOAK *declares* it, but **nothing in the sim
+    consults it yet** (grep: only `occupancy` and `wake` are passed to `runwaysRelated`). Dependent
+    parallels < 2,500 ft apart require arrivals to the two runways to be **staggered on final** (a
+    diagonal separation, not the same-runway in-trail rule). This is the ~+5–8 day part of the
+    estimate: an arrival-sequencing rule that reads the coupling and spaces the two finals. Until
+    it lands, activating both parallels lands them independently (wake aside), which is the unsafe
+    real-world case the rule exists to prevent — so it is the next substantive build here.
+  - **Cargo/GA fleets**: OAK is a major FedEx hub (widebody freighters on 12/30's length) and has
+    heavy GA, but those ramps have no tagged gate nodes — a remote-stand fleet like KSAN's, a
+    scenario question. The airline narrowbody fleet at the terminal is what ships today.
+  - **Play it** (the KBUR lesson): default 30 is a short taxi; activating a North parallel makes
+    the gate→runway taxi much longer, so the slot lead is set generous (8–16 min) and flagged —
+    re-measure clearance→hold-short in play and tighten if slots bite on taxi rather than flow.
 
 Both are larger fields than KSAN, so the OSM taxiway-naming risk scales. **Before committing to
 either, pull the Overpass extract and count untagged ways touching the movement area** — that
