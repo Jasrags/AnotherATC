@@ -510,3 +510,56 @@ describe('runway operations designation — departures / arrivals / mixed (docs/
     expect(departures).toBeGreaterThan(0) // and departures — parked at the terminal for runway 30
   })
 })
+
+describe('independent runways sequence departures separately (docs/atc-multi-runway.md §3–4)', () => {
+  // A departure holding short of a runway end, facing the roll, goal on the runway.
+  const departureAt = (id: string, r: '30' | '28R'): AircraftInit => {
+    const rwy = KOAK_RUNWAYS[r]
+    const ux = rwy.farEnd[0] - rwy.departureStart[0]
+    const uy = rwy.farEnd[1] - rwy.departureStart[1]
+    const len = Math.hypot(ux, uy)
+    const back: [number, number] = [rwy.departureStart[0] - (ux / len) * 0.05, rwy.departureStart[1] - (uy / len) * 0.05]
+    return { id, callsign: id.toUpperCase(), type: 'B738', wake: 'M', path: [back, rwy.departureStart], targetSpeed: 5, intent: 'departure', goalPoint: rwy.departureStart }
+  }
+
+  it('two departures on independent runways (30 and 28R) can both be cleared and rolling at once', () => {
+    // 12/30 (South Field) and 10L/28R (North Field) are not coupled — only the close parallels are.
+    // So a takeoff on one imposes nothing on a takeoff on the other: occupancy is per-runway
+    // (blocksRunwayFor scopes to the aircraft's own runway) and so is wake (lastDepartureByRunway).
+    const sim = createGroundSim([departureAt('a', '30'), departureAt('b', '28R')], {
+      graph,
+      guard,
+      runways: [KOAK_RUNWAYS['30'], KOAK_RUNWAYS['28R']],
+      runwaysInteract: createAirportGame(KOAK).runwaysInteract,
+    })
+    const A = (id: string) => sim.snapshot().aircraft.find((x) => x.id === id)!
+    // Both taxi to their own hold-short line.
+    for (let i = 0; i < 3000 && !(A('a').holdShort && A('b').holdShort); i += 1) sim.step(0.1)
+    expect(A('a').holdShort).toBe(true)
+    expect(A('b').holdShort).toBe(true)
+
+    // Both hand off to Tower and are cleared for takeoff — crucially, the second is NOT refused on
+    // account of the first, because they are on different, uncoupled runways.
+    expect(sim.dispatch({ type: 'contactTower', aircraftId: 'a' }).ok).toBe(true)
+    expect(sim.dispatch({ type: 'contactTower', aircraftId: 'b' }).ok).toBe(true)
+    expect(sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'a' }).ok).toBe(true)
+    expect(sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'b' }).ok).toBe(true)
+
+    // Both are now on their takeoff roll at the same instant — status 'departing' together, and both
+    // accelerating (a stopped/held aircraft would not gain speed).
+    for (let i = 0; i < 20; i += 1) sim.step(0.1)
+    expect(A('a').status).toBe('departing')
+    expect(A('b').status).toBe('departing')
+    const gsA = A('a').groundspeed
+    const gsB = A('b').groundspeed
+    for (let i = 0; i < 60; i += 1) sim.step(0.1)
+    expect(A('a').status).toBe('departing')
+    expect(A('b').status).toBe('departing')
+    expect(A('a').groundspeed).toBeGreaterThan(gsA) // still accelerating — a real roll, not a hold
+    expect(A('b').groundspeed).toBeGreaterThan(gsB)
+    // Each is rolling on its own field — 30 down on the South Field, 28R up on the North — so the
+    // two takeoffs share no pavement.
+    expect(A('a').y).toBeLessThan(-0.5) // South Field (12/30)
+    expect(A('b').y).toBeGreaterThan(0) // North Field (10L/28R)
+  })
+})
