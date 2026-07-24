@@ -68,6 +68,12 @@ export function GroundScope({ controller }: { controller: GroundController }) {
   // Admin routing-graph overlay. The render loop reads a ref (no effect re-run); the state
   // just drives the button's pressed styling. Toggled by the button or the "g" key.
   const [showGraph, setShowGraph] = useState(false)
+  // The developer tools are a wide row of controls; on a phone they bury the map, so they start
+  // collapsed behind the DEV badge there and expanded on a roomy screen. Only the initial default
+  // is width-derived — once the badge is tapped it is the player's call.
+  const [devOpen, setDevOpen] = useState(
+    () => typeof window === 'undefined' || !window.matchMedia('(max-width: 720px)').matches,
+  )
   const showGraphRef = useRef(false)
   const toggleGraph = () => {
     showGraphRef.current = !showGraphRef.current
@@ -658,7 +664,22 @@ export function GroundScope({ controller }: { controller: GroundController }) {
         </div>
       </div>
       <div className="hud hud-controls">
-        {controller.dev && <span className="dev-tag mono">DEV</span>}
+        {/* The buttons scroll as one row on a phone; the wrapper is `display: contents` on a wide
+            screen, so the desktop bar lays out exactly as if it were not here. */}
+        <div className="hud-controls-scroll">
+        {controller.dev && (
+          <button
+            type="button"
+            className="dev-tag mono"
+            aria-pressed={devOpen}
+            aria-expanded={devOpen}
+            aria-controls="dev-tools"
+            onClick={() => setDevOpen((v) => !v)}
+            title={devOpen ? 'Hide developer tools' : 'Show developer tools'}
+          >
+            DEV {devOpen ? '▾' : '▸'}
+          </button>
+        )}
         {airport.layouts.map((layout) => {
           const dirs = layout.ident.split('/')
           const onDir = dirs.find((d) => activeRunways.includes(d))
@@ -735,8 +756,8 @@ export function GroundScope({ controller }: { controller: GroundController }) {
             ))}
           </span>
         )}
-        {controller.dev && (
-          <span className="ctl-group" role="group" aria-label="Developer tools">
+        {controller.dev && devOpen && (
+          <span className="ctl-group" id="dev-tools" role="group" aria-label="Developer tools">
             <button
               type="button"
               className="ctl-btn mono"
@@ -817,7 +838,9 @@ export function GroundScope({ controller }: { controller: GroundController }) {
             </button>
           </span>
         )}
-        {/* Shares the control bar's row so the two can't collide as the bar grows. */}
+        </div>
+        {/* Outside the scroll wrapper: shares the bar's row on desktop, and sits on its own line
+            above the docked toolbar on a phone (so it is never clipped by the row's overflow). */}
         <div ref={hintRef} className="hud-hint mono" aria-live="polite" />
       </div>
       {controller.dev && <div ref={devRef} className="hud hud-dev mono" aria-live="polite" />}

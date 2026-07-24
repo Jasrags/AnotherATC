@@ -229,8 +229,20 @@ body {
   gap: 6px;
 }
 
+/* On a wide screen this wrapper is transparent to layout — its children are the flex items of
+   .hud-controls, exactly as before it existed. On a phone it becomes the horizontally-scrolling
+   button row (see the max-width block). */
+.hud-controls-scroll {
+  display: contents;
+}
+
+/* The DEV badge doubles as the toggle for the developer-tools group — a button, so it opts back
+   into pointer events and carries a focus ring. */
 .dev-tag {
-  pointer-events: none;
+  pointer-events: auto;
+  cursor: pointer;
+  appearance: none;
+  border: 0;
   font-size: 10px;
   letter-spacing: 0.18em;
   padding: 3px 7px;
@@ -238,6 +250,11 @@ body {
   color: #04080d;
   background: #ff4d94;
   font-weight: 600;
+}
+
+.dev-tag:focus-visible {
+  outline: 2px solid #ff9ec4;
+  outline-offset: 2px;
 }
 
 .ctl-btn {
@@ -1017,11 +1034,96 @@ body {
   .hud-sub {
     font-size: 9px;
   }
-  /* move the status line to the bottom of the scope so it can't collide with the title */
+  /* The control bar stops floating over the map and docks as a solid toolbar along the bottom of
+     the scope: a compact hint line above one horizontally-scrollable button row, instead of five
+     wrapped rows burying the field. Pads for the home indicator. */
+  .hud-controls {
+    left: 0;
+    right: 0;
+    bottom: 0;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    gap: 0;
+    padding: 0 0 env(safe-area-inset-bottom, 0px);
+    background: linear-gradient(to top, rgba(4, 8, 13, 0.94), rgba(4, 8, 13, 0.74));
+    border-top: 1px solid #12202c;
+  }
+  /* The button row: keeps each control its natural size and scrolls sideways rather than crushing
+     or stacking them. It catches its own touches so a sideways swipe scrolls the bar, not the map. */
+  .hud-controls-scroll {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    pointer-events: auto;
+    touch-action: pan-x;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .hud-controls-scroll::-webkit-scrollbar {
+    display: none;
+  }
+  .hud-controls-scroll > *,
+  .ctl-group > * {
+    flex: none;
+  }
+  /* Roomier tap targets on a touch screen (~38–40px). */
+  .ctl-btn {
+    padding: 9px 12px;
+    font-size: 12px;
+  }
+  .dev-tag {
+    padding: 9px 10px;
+    font-size: 11px;
+  }
+  .dev-type-select {
+    padding: 6px 6px;
+    font-size: 12px;
+  }
+  /* The hint sits on its own compact line above the button row (order:-1), so a refused-clearance
+     notice (⛔ …) or a routing prompt stays readable without stacking button rows. One line, clipped
+     with an ellipsis rather than wrapping. */
+  .hud-controls .hud-hint {
+    order: -1;
+    flex: none;
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding: 5px 12px 0;
+    font-size: 11px;
+    line-height: 1.3;
+  }
+  .hud-controls .hud-hint:empty {
+    display: none;
+  }
+  /* Status and dev readouts lift clear of the docked toolbar and are bounded to the viewport so a
+     long line clips against the right edge (keeping the tail — time and rate) instead of running
+     off-screen. */
   .hud-tr {
     top: auto;
-    bottom: 10px;
+    bottom: 80px;
+    left: 12px;
     right: 12px;
+    text-align: right;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 9px;
+    letter-spacing: 0;
+  }
+  .hud-dev {
+    bottom: 98px;
+    left: 12px;
+    right: 12px;
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
     font-size: 10px;
   }
   /* The status line has vacated the top-right, so the alert stack moves up into it and
