@@ -152,6 +152,31 @@ The note fixes the **signature and the call sites** (every per-runway gate consu
 same-runway check). It does **not** implement KBUR's crossing geometry or KOAK's stagger timing —
 those are the next slices. The proof it carries a real rule is a test stub (§7), not a real field.
 
+### §6 shipped — KBUR's crossing, position-aware
+
+The boolean seam says two runways are occupancy-coupled; KBUR's crossing needs *for how long*, so
+the coupling is refined by **position**. The field declares the intersection point
+(`RunwayDependency.crossing`, the surveyed value — field geometry, so it rides the bundle and is
+guarded by a test against the actual centreline intersection); the sim carries it as
+`runwayCrossings` and consults it in `blocksRunwayFor`:
+
+- A **moving** aircraft on one runway — a departure roll or a landing rollout — holds the crossing
+  runway only until it is `CROSSING_CLEARED_NM` past the intersection. Crucially the gate here is
+  **position, not rotation speed**: the coarse `occupiesForTakeoff` releases at `ROTATE_KT`, but a
+  jet at 130 kt *short of the crossing* is still in the way, so on a crossing pair the occupancy is
+  `onRunwayNow(o) && stillAtCrossing(o, …)` instead. That is what lets Tower line an 08 departure up
+  and hold it, then clear it the moment the 15 traffic is through — "cleared for takeoff, traffic has
+  crossed."
+- Everything else stays conservative and holds: a stationary occupant (lined up, holding, stopped),
+  an arrival still on final, and any coupling with **no** stated crossing point (which keeps the
+  coarse boolean — dependent parallels, KOAK-to-be, are unaffected). It never relaxes a same-runway
+  hold. So the refinement only ever *safely narrows* the boolean, and only where a crossing is
+  declared.
+
+Line-up (`canLineUpNow`) is deliberately left coarse: lining up on 08 while a 15 departure rolls is
+fine — the aircraft waits at its own threshold, clear of the intersection — and it is the *takeoff*
+that `blocksRunwayFor` holds until the crossing is clear.
+
 ## 7. The fictional test field
 
 A made-up **intersecting** two-runway field, built from scratch like `world/airport.test.ts`'s

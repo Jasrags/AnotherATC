@@ -349,6 +349,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
         hotspots,
         runway: game.runway,
         runwaysInteract: game.runwaysInteract,
+        runwayCrossings: game.runwayCrossings,
         frequencies,
         stands: game.stands,
       })
@@ -360,6 +361,7 @@ export function createGroundController(opts: GroundControllerOptions = {}): Grou
         servicing: game.servicing,
         runway: game.runway,
         runwaysInteract: game.runwaysInteract,
+        runwayCrossings: game.runwayCrossings,
         frequencies,
         stands: game.stands,
         // Arrivals become the next departure off the same stand rather than vanishing, which is

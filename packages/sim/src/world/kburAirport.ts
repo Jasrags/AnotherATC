@@ -137,13 +137,16 @@ export const KBUR_LAYOUT_1533: RunwayLayout = {
 
 /**
  * The crossing. 08/26 and 15/33 cross at 66% / 79% along, so traffic committed to one runway
- * occupies the intersection the other runs through — an `occupancy` coupling. This is the boolean
- * first cut of the intersecting rule (docs/atc-multi-runway.md §6): safe (it never permits a real
- * crossing conflict) but position-blind (it does not yet release the other runway once a departure
- * is past the intersection — the refinement). Not `wake`-coupled: crossing departures do not share
- * a wake corridor.
+ * occupies the intersection the other runs through — an `occupancy` coupling. The `crossing` point
+ * (the surveyed intersection, docs/BUR/runways.md §0) makes the coupling **position-aware**: a
+ * departure or rollout holds the other runway only until it is past that point, not for its whole
+ * roll. Not `wake`-coupled: crossing departures do not share a wake corridor.
  */
-const CROSSING: RunwayDependency = { runways: ['08/26', '15/33'], kinds: ['occupancy'] }
+const CROSSING: RunwayDependency = {
+  runways: ['08/26', '15/33'],
+  kinds: ['occupancy'],
+  crossing: [0.1111, -0.1773],
+}
 
 /** Hollywood Burbank — the second airport, and the reference for an intersecting two-runway field. */
 export const KBUR: Airport = {

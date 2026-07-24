@@ -79,6 +79,20 @@ export type RunwayInteractionKind = 'occupancy' | 'landing' | 'wake'
 export type RunwaysInteract = (mine: string, other: string, kind: RunwayInteractionKind) => boolean
 
 /**
+ * Where two physical runways physically cross (an intersecting field like KBUR). The boolean
+ * {@link RunwaysInteract} seam says two runways are occupancy-coupled at all; this adds *where*, so
+ * the sim can refine that coupling by position — a departure or rollout on one runway stops holding
+ * the other once it is past the intersection, rather than for its whole roll (docs/atc-multi-runway.md).
+ * It is field geometry (the intersection of the field's own runways), so it rides the airport bundle.
+ */
+export interface RunwayCrossing {
+  /** The two physical runway ids that cross, e.g. `['08/26', '15/33']`. Symmetric. */
+  runways: readonly [string, string]
+  /** Where their centrelines intersect, in the field's local nm frame. */
+  point: Point
+}
+
+/**
  * The designator of the opposite direction: 09 ↔ 27. Runway numbers are the magnetic heading in
  * tens, so the reciprocal is 18 away, wrapping at 36.
  */

@@ -6,6 +6,7 @@ import {
   type RunwayLayout,
   type RunwayInteractionKind,
   type RunwaysInteract,
+  type RunwayCrossing,
 } from '../ground/runway'
 import type {
   AircraftInit,
@@ -42,6 +43,19 @@ export interface RunwayDependency {
   runways: readonly [string, string]
   /** Why they interact — the reasons a gate consults the seam for. */
   kinds: readonly RunwayInteractionKind[]
+  /** For an `occupancy` crossing: where the two runways' centrelines meet. Supplied, the sim
+   *  refines the coupling by position — traffic that has rolled past the intersection stops holding
+   *  the other runway. Omit for a coupling with no single crossing point (e.g. dependent
+   *  parallels), which stays the coarse boolean. */
+  crossing?: Point
+}
+
+/** The declared crossings (dependencies that carry a crossing point), for the sim's position-aware
+ *  refinement. A field with none behaves as the coarse boolean coupling. */
+export function runwayCrossingsFrom(deps?: readonly RunwayDependency[]): RunwayCrossing[] {
+  return (deps ?? [])
+    .filter((d): d is RunwayDependency & { crossing: Point } => d.crossing !== undefined)
+    .map((d) => ({ runways: d.runways, point: d.crossing }))
 }
 
 /**
@@ -156,6 +170,8 @@ export interface AirportGame {
   /** The field's inter-runway coupling, compiled from its declared dependencies; independent by
    *  default. Passed straight to the sim (docs/atc-multi-runway.md §6). */
   runwaysInteract: RunwaysInteract
+  /** Where the field's coupled runways cross, for the position-aware refinement of that coupling. */
+  runwayCrossings: RunwayCrossing[]
 }
 
 /**
@@ -239,6 +255,7 @@ export function createAirportGame(airport: Airport, seed = 1, runwayIdent?: stri
     ...(airport.slots ? { slots: { ...airport.slots, seed: seed + 7717 } } : {}),
     runway,
     runwaysInteract: compileRunwayDependencies(airport.runwayDependencies),
+    runwayCrossings: runwayCrossingsFrom(airport.runwayDependencies),
     stands: buildStands(airport.surface),
   }
 }

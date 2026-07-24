@@ -44,6 +44,7 @@ import {
   type ActiveRunway,
   type RunwayInteractionKind,
   type RunwaysInteract,
+  type RunwayCrossing,
 } from './runway'
 import {
   brakeRateFor,
@@ -218,6 +219,10 @@ export interface GroundSimOptions {
    *  runway minds only its own traffic, which is every single-runway field and any multi-runway
    *  field that has not stated a dependency. KBUR's crossing and KOAK's parallels plug in here. */
   runwaysInteract?: RunwaysInteract
+  /** Where coupled runways physically cross. With this, the occupancy coupling is refined by
+   *  position: a departure or rollout on one runway stops holding the other once it is past the
+   *  intersection, instead of for its whole roll. Omit to keep the coarse boolean coupling. */
+  runwayCrossings?: readonly RunwayCrossing[]
 }
 
 // ─── Wheels-up time windows (EDCT) ───────────────────────────────────────────
@@ -281,6 +286,11 @@ const MIN_TAKEOFF_RUN_NM = (TAKEOFF_SPEED_KT * TAKEOFF_SPEED_KT) / (7200 * TAKEO
  *  a slower-accelerating leader followed by a faster follower could close the gap; revisit this
  *  gate (add a distance floor) then, since detectConflicts() excludes departing pairs. */
 const ROTATE_KT = 120
+
+/** How far past a runway crossing (nm ≈ 240 ft) a moving aircraft must be before it stops holding
+ *  the intersecting runway — its length plus the crosser's width plus a margin, so "past" means
+ *  genuinely clear of the intersection, not merely across the centreline. */
+const CROSSING_CLEARED_NM = 0.04
 
 // ─── Final approach & landing (Tower) ────────────────────────────────────────
 /** Glide path (deg) assumed when no runway configuration supplies a real one. */
@@ -571,6 +581,8 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
   let runway: ActiveRunway | undefined = active[0]?.dir
   /** How this field couples its runways; independent by default (docs/atc-multi-runway.md §6). */
   const runwaysInteract: RunwaysInteract = opts.runwaysInteract ?? (() => false)
+  /** Where coupled runways cross, for the position-aware refinement of the occupancy coupling. */
+  const runwayCrossings: readonly RunwayCrossing[] = opts.runwayCrossings ?? []
   /** Whether traffic on runway `other` bears on a clearance protecting runway `mine`, for `kind`:
    *  the same runway always does, and a coupled pair does when the field says so. The single
    *  choke point every per-runway gate goes through, so "same runway, or interacting" is stated
@@ -1202,11 +1214,63 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
    * unrelated runway is invisible here. With `runwayId` null (a runway that can't be resolved) it
    * falls back to the field-wide predicate, which is also exactly the single-runway behaviour.
    */
+  /** The declared crossing point of two runways, or null if they do not cross (or none is stated). */
+  function crossingBetween(a: string, b: string): Point | null {
+    for (const c of runwayCrossings) {
+      if ((c.runways[0] === a && c.runways[1] === b) || (c.runways[1] === a && c.runways[0] === b)) return c.point
+    }
+    return null
+  }
+
+  /**
+   * Whether occupant `o` on runway `oId` still holds the runway it *crosses* (`protectedId`) — the
+   * position-aware refinement of the occupancy coupling (docs/atc-multi-runway.md §6). The coupling
+   * says a crossing pair holds each other; this says *for how long*: only until the moving aircraft
+   * is past the intersection.
+   *
+   * Deliberately narrow. It relaxes the coupling for exactly one case — an aircraft **rolling**
+   * (a departure, or a landing rollout) that has physically passed the crossing — because that is
+   * the one that visibly clears the intersection and frees the other runway ("cleared for takeoff,
+   * traffic has crossed"). Everything else stays conservative and holds: same runway, a coupling
+   * with no stated crossing point, a stationary occupant (lined up, holding, stopped on the
+   * pavement), and any traffic still short of the crossing. Never relaxes a same-runway hold.
+   */
+  function stillAtCrossing(o: Internal, oId: string | null, protectedId: string, kind: RunwayInteractionKind): boolean {
+    if (kind !== 'occupancy' || oId === null || oId === protectedId) return true
+    if (!(o.departing || o.rollingOut)) return true // only a moving roll earns the refinement
+    const x = crossingBetween(oId, protectedId)
+    if (!x) return true // no stated crossing → coarse coupling
+    const dir = active.find((a) => a.id === oId)?.dir
+    if (!dir) return true
+    const ux = dir.farEnd[0] - dir.departureStart[0]
+    const uy = dir.farEnd[1] - dir.departureStart[1]
+    const len = Math.hypot(ux, uy)
+    if (len < 1e-9) return true
+    // Signed distance from o to the crossing along its runway's roll direction: positive while the
+    // crossing is still ahead. Once it is CROSSING_CLEARED_NM behind, o has cleared the intersection.
+    const ahead = ((x[0] - o.x) * ux + (x[1] - o.y) * uy) / len
+    return ahead >= -CROSSING_CLEARED_NM
+  }
+
   function blocksRunwayFor(o: Internal, runwayId: string | null, kind: RunwayInteractionKind): boolean {
     if (runwayId === null) return blocksRunway(o)
+    // An arrival on short final is airborne — not yet a *moving* ground occupant — so the crossing
+    // refinement below never relaxes it; it holds the coupled runway until it has landed and rolls.
     if (onShortFinal(o)) return runwaysRelated(approachRunwayOf(o), runwayId, kind)
-    if (o.rollingOut && !o.vacated) return runwaysRelated(approachRunwayOf(o), runwayId, kind)
-    return occupiesForTakeoff(o) && runwaysRelated(physicalRunwayOf(o), runwayId, kind)
+    if (o.rollingOut && !o.vacated)
+      return runwaysRelated(approachRunwayOf(o), runwayId, kind) && stillAtCrossing(o, approachRunwayOf(o), runwayId, kind)
+    const oId = physicalRunwayOf(o)
+    if (oId === null) return false
+    if (oId === runwayId) return occupiesForTakeoff(o) // same runway: unchanged, rotation-based release
+    if (!runwaysRelated(oId, runwayId, kind)) return false // an unrelated runway is invisible
+    // A coupled *crossing* runway (a stated crossing point): the occupant holds `runwayId` while it
+    // is physically on its own runway and short of the intersection — position, not rotation speed,
+    // is what clears it, because a departure at 130 kt short of the crossing is still in the way and
+    // `occupiesForTakeoff` would have released it at ROTATE. Without a crossing point (a coarse
+    // coupling, e.g. dependent parallels) the established rotation-based occupancy stands.
+    if (kind === 'occupancy' && crossingBetween(oId, runwayId))
+      return onRunwayNow(o) && stillAtCrossing(o, oId, runwayId, kind)
+    return occupiesForTakeoff(o)
   }
 
   /** Every runway a holding-short aircraft's held (crossing) route runs across — each one a

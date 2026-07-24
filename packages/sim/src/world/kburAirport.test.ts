@@ -59,6 +59,23 @@ describe('KBUR configuration comes off the survey', () => {
     expect(KBUR.fleets[0]!.gates.length).toBe(14)
     expect(KBUR.fleets[0]!.gates.every((g) => g.ref.startsWith('A') || g.ref.startsWith('B'))).toBe(true)
   })
+
+  it('declares the crossing point where its two runways actually intersect', () => {
+    // Guard against the declared crossing drifting from the runway geometry it must match: it has
+    // to sit on the geometric intersection of the two centrelines, not just near it.
+    const dep = KBUR.runwayDependencies!.find((d) => d.crossing)!
+    const [p, q] = [KBUR_RUNWAYS['08'].departureStart, KBUR_RUNWAYS['08'].farEnd]
+    const [r, s] = [KBUR_RUNWAYS['15'].departureStart, KBUR_RUNWAYS['15'].farEnd]
+    const d1x = q[0] - p[0]
+    const d1y = q[1] - p[1]
+    const d2x = s[0] - r[0]
+    const d2y = s[1] - r[1]
+    const denom = d1x * d2y - d1y * d2x
+    const t = ((r[0] - p[0]) * d2y - (r[1] - p[1]) * d2x) / denom
+    const computed: [number, number] = [p[0] + t * d1x, p[1] + t * d1y]
+    const off = Math.hypot(dep.crossing![0] - computed[0], dep.crossing![1] - computed[1])
+    expect(off).toBeLessThan(0.005) // within ~30 ft of the true intersection
+  })
 })
 
 describe('the crossing is declared as an occupancy coupling (docs/atc-multi-runway.md §6)', () => {
@@ -341,3 +358,97 @@ describe('two runways active at once (docs/atc-multi-runway.md §5)', () => {
 function game_runwaysInteract() {
   return createAirportGame(KBUR, 1).runwaysInteract
 }
+
+describe('the crossing is position-aware: past the intersection frees the other runway (docs/atc-multi-runway.md §6)', () => {
+  const CROSSING: [number, number] = [0.1111, -0.1773]
+  const ROTATE_KT = 120
+
+  /** A departure holding short of runway 15's departure end (the NW end), rolling toward the SE. */
+  const departure15 = (): AircraftInit => ({
+    id: 'r',
+    callsign: 'ASA700',
+    type: 'B738',
+    wake: 'M',
+    path: [
+      [-0.12, 0.74], // off-runway, NW of the 15 end
+      KBUR_RUNWAYS['15'].departureStart,
+      [-0.05, 0.65], // onto the runway, toward the SE
+    ],
+    targetSpeed: 15,
+    intent: 'departure',
+    goalPoint: KBUR_RUNWAYS['15'].departureStart,
+  })
+
+  /** Signed distance (nm) from a point to the crossing along 15's roll direction: positive while
+   *  the crossing is still ahead, negative once past it. */
+  const aheadOfCrossing = (x: number, y: number): number => {
+    const ux = KBUR_RUNWAYS['15'].farEnd[0] - KBUR_RUNWAYS['15'].departureStart[0]
+    const uy = KBUR_RUNWAYS['15'].farEnd[1] - KBUR_RUNWAYS['15'].departureStart[1]
+    const len = Math.hypot(ux, uy)
+    return ((CROSSING[0] - x) * ux + (CROSSING[1] - y) * uy) / len
+  }
+
+  const twoRunwaySim = (opts: { crossing: boolean }) => {
+    const game = createAirportGame(KBUR, 1)
+    return createGroundSim([departure15(), departure08()], {
+      graph,
+      guard,
+      runways: [KBUR_RUNWAYS['08'], KBUR_RUNWAYS['15']],
+      runwaysInteract: game.runwaysInteract,
+      ...(opts.crossing ? { runwayCrossings: game.runwayCrossings } : {}),
+    })
+  }
+
+  it('holds 08 while a 15 departure is short of the crossing — even past rotation speed — then releases it', () => {
+    const sim = twoRunwaySim({ crossing: true })
+    // Roll the 15 departure; hand 08 to Tower so its takeoff gate is the only thing outstanding.
+    expect(sim.dispatch({ type: 'contactTower', aircraftId: 'r' })).toEqual({ ok: true })
+    expect(sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'r' })).toEqual({ ok: true })
+    expect(sim.dispatch({ type: 'contactTower', aircraftId: 'd' })).toEqual({ ok: true })
+
+    const r = () => sim.snapshot().aircraft.find((a) => a.id === 'r')
+    let checkedFastBeforeX = false
+    let released = false
+    for (let i = 0; i < 4000; i += 1) {
+      sim.step(0.1)
+      const rr = r()
+      if (!rr) break // 15 departure airborne and gone
+      const ahead = aheadOfCrossing(rr.x, rr.y)
+      // Past rotation speed but still short of the crossing: the coarse rule (occupiesForTakeoff)
+      // would have released 08 at ROTATE — the position-aware one must still hold it.
+      if (!checkedFastBeforeX && rr.groundspeed >= ROTATE_KT && ahead > 0.05) {
+        checkedFastBeforeX = true
+        const res = sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'd' })
+        expect(res.ok).toBe(false)
+      }
+      // Once it is clear of the intersection, 08 is free to go.
+      if (ahead < -0.05) {
+        released = sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'd' }).ok
+        break
+      }
+    }
+    expect(checkedFastBeforeX).toBe(true) // the "fast but short of the crossing" window did occur
+    expect(released).toBe(true)
+  })
+
+  it('without a crossing point declared, the coupling stays coarse — 08 is not refused once 15 is past rotation', () => {
+    // The control: same geometry, but the field states no crossing, so `occupiesForTakeoff` releases
+    // at ROTATE and 08 can be cleared while the 15 departure is fast but still short of the crossing.
+    const sim = twoRunwaySim({ crossing: false })
+    sim.dispatch({ type: 'contactTower', aircraftId: 'r' })
+    sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'r' })
+    sim.dispatch({ type: 'contactTower', aircraftId: 'd' })
+    const r = () => sim.snapshot().aircraft.find((a) => a.id === 'r')
+    let allowedWhileFastBeforeX = false
+    for (let i = 0; i < 4000; i += 1) {
+      sim.step(0.1)
+      const rr = r()
+      if (!rr) break
+      if (rr.groundspeed >= ROTATE_KT && aheadOfCrossing(rr.x, rr.y) > 0.05) {
+        allowedWhileFastBeforeX = sim.dispatch({ type: 'clearedForTakeoff', aircraftId: 'd' }).ok
+        break
+      }
+    }
+    expect(allowedWhileFastBeforeX).toBe(true)
+  })
+})

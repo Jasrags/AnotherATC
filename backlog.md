@@ -412,7 +412,7 @@ shared prerequisite — ✅ **now shipped** — was the same for either: runways
 an inter-runway `runwaysInteract` seam (`docs/atc-multi-runway.md`). Each field now adds exactly its
 own coupling rule as a seam plug; neither is blocked.
 
-- 🚧 **KBUR — the intersecting case** *(recommended first)*. Two runways: **08/26** 5,802 ft
+- ✅ **KBUR — the intersecting case** *(recommended first)*. Two runways: **08/26** 5,802 ft
   (091°/271°, ILS on 08) and **15/33** 6,886 ft (167°/347°), **crossing at 66% along 08/26 and 79%
   along 15/33**. Needs a time-and-position conflict model at the crossing, hold-short-of-the-
   intersecting-runway, and timed departures between arrivals; LAHSO optional. Because the crossing
@@ -459,8 +459,15 @@ own coupling rule as a seam plug; neither is blocked.
   `approaches()`. Residual, small and pre-existing (shared with `setRunway`): runway-crossing
   traffic isn't counted by the committed check, and intersection-departure goals aren't re-aimed on
   a close — both flagged in code, unreachable/safe today.
-  _Remaining: **position-aware crossing** — release the
-  other runway once a departure is past the intersection (the refinement of the boolean coupling)._
+  **Position-aware crossing shipped** (`docs/atc-multi-runway.md` §6): the field declares the
+  intersection point (`RunwayDependency.crossing`, guarded against the real centreline crossing), and
+  `blocksRunwayFor` releases a moving departure/rollout from holding the other runway once it is past
+  the intersection — gated on **position, not rotation speed** (`onRunwayNow` + `stillAtCrossing`
+  rather than `occupiesForTakeoff`, which released too early at ROTATE and was actually *unsafe* for a
+  jet short of the crossing). Line-up stays coarse (you may line up on 08 while 15 rolls; the takeoff
+  waits). Stationary occupants, arrivals on final, and couplings with no crossing point stay
+  conservative. **KBUR's intersecting epic is complete** — data pipeline, taxiway naming, bundle +
+  crossing, SE-terminal arrivals, two runways active, and the position-aware crossing.
 - ⬜ **KOAK — the parallel/dependent case**. Four runways, **zero intersections**: **10L/28R**
   (5,457 ft) and **10R/28L** (6,213 ft) are parallel and only **1,001 ft apart** — well under the
   ~2,500 ft dependent-approach threshold, so they are *not* independent and arrivals must be
