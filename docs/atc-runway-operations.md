@@ -8,7 +8,8 @@ current edition before relying on it.
 
 This is the companion to [`atc-multi-runway.md`](atc-multi-runway.md): that note is the *engine
 seam* for two runways interacting; this one is the *state and designation* of a runway — what it is
-for (departures, arrivals, or both), whether it is usable at all, and how a controller says so.
+for (departures, arrivals, or both), whether it is usable at all, and how a controller says so. A
+worked session using it is [`BUR/runway-operations-scenario.md`](BUR/runway-operations-scenario.md).
 
 ---
 
@@ -143,8 +144,8 @@ The engine models an **active runway set** — at most one direction per physica
 | Concept (above) | Sim today |
 |---|---|
 | **Active — Mixed ops** | ✅ **The only designation.** The spawner picks intent (departure/arrival) 50/50 and then a runway from the active set at random (`trySpawn`), so *every active runway is mixed ops*, and both takeoff and landing clearances gate on it. Single-runway KSAN is exactly "single runway mixed ops". |
-| **Active — Departure only** | ❌ Not expressible. Nothing designates a runway takeoffs-only, so a departure-only / arrival-only *split* across two active runways (the common multi-runway configuration) cannot be set. **This is the first slice — §9.1.** |
-| **Active — Arrival only** | ❌ Not expressible (same as above). |
+| **Active — Departure only** | ✅ **Shipped (§9.1).** Each active runway carries a designation — `mixed` (default), `departures`, or `arrivals` (`setRunwayOps`). The spawner sends each intent only to a runway that takes it, and the clearance gates enforce it. |
+| **Active — Arrival only** | ✅ **Shipped (§9.1).** A `departures` runway issues no landing clearances ("RWY X is departures only"); an `arrivals` runway no takeoff ("RWY X is arrivals only"). |
 | **Inactive / not in use** | ➖ A runway not in the active set is effectively inactive (drawn normally, no X, unassigned). But there is no "an aircraft may still request it" path, and "off" is really "not in the mix" rather than a first-class state. |
 | **Closed** | ❌ No distinct closed state — no X marking, no NOTAM, no "runway 27 is closed" broadcast. "Off" is the nearest thing but means *inactive*, not *closed*. |
 | **Runway configuration change** | 🚧 Partial. `setRunway` / `deactivateRunway` change the config, and a change **cascades** correctly (committed traffic refused or, on a close, drained onto a remaining runway; arrivals on final go around and re-establish on the new approach; landing clearances void). But there is **no "attention all aircraft" broadcast** and no acknowledgement mechanic. |
@@ -155,24 +156,26 @@ The engine models an **active runway set** — at most one direction per physica
 | **ILS critical area** | ❌ Not modelled; no low-visibility state and no critical-area hold. |
 | **Hot** | ➖ Emergent, not named — tight sequencing happens under load but the game does not label a runway "hot". |
 
-### 9.1 First slice — the operations designation (departure / arrival / mixed)
+### 9.1 First slice — the operations designation (departure / arrival / mixed) — ✅ shipped
 
-The one the game most wants, and the natural next step on the multi-runway foundation. Each **active
-runway carries an operations designation**: `mixed` (today's behaviour, the default), `departures`,
-or `arrivals`. It plugs into what already exists:
+Each **active runway carries an operations designation**: `mixed` (the default and every
+single-runway field), `departures`, or `arrivals`. As built:
 
-- **The `ActiveRunway` set** gains the designation (engine state, since it is a *rule about
-  operations* — an aircraft may not land on a departures-only runway at any field). The web control
-  extends from `dir → reciprocal → off` to also cycle the designation, or a second control sets it.
-- **The spawner** respects it: a `departures`-only runway is never chosen for an arrival, an
-  `arrivals`-only runway never for a departure. With one runway `departures` and another `arrivals`,
-  traffic splits cleanly — the classic two-runway configuration.
-- **The clearance gates** enforce it: `clearedToLand` is refused on a `departures` runway
-  ("runway 9 is departures only"); `lineUpAndWait` / `clearedForTakeoff` refused on an `arrivals`
-  runway. This mirrors the existing "not in use" refusal (`takeoffBlocked`) — a new, adjacent reason.
+- **The sim's active set** carries the designation — session state the controller sets, not field
+  data (it is a *rule about operations*: nothing may land on a departures-only runway at any field).
+  `setRunwayOps` designates an active runway; turning a runway end-for-end keeps the designation, a
+  fresh activation opens `mixed`. The web control adds a **MIX / DEP / ARR** badge beside each active
+  runway button that cycles it.
+- **The spawner** respects it (`runwayTakes`): a `departures` runway is never chosen for an arrival,
+  an `arrivals` runway never for a departure. With one runway `departures` and another `arrivals`,
+  traffic splits cleanly — the classic two-runway configuration. When every runway is `mixed` the
+  eligible set is the whole active set, so the spawn stream is byte-for-byte unchanged.
+- **The clearance gates** enforce it: `clearedToLand` refused on a `departures` runway ("RWY X is
+  departures only"); `lineUpAndWait` / `clearedForTakeoff` refused on an `arrivals` runway ("RWY X is
+  arrivals only") — adjacent to the "not in use" refusal in `takeoffBlocked`.
 - **KOAK is the field that wants it**: the close parallels realistically run one for arrivals and one
-  for departures, or both for arrivals staggered (the dependent-approach rule, a later slice). KBUR
-  and KSAN stay mixed by default, so nothing regresses.
+  for departures (or both for arrivals staggered — the dependent-approach rule, a later slice). KBUR
+  and KSAN stay mixed by default, so nothing regressed.
 
 Deferred to later slices, each roughly independent: a true **closed** state (X marking + broadcast),
 a **wind model** to *drive* selection and the calm-wind/tailwind rules, the **ATIS information

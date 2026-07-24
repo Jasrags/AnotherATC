@@ -386,7 +386,15 @@ Design note: `docs/atc-tower.md` (one sim, two projections; Ground and Tower own
   committed to the runway in use (on it, or on short final above it); on success every arrival
   still on final goes around and re-establishes on the *new* approach at that end's glide path,
   landing clearances are voided, and departures yet to roll are retargeted to the new departure
-  end. _Next: wind + altimeter, an actual ATIS letter._
+  end. **Runway operations designation shipped** (`docs/atc-runway-operations.md` §2/§9.1): each
+  active runway is `mixed` (default), `departures`, or `arrivals` (`setRunwayOps`; a MIX/DEP/ARR
+  badge on the RWY control cycles it). The spawner sends each intent only to a runway that takes it
+  (`runwayTakes` — all-mixed leaves the spawn stream byte-for-byte unchanged), and the clearance
+  gates enforce it (no landing on a departures runway, no takeoff on an arrivals runway). This is
+  the classic multi-runway split (one runway arrivals, one departures) the game could not express —
+  worked example at `docs/BUR/runway-operations-scenario.md` (land 8 / depart 15). Turning a runway
+  end-for-end keeps its designation. _Next: wind + altimeter, an actual ATIS letter (the config it
+  states now exists), the "attention all aircraft" runway-change broadcast, a true closed state._
 - ⬜ **Weather** — wind (affects ops), precipitation shading on scopes
 - ⬜ **Wake-turbulence model** — categories on strips, spacing constraints
 - 🚧 **Scenario / traffic generation** — deterministic spawner (gates → RWY, RWY → gates) in place; want realistic demand curves, schedules, runway-config awareness
