@@ -93,6 +93,11 @@ check: typecheck lint test ## Full gate: typecheck + lint + test
 ingest-ksan: check-node ## Rebuild KSAN surface data from the committed OSM snapshot
 	$(RUN) node tools/ingest/build-ksan-surface.mjs
 
+.PHONY: audit-taxi
+audit-taxi: check-node ## Audit a field's taxi-graph geometry (AIRPORT=KBUR, or all fields)
+	@AUDIT_AIRPORT=$(or $(AIRPORT),ALL) $(RUN) $(PNPM) --filter $(SIM) exec vitest run \
+		src/world/taxiAuditCli.test.ts --disable-console-intercept --reporter=dot
+
 .PHONY: clean
 clean: ## Remove build outputs and installed dependencies
 	rm -rf node_modules packages/*/node_modules apps/*/node_modules apps/web/dist
