@@ -121,6 +121,14 @@ const DROP = new Set([
   // and A as a single clean 3-way junction — the south turn just routes through A. Nothing
   // disconnects: P stays on the connector, S stays on B. It is a corner-cut fillet, not connectivity.
   311355307,
+
+  // A fillet triangle on taxiway D on the SW side (~[-0.36, -0.09]). A connector (way 99872014)
+  // comes from the north, meets D at its NW foot [-0.3683, -0.0961]; this way (99871997) is an extra
+  // corner-cut fillet from the same apex to D's NE foot [-0.3451, -0.0963], closing a triangle that
+  // renders as a diamond. Dropping it leaves the apex and the NE foot as pass-throughs (contracted
+  // away) and D's junction with the connector as one clean node — the east turn routes through it.
+  // Nothing disconnects. Same asymmetric-fillet pattern as 311355307 above.
+  99871997,
 ])
 
 // Charted hot spots (not in OSM). KBUR publishes hot spots on SW3HOTSPOT.PDF;

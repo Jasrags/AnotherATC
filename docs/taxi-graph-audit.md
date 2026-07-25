@@ -74,7 +74,7 @@ worse. Lower the number when you improve a graph. Current baselines:
 | Field | total | high |
 |---|---|---|
 | KSAN | 154 | 66 |
-| KBUR | 183 | 68 |
+| KBUR | 181 | 67 |
 | KOAK | 180 | 57 |
 
 (Totals include the `compound-intersection` characterisation findings — one per messy crossing —
