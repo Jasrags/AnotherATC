@@ -61,12 +61,24 @@ patched way-id is absent on a re-fetch.
 | 99871894 | 15/33 | 12% | same holding-area fillet (A1/B1) |
 | 558772692 | 08/26 | 26% | the C8↔D8 crossing throat — ambiguous which connector owns it |
 | 558772697 | 08/26 | 43% | the C7↔D7 crossing throat — ambiguous |
-| 99871959 | 15/33 | 76% | SE terminal-apron cluster (NE of the crossing, by the passenger terminal) |
-| 99871960 | 15/33 | 70% | SE terminal-apron cluster |
-| 99871982 | 15/33 | 70% | SE terminal-apron cluster |
-| 99871991 | 15/33 | 76% | SE terminal-apron cluster |
+| 99871959 | 15/33 | 76% | SE terminal-apron cluster — **dropped 2026-07-24** (see below) |
+| 99871960 | 15/33 | 70% | SE terminal-apron cluster — **dropped** |
+| 99871982 | 15/33 | 70% | SE terminal-apron cluster — **dropped** |
+| 99871991 | 15/33 | 76% | SE terminal-apron cluster — **dropped** |
 | 1052138834 | 08/26 | 99% | 2-pt stub at the 26 (east) threshold — runway-end pavement, no connector identity |
 | 1066844999 | 15/33 | 4% | stub at the 15 (NW) threshold — runway-end pavement |
+
+## Dropped as orphaned pavement (2026-07-24)
+
+The four **SE terminal-apron cluster** ways above (99871959/60/82/91) form a self-contained loop of
+unnamed taxiway NE of the crossing that shares no node with the movement area — the taxi-graph audit
+(`docs/taxi-graph-audit.md`) flagged them as an 8-node **disconnected island**. No stand attaches to
+it (all 14 gates reach the network elsewhere): it is BUR's GA / remote-parking apron, not yet
+modelled as gates (`kburAirport.ts`). Per the "route to the gate, not via apron pavement" discipline
+they are removed via a `DROP` set in `build-kbur-surface.mjs` (with the same matched-or-throw guard
+as `REF_PATCH`), together with the two `holding_position` markers sitting on them (nodes 1154611488,
+8028996387; the third nearby marker 8028996414 is on taxiway C and stays). When GA/charter traffic is
+modelled, this apron returns **with** a real connection to the network and its own stands.
 
 ## Lower-confidence assignments to re-check on the chart / in play
 

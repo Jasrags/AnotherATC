@@ -13,7 +13,7 @@ import { auditAirport } from './taxiAuditReport'
  */
 const BASELINE: Record<string, { airport: Airport; maxTotal: number; maxHigh: number }> = {
   KSAN: { airport: KSAN, maxTotal: 123, maxHigh: 67 },
-  KBUR: { airport: KBUR, maxTotal: 167, maxHigh: 77 },
+  KBUR: { airport: KBUR, maxTotal: 160, maxHigh: 76 },
   KOAK: { airport: KOAK, maxTotal: 174, maxHigh: 70 },
 }
 

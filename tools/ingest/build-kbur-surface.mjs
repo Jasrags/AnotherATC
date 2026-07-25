@@ -99,6 +99,21 @@ const REF_PATCH = {
   221231956: 'A',
 }
 
+// Orphaned pavement removed from the surface — see docs/BUR/taxiway-naming.md and
+// docs/taxi-graph-audit.md. The SE terminal-apron cluster is four unnamed taxiway ways forming a
+// self-contained loop NE of the 08/26 × 15/33 crossing; it touches nothing in the movement area and
+// no stand attaches to it (all 14 gates reach the network elsewhere). It is BUR's GA / remote-
+// parking apron, not yet modelled as gates (see kburAirport.ts). The taxi-graph audit flagged it as
+// an 8-node disconnected island; per the "route to the gate, not via apron pavement" discipline
+// (same as KSAN) it is dropped rather than bridged — when GA traffic is modelled it returns with a
+// real connection and stands. The two holding_position markers sitting on the cluster go with it;
+// the third nearby marker (node 8028996414, on taxiway C) is on the network and stays.
+// Same matched-or-throw guard as REF_PATCH: a re-fetch that renames these ids fails loudly.
+const DROP = new Set([
+  99871959, 99871960, 99871982, 99871991, // the four apron-loop taxiway ways
+  1154611488, 8028996387, // the two holding_position markers on that apron
+])
+
 // Charted hot spots (not in OSM). KBUR publishes hot spots on SW3HOTSPOT.PDF;
 // their exact centres are read off that chart during the naming theme.
 const HOTSPOTS = []
@@ -140,11 +155,19 @@ if (!Array.isArray(raw?.elements)) {
 
 const features = []
 const matchedRefPatch = new Set() // REF_PATCH ids actually seen in this snapshot
+const matchedDrop = new Set() // DROP ids actually seen in this snapshot
 const skippedKept = [] // KEEP-listed elements dropped for want of usable geometry
 
 for (const el of raw.elements) {
   const kind = el.tags?.aeroway
   if (!kind || !KEEP.has(kind)) continue
+
+  // Deliberately dropped orphaned pavement (see DROP) — before any geometry work, so a dropped
+  // way can never reach the surface or the skipped-geometry guard.
+  if (DROP.has(el.id)) {
+    matchedDrop.add(String(el.id))
+    continue
+  }
 
   let points
   if (el.type === 'way' && Array.isArray(el.geometry) && el.geometry.length > 0) {
@@ -202,6 +225,12 @@ const unmatchedRefPatch = Object.keys(REF_PATCH).filter((id) => !matchedRefPatch
 if (unmatchedRefPatch.length > 0) {
   throw new Error(
     `REF_PATCH has ${unmatchedRefPatch.length} way id(s) not present in this OSM snapshot: ${unmatchedRefPatch.join(', ')} — the upstream ways changed; re-verify against docs/BUR/taxiway-naming.md`,
+  )
+}
+const unmatchedDrop = [...DROP].filter((id) => !matchedDrop.has(String(id)))
+if (unmatchedDrop.length > 0) {
+  throw new Error(
+    `DROP has ${unmatchedDrop.length} id(s) not present in this OSM snapshot: ${unmatchedDrop.join(', ')} — the upstream ways changed; re-verify against docs/BUR/taxiway-naming.md`,
   )
 }
 
