@@ -137,4 +137,21 @@ Thin vertical slices, each green and playtested, in the project's cadence:
 
 ## 7. Where the sim is
 
-_(Filled in as the slice lands.)_ Nothing built yet — this note is the design ahead of Slice 1.
+_(Filled in as the slice lands.)_
+
+**Slice 1 — airborne kinematics + radar scope (done).** The deterministic terminal core is
+`packages/sim/src/terminal/sim.ts` (`createTerminalSim`): an aircraft is kinematic state plus the
+targets it eases toward at engine-constant rates (§3), commands in / immutable snapshots out (§4),
+same determinism guarantee as the ground core. The Slice-1 command vocabulary is one heading vector
+(`vectorHeading`); altitude/speed targets are already in the kinematic model, settable at init, so
+Slice 2's `assignAltitude`/`assignSpeed` drop onto a proven core.
+
+The radar scope is `apps/web/src/terminal/` — reachable at `?mode=tracon` (with the usual
+`?airport=`). It is render-only this slice: `TerminalScope.tsx` runs the sim and draws the picture
+each frame; `render.ts` paints range rings, targets, history trails, velocity vectors, and data
+blocks (callsign / altitude-hundreds / groundspeed); `scene.ts` derives the demo arrival from runway
+geometry and formats the data block. One arrival enters at a feeder-fix-like point 15 nm out on the
+active runway's extended final, at 6,000 ft, and flies its inbound course. That entry is Slice-1
+scaffolding — real feeder fixes become `Airport`-bundle data in a later slice (§5). The scope reuses
+the ground core's pure view/clock helpers (`ground/view`, `ground/simClock`) and imports no React
+into the sim.

@@ -44,6 +44,17 @@ body {
   cursor: grabbing;
 }
 
+/* TRACON radar scope — a full-viewport canvas, its own display mode (?mode=tracon). */
+.terminal-scope {
+  position: fixed;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #02060a;
+  touch-action: none;
+}
+
 .hud {
   position: absolute;
   pointer-events: none;
