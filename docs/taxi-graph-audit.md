@@ -69,12 +69,29 @@ worse. Lower the number when you improve a graph. Current baselines:
 These are large because the graphs really are rough — that is the point. The audit does not fix the
 data; it tells you where to look and in what order.
 
+## Automatic smoothing that *is* applied
+
+Two graph-construction passes in `buildTaxiGraph` clean up the most mechanical OSM artifacts before
+anything routes on the graph, so they never reach the audit or the scope:
+
+- **Near-coincident node merge** (~30 ft) — folds two vertices OSM digitized a few dozen feet apart
+  at one junction into a single node, so a junction routes as one node rather than a severed pair.
+- **Collinear-detour collapse** (~15 ft) — where the same run of pavement is drawn twice (a named
+  taxiway A→B and an unnamed way shadowing it through an extra vertex M that sits right on segment
+  A–B), the shadow midpoint is dropped and the direct edge kept. This removes the doubled-paint
+  "spike" cusps at A and B. A detour that genuinely bows away from the line (a real bypass or a
+  curve) is **left alone** — only a near-collinear shadow collapses, so no real geometry is lost.
+
+Both are conditional and self-limiting; they fire only on the artifact, never on distinct pavement.
+
 ## What it does not do (yet)
 
 - **No auto-smoothing.** By design — the fix (merge these nodes, drop this paint, re-digitize this
   corner) is a data edit a human makes, verified by re-running the audit and watching the baseline
   drop.
 - **Overlap detection is shallow.** `duplicate-edge` only catches edges between the *same* node
-  keys; the common real case is the same centreline drawn twice with slightly different endpoints,
-  which currently surfaces as a cluster of `cusp`s rather than one "overlap" finding. A geometry-
-  level overlap check is the natural next increment.
+  keys. The collinear-detour collapse above removes the most common overlap (a shadow that shares
+  both endpoints), but the same centreline drawn twice with *slightly different* endpoints still
+  surfaces as a cluster of `cusp`s rather than one "overlap" finding. A geometry-level overlap check
+  is the natural next increment. The remaining cusps are largely **real** shallow junctions —
+  bypass aprons and connectors rejoining a parallel — which are geometry to leave alone, not defects.

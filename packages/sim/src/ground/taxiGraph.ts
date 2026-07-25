@@ -206,6 +206,66 @@ export function buildTaxiGraph(surface: AirportSurface): TaxiGraph {
     for (const [k, e] of mergedAdj) adj.set(k, e)
   }
 
+  // Collapse redundant collinear detours. OSM sometimes draws the same run of pavement twice — a
+  // named taxiway A→B and an unnamed way shadowing it through an extra vertex M — leaving the graph
+  // with both a direct A–B edge and a detour A–M–B whose leg lies right on top of it. The detour
+  // adds only a spike at A and B (the "star" the taxi audit flags) and a redundant routing option.
+  // Where a degree-2 vertex M sits essentially *on* the segment between its two neighbours A and B,
+  // and A–B are already directly connected, M's two legs are that shadow: drop M and keep the direct
+  // edge. A detour that bows away from the line (a real bypass or a genuine curve) is left alone —
+  // only a near-collinear shadow is removed. docs/taxi-graph-audit.md.
+  const COLLINEAR_EPS_NM = 0.0025 // ~15 ft off the direct line: a shadow, not a curve
+  const distToSeg = (p: Point, a: Point, b: Point): number => {
+    const vx = b[0] - a[0]
+    const vy = b[1] - a[1]
+    const l2 = vx * vx + vy * vy
+    const t = l2 > 0 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * vx + (p[1] - a[1]) * vy) / l2)) : 0
+    return Math.hypot(a[0] + t * vx - p[0], a[1] + t * vy - p[1])
+  }
+  const edgeRef = (from: Key, to: Key): string | undefined => (adj.get(from) ?? []).find((e) => e.to === to)?.ref
+  const shadowMidpoint = (m: Key): [Key, Key] | null => {
+    const nb = [...new Set((adj.get(m) ?? []).map((e) => e.to))].filter((k) => k !== m)
+    if (nb.length !== 2) return null
+    const [a, b] = nb as [Key, Key]
+    if (!(adj.get(a) ?? []).some((e) => e.to === b)) return null // A–B not directly connected
+    const pm = nodes.get(m)
+    const pa = nodes.get(a)
+    const pb = nodes.get(b)
+    if (!pm || !pa || !pb) return null
+    if (distToSeg(pm, pa, pb) > COLLINEAR_EPS_NM) return null
+    // Refuse to collapse when the direct edge and the shadow legs are *both* named and disagree —
+    // that is a genuine ambiguity (two differently-designated ways drawn on the same pavement),
+    // not a shadow to silently resolve. Leave it for the audit to surface.
+    const directRef = edgeRef(a, b)
+    const legRef = edgeRef(m, a) ?? edgeRef(m, b)
+    if (directRef !== undefined && legRef !== undefined && directRef !== legRef) return null
+    return [a, b]
+  }
+  for (let changed = true; changed; ) {
+    changed = false
+    for (const m of [...nodes.keys()]) {
+      const pair = shadowMidpoint(m)
+      if (!pair) continue
+      const [a, b] = pair
+      // Preserve the named identity: if the kept direct edge is unnamed but the shadow legs carry a
+      // ref, the named taxiway was the one digitised as the detour — move its ref onto the edge we
+      // keep, so refBetween / routeVia still resolve the name after the collapse.
+      const legRef = edgeRef(m, a) ?? edgeRef(m, b)
+      if (legRef !== undefined && edgeRef(a, b) === undefined) {
+        for (const [x, y] of [[a, b] as const, [b, a] as const]) {
+          const e = (adj.get(x) ?? []).find((edge) => edge.to === y)
+          if (e && e.ref === undefined) e.ref = legRef
+        }
+      }
+      for (const n of [...new Set((adj.get(m) ?? []).map((e) => e.to))]) {
+        adj.set(n, (adj.get(n) ?? []).filter((e) => e.to !== m))
+      }
+      adj.delete(m)
+      nodes.delete(m)
+      changed = true
+    }
+  }
+
   const refBetween = (a: Key, b: Key): string | undefined => adj.get(a)?.find((e) => e.to === b)?.ref
   const neighbours = (key: Key): Key[] => [...new Set((adj.get(key) ?? []).map((e) => e.to))]
 

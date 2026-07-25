@@ -47,6 +47,66 @@ describe('buildTaxiGraph', () => {
     expect(g.route(g.nearestNode([0, 0])!, g.nearestNode([6, 5])!)).toEqual([])
   })
 
+  describe('collapsing redundant collinear detours', () => {
+    // A named taxiway A→B, plus an unnamed way shadowing it through a midpoint that sits ~6 ft off
+    // the direct line — the doubled-paint artifact. The shadow's midpoint should be collapsed away.
+    it('drops a degree-2 midpoint that lies on the direct edge between its neighbours', () => {
+      const shadow: AirportSurface = {
+        ...toy,
+        features: [
+          { kind: 'taxiway', points: [[0, 0], [1, 0]], ref: 'A' },
+          { kind: 'taxiway', points: [[0, 0], [0.5, 0.001], [1, 0]] }, // ~6 ft off the line
+        ],
+      }
+      const g = buildTaxiGraph(shadow)
+      expect(g.size).toBe(2) // just the two endpoints — the shadow midpoint is gone
+      expect(g.keyAt([0.5, 0.001])).toBeNull()
+      // Connectivity and the named edge survive.
+      expect(g.route(g.nearestNode([0, 0])!, g.nearestNode([1, 0])!)).toEqual([[0, 0], [1, 0]])
+      expect(g.refBetween(g.nearestNode([0, 0])!, g.nearestNode([1, 0])!)).toBe('A')
+    })
+
+    it('keeps a detour that genuinely bows away from the direct line (a real bypass)', () => {
+      const bypass: AirportSurface = {
+        ...toy,
+        features: [
+          { kind: 'taxiway', points: [[0, 0], [1, 0]], ref: 'A' },
+          { kind: 'taxiway', points: [[0, 0], [0.5, 0.05], [1, 0]] }, // ~300 ft off — a real curve
+        ],
+      }
+      const g = buildTaxiGraph(bypass)
+      expect(g.size).toBe(3) // the bypass midpoint is preserved
+      expect(g.keyAt([0.5, 0.05])).not.toBeNull()
+    })
+
+    it('preserves the taxiway name when the shadow is the named side, not the direct edge', () => {
+      // The named taxiway is digitised as the A–M–B detour; an unnamed sliver is the direct edge.
+      const named: AirportSurface = {
+        ...toy,
+        features: [
+          { kind: 'taxiway', points: [[0, 0], [1, 0]] }, // unnamed direct
+          { kind: 'taxiway', points: [[0, 0], [0.5, 0.001], [1, 0]], ref: 'B7' }, // named shadow
+        ],
+      }
+      const g = buildTaxiGraph(named)
+      expect(g.size).toBe(2)
+      expect(g.refBetween(g.nearestNode([0, 0])!, g.nearestNode([1, 0])!)).toBe('B7') // name survives
+    })
+
+    it('does not collapse when the two coincident sides carry different names', () => {
+      const conflict: AirportSurface = {
+        ...toy,
+        features: [
+          { kind: 'taxiway', points: [[0, 0], [1, 0]], ref: 'A' },
+          { kind: 'taxiway', points: [[0, 0], [0.5, 0.001], [1, 0]], ref: 'B' }, // same pavement, other name
+        ],
+      }
+      const g = buildTaxiGraph(conflict)
+      expect(g.size).toBe(3) // left intact — a genuine ambiguity the audit should surface
+      expect(g.keyAt([0.5, 0.001])).not.toBeNull()
+    })
+  })
+
   it('reports the taxiway designator of an edge', () => {
     const named: AirportSurface = {
       ...toy,
