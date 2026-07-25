@@ -1623,39 +1623,43 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
 
   /**
    * One runway at a time (docs/atc-runway-crossing.md §6): having cleared the runway it was
-   * crossing, an aircraft whose onward route still crosses **another** runway is put back on hold
-   * short of it, needing a fresh crossing clearance. Edge-triggered — called only at the moment an
-   * aircraft clears a runway, not each tick — so the route scan below costs nothing in the common
-   * case. Never the aircraft's own runway (see {@link nextCrossedRunwayId}); a no-op on a
-   * single-runway field, so KSAN and KBUR's own-runway crossings are unchanged.
+   * crossing, an aircraft whose onward route reaches **another** runway is put back on hold short of
+   * it, needing a fresh clearance for that one. Two shapes: the route *ends on* the next runway (it
+   * is the departure runway, reached across another — KOAK's cross-28R-to-depart-28L), or it
+   * *crosses* the next to reach a destination beyond (cross both parallels to a South-terminal gate).
+   * Edge-triggered — called only at the moment an aircraft clears a runway, not each tick — so the
+   * route scan below costs nothing in the common case. A no-op on a single-runway field, so KSAN and
+   * KBUR's own-runway crossings are unchanged.
    */
   function maybeReholdAtNextRunway(ac: Internal): void {
     if (physicalRunwayCount <= 1) return // single-runway field: never a *second* runway to re-hold at
-    if (ac.held !== null || ac.controlledBy !== 'ground') return
+    if (ac.held !== null) return
     if (ac.airborne || ac.rollingOut || ac.departing || ac.lineUpWait || onRunwayNow(ac)) return
-    const next = nextCrossedRunwayId(ac)
-    // Re-hold only at a runway that is genuinely *separate* from the aircraft's own — not its own
-    // runway, and not one occupancy-coupled to it. The second clause is what keeps this to KOAK's
-    // independent parallels: at an intersecting field like KBUR, "crossing" the other runway is the
-    // shared intersection, which the occupancy coupling already gates — a separate re-hold there
-    // would make an arrival wait for the busy departure runway twice. `runwaysRelated` folds in the
-    // same-runway case too, so a single-runway field is a no-op.
-    if (next !== null && !runwaysRelated(targetRunwayId(ac), next, 'occupancy')) reholdAtRunway(ac)
-  }
-
-  /**
-   * The id of the runway the aircraft's remaining route first genuinely **crosses** — enters and
-   * continues to the far side — or null if the route only ends on/near a runway (a gate inside a
-   * guard band is a destination, not a crossing) or crosses none.
-   */
-  function nextCrossedRunwayId(ac: Internal): string | null {
-    if (!guard) return null
+    if (!guard) return
+    // The next runway the onward route reaches — crossed *or* ended on. `runwaysAlong` samples along
+    // the held split, so a thin-band crossing between two vertices still resolves.
     const remaining: Point[] = [[ac.x, ac.y], ...ac.path.slice(ac.leg + 1)]
     const { held } = splitRouteAtRunway(remaining, guard)
-    if (!held || held.length < 2) return null
-    const end = held[held.length - 1]
-    if (end === undefined || onRunway(end, guard)) return null
-    return runwaysAlong(held)[0] ?? null
+    if (!held || held.length < 2) return
+    const next = runwaysAlong(held)[0] ?? null
+    if (next === null) return
+    const stop = ac.goalPoint ?? held[held.length - 1]
+    if (stop !== undefined && runwayIdAt(stop, guard) === next) {
+      // The next runway is the *departure runway the route ends on*, reached across another (KOAK:
+      // cross 28R, then depart 28L). Hold short of it — the pre-line-up hold, exactly as the initial
+      // plan makes it — regardless of who is working the aircraft. Its own runway's Tower (which ran
+      // the crossing) keeps it and gives the line-up; Ground would hand it to Tower. Either way it
+      // must not taxi onto its departure runway unbidden, which is the bug this branch fixes.
+      reholdAtRunway(ac)
+      return
+    }
+    // Otherwise the route *crosses* the next runway to reach a destination beyond it (cross both
+    // parallels to a South-terminal gate). That re-hold is Ground's to make once a Tower-run crossing
+    // is handed back (resolveCrossingHandoff) — and never at a runway occupancy-coupled to the
+    // aircraft's own: an intersecting field (KBUR) already gates the shared intersection, so a second
+    // hold there would double it, and a single-runway field never reaches here at all.
+    if (ac.controlledBy !== 'ground') return
+    if (!runwaysRelated(targetRunwayId(ac), next, 'occupancy')) reholdAtRunway(ac)
   }
 
   /** What an aircraft on the runway is doing there, or null when it isn't on it. Ordered by

@@ -366,6 +366,64 @@ describe('taxi runway-crossings — one runway at a time, position-aware (docs/a
     expect(until(sim, () => A(sim, 'x').holdShort && A(sim, 'x').y > 0.23)).toBe(true)
     expect(runwayIdAt([A(sim, 'x').x, A(sim, 'x').y], guard)).toBeNull()
   })
+
+  // The sibling the "cross both parallels to a gate" case never exercised: a DEPARTURE that crosses
+  // one parallel (10L/28R) to reach the OTHER (10R/28L), its departure runway — goal *on* 28L, not
+  // beyond it. It must hold short of 10L/28R, cross, then hold short of 10R/28L (a takeoff hold, not
+  // drive onto it) awaiting line-up. Goal on the runway is why the crossed-runway re-hold missed it.
+  const departAcrossParallel = (): AircraftInit => ({
+    id: 'd',
+    callsign: 'SWA28',
+    type: 'B738',
+    wake: 'M',
+    // North of 10L/28R (y≈0.41) → across it → goal ON 10R/28L (centreline y≈0.23).
+    path: [[0.3, 0.5], [0.3, 0.45], [0.3, 0.35], [0.3, 0.28], [0.3, 0.23]],
+    targetSpeed: 15,
+    intent: 'departure',
+    goalPoint: [0.3, 0.23],
+  })
+
+  it('a departure crossing one parallel to depart the other re-holds short of its runway (Ground)', () => {
+    const sim = createGroundSim([departAcrossParallel()], {
+      graph,
+      guard,
+      runways: [KOAK_RUNWAYS['28R'], KOAK_RUNWAYS['28L']],
+      runwaysInteract,
+    })
+    expect(runwayIdAt(departAcrossParallel().goalPoint!, guard)).toBe('10R/28L') // goal really is on 28L
+
+    // Holds short of the first parallel (10L/28R), crosses on clearance.
+    expect(until(sim, () => A(sim, 'd').holdShort && A(sim, 'd').y > 0.41)).toBe(true)
+    expect(sim.dispatch({ type: 'crossRunway', aircraftId: 'd' }).ok).toBe(true)
+
+    // Comes back on hold short of its departure runway (10R/28L) — a takeoff hold, not on the runway.
+    expect(until(sim, () => A(sim, 'd').holdShort && A(sim, 'd').y < 0.41)).toBe(true)
+    expect(A(sim, 'd').onRunway).toBe(false)
+    expect(A(sim, 'd').y).toBeGreaterThan(0.23) // short of 10R/28L's centreline, not on it
+    expect(A(sim, 'd').holdingForTakeoff).toBe(true) // its departure runway now — hand to Tower next
+  })
+
+  it('the same crossing run by Tower holds it short of its departure runway, not onto it', () => {
+    // The reported bug, exactly: cleared across 28R by Tower, it drove straight onto 28L. Tower owns
+    // the departure runway, so it keeps the aircraft and holds it short for line-up — no Ground bounce.
+    const sim = createGroundSim([departAcrossParallel()], {
+      graph,
+      guard,
+      runways: [KOAK_RUNWAYS['28R'], KOAK_RUNWAYS['28L']],
+      runwaysInteract,
+    })
+    expect(until(sim, () => A(sim, 'd').holdShort && A(sim, 'd').y > 0.41)).toBe(true)
+    expect(sim.dispatch({ type: 'contactTower', aircraftId: 'd' }).ok).toBe(true)
+    expect(sim.dispatch({ type: 'crossRunway', aircraftId: 'd' }).ok).toBe(true)
+
+    // Never drives onto 10R/28L: it re-holds short of it, still Tower's, ready to line up.
+    expect(until(sim, () => A(sim, 'd').holdShort && A(sim, 'd').y < 0.41)).toBe(true)
+    expect(A(sim, 'd').onRunway).toBe(false)
+    expect(A(sim, 'd').controlledBy).toBe('tower')
+    expect(A(sim, 'd').holdingForTakeoff).toBe(true)
+    // And it stays short — stepping on does not carry it onto the runway without a fresh clearance.
+    expect(until(sim, () => A(sim, 'd').onRunway, 300)).toBe(false)
+  })
 })
 
 describe('line up and wait needs the runway in use (docs/atc-multi-runway.md §5)', () => {
