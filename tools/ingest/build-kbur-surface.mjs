@@ -112,6 +112,15 @@ const REF_PATCH = {
 const DROP = new Set([
   99871959, 99871960, 99871982, 99871991, // the four apron-loop taxiway ways
   1154611488, 8028996387, // the two holding_position markers on that apron
+
+  // A fillet triangle on taxiway B near the west connector (~[-0.087, 0.436]) — the worst *genuine*
+  // compound intersection the audit found once the clustering was fixed (docs/taxi-graph-audit.md).
+  // Taxiway B (way 99872110) runs A→S there; the west connector (way 311355306) meets B at A; and
+  // this way (311355307) is a short link from a point on that connector to S, closing a triangle
+  // A–P–S that renders as a diamond. Dropping it leaves P and S as pass-throughs (contracted away)
+  // and A as a single clean 3-way junction — the south turn just routes through A. Nothing
+  // disconnects: P stays on the connector, S stays on B. It is a corner-cut fillet, not connectivity.
+  311355307,
 ])
 
 // Charted hot spots (not in OSM). KBUR publishes hot spots on SW3HOTSPOT.PDF;
