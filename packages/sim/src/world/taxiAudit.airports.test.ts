@@ -14,7 +14,7 @@ import { auditAirport } from './taxiAuditReport'
 const BASELINE: Record<string, { airport: Airport; maxTotal: number; maxHigh: number }> = {
   KSAN: { airport: KSAN, maxTotal: 152, maxHigh: 66 },
   KBUR: { airport: KBUR, maxTotal: 178, maxHigh: 66 },
-  KOAK: { airport: KOAK, maxTotal: 172, maxHigh: 54 },
+  KOAK: { airport: KOAK, maxTotal: 145, maxHigh: 48 },
 }
 
 describe('per-airport taxi-graph audit baselines', () => {
@@ -25,6 +25,14 @@ describe('per-airport taxi-graph audit baselines', () => {
       expect(report.summary.high).toBeLessThanOrEqual(maxHigh)
     })
   }
+
+  it('every field is one connected component — no orphaned pavement', () => {
+    // KBUR's SE apron island and KOAK's six North Field taxilane islands are dropped; this locks
+    // the whole movement area reachable, so a future data change that re-islands a field fails here.
+    for (const { airport } of Object.values(BASELINE)) {
+      expect(auditAirport(airport).graph.components).toBe(1)
+    }
+  })
 
   it('the audit is deterministic — same field, same report', () => {
     const a = auditAirport(KBUR)

@@ -75,7 +75,7 @@ worse. Lower the number when you improve a graph. Current baselines:
 |---|---|---|
 | KSAN | 152 | 66 |
 | KBUR | 178 | 66 |
-| KOAK | 172 | 54 |
+| KOAK | 145 | 48 |
 
 (Totals include the `compound-intersection` characterisation findings — one per messy crossing —
 which are `medium`, so the high-severity ceiling is the one that reflects genuine defects. The
