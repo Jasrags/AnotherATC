@@ -29,7 +29,7 @@ curve without kinks).
 | `duplicate-edge` | redundancy | MED | more than one edge between the same node pair | keep one; drop the redundant paint |
 | `stub-edge` | redundancy | MED | a contracted edge < 25 ft long | collapse the stub — merge its endpoints |
 | `cusp` | intersections | HIGH | two edges leave a node < 30° apart — a spike / the star artifact | relocate or merge the node so edges leave along the real pavement |
-| `compound-intersection` | intersections | MED | ≥ 2 crossing nodes jammed within ~140 ft — the multi-node "diamond" a fillet ring digitizes | simplify the ring to a single crossing (keep the corner fillets as turn edges) |
+| `compound-intersection` | intersections | MED | ≥ 2 crossing nodes in a compact knot (cluster diameter ≤ 120 ft) — the multi-node "diamond" a fillet ring digitizes | simplify the ring to a single crossing (keep the corner fillets as turn edges) |
 | `tight-turn` | intersections | MED | 30–60° between edges at a node — sharper than an aircraft taxis | round the corner toward ≥ 60° |
 | `kink` | smoothness | MED/LOW | a sharp bend (> 40°) inside one edge's polyline | resample smooth, or split at a real junction |
 
@@ -73,9 +73,9 @@ worse. Lower the number when you improve a graph. Current baselines:
 
 | Field | total | high |
 |---|---|---|
-| KSAN | 138 | 66 |
-| KBUR | 180 | 69 |
-| KOAK | 183 | 57 |
+| KSAN | 154 | 66 |
+| KBUR | 185 | 69 |
+| KOAK | 180 | 57 |
 
 (Totals include the `compound-intersection` characterisation findings — one per messy crossing —
 which are `medium`, so the high-severity ceiling is the one that reflects genuine defects. The

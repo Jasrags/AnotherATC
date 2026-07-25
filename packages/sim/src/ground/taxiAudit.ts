@@ -32,10 +32,12 @@ const KINK_DEG = 40
 /** A degree-1 node this far from any known endpoint (runway end / stand) is a dangling stub, not a
  *  legitimate dead-end. Only checked when endpoints are supplied. */
 const DANGLE_FT = 120
-/** Crossing nodes (degree ≥ 3) within this of each other are one intersection. A clean crossing is a
- *  single such node; two or more jammed this close is a compound intersection — the multi-node
- *  "diamond" a fillet ring digitizes, where a chart shows one crossing. */
-const CLUSTER_RADIUS_FT = 140
+/** A compound intersection is a *compact* knot of crossing nodes: the cluster's own diameter (its
+ *  widest node-to-node span) must stay within this. A clean crossing is one node; a fillet ring
+ *  digitizes two or more within a few car-lengths. The bound is a diameter, not a link distance, so
+ *  the cluster cannot chain down a run of evenly-spaced connectors (which are a taxiway, not one
+ *  intersection) — that chaining was the first cut's mistake. */
+const CLUSTER_DIAMETER_FT = 120
 
 export type TaxiFindingKind =
   | 'near-duplicate-nodes'
@@ -371,30 +373,27 @@ function findDangling(topology: TaxiTopology, endpoints: Point[]): RawFinding[] 
  */
 function findCompoundIntersections(nodes: TopoNode[]): RawFinding[] {
   const crossings = nodes.filter((n) => n.degree >= 3)
-  const limit = nm(CLUSTER_RADIUS_FT)
-  const parent = new Map<string, string>(crossings.map((n) => [n.key, n.key]))
-  const find = (k: string): string => {
-    let r = k
-    while (parent.get(r) !== r) r = parent.get(r)!
-    while (parent.get(k) !== r) {
-      const next = parent.get(k)!
-      parent.set(k, r)
-      k = next
+  const limit = nm(CLUSTER_DIAMETER_FT)
+  // Complete-linkage: a crossing joins a cluster only if it is within the diameter of *every* member
+  // already in it, so the cluster stays compact (bounded diameter) and cannot chain along a taxiway.
+  // Greedy over the fixed node order — deterministic. O(n²), and n is a few hundred.
+  const assigned = new Set<string>()
+  const clusters: TopoNode[][] = []
+  for (const seed of crossings) {
+    if (assigned.has(seed.key)) continue
+    const cluster = [seed]
+    assigned.add(seed.key)
+    for (const n of crossings) {
+      if (assigned.has(n.key)) continue
+      if (cluster.every((m) => distNm(m.point, n.point) <= limit)) {
+        cluster.push(n)
+        assigned.add(n.key)
+      }
     }
-    return r
-  }
-  for (let i = 0; i < crossings.length; i += 1) {
-    for (let j = i + 1; j < crossings.length; j += 1) {
-      if (distNm(crossings[i]!.point, crossings[j]!.point) <= limit) parent.set(find(crossings[i]!.key), find(crossings[j]!.key))
-    }
-  }
-  const groups = new Map<string, TopoNode[]>()
-  for (const n of crossings) {
-    const r = find(n.key)
-    ;(groups.get(r) ?? groups.set(r, []).get(r)!).push(n)
+    clusters.push(cluster)
   }
   const out: RawFinding[] = []
-  for (const g of groups.values()) {
+  for (const g of clusters) {
     if (g.length < 2) continue // a lone crossing node is a clean intersection
     const anchor = g.reduce((lo, n) => (n.point[0] < lo.point[0] || (n.point[0] === lo.point[0] && n.point[1] < lo.point[1]) ? n : lo))
     const extent = Math.max(...g.flatMap((a) => g.map((b) => distNm(a.point, b.point))))
