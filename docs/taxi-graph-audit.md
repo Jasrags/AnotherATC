@@ -16,19 +16,30 @@ The audit reads the contracted `TaxiTopology` (decision nodes + geometry-preserv
 returns findings ranked worst-first, each with a **world coordinate to jump to** and a **suggested
 smoothing** (a suggestion — nothing is auto-applied; relocating a node is a data decision).
 
-| Kind | Severity | What it means | Suggested fix |
-|---|---|---|---|
-| `cusp` | HIGH | two edges leave a node < 30° apart — a spike / the star artifact | relocate or merge the node so edges leave along the real pavement |
-| `near-duplicate-nodes` | HIGH | two nodes < 15 ft apart — a routing ambiguity | merge to the midpoint |
-| `disconnected` | HIGH | an island unreachable from the main network (one finding per island) | connect it, or drop the orphaned pavement |
-| `tight-turn` | MED | 30–60° between edges at a node — sharper than an aircraft taxis | round the corner toward ≥ 60° |
-| `stub-edge` | MED | a contracted edge < 25 ft long | collapse the stub — merge its endpoints |
-| `duplicate-edge` | MED | more than one edge between the same node pair | keep one; drop the redundant paint |
-| `kink` | MED/LOW | a sharp bend (> 40°) inside one edge's polyline | resample smooth, or split at a real junction |
-| `dangling-node` | LOW | a dead-end far (> 120 ft) from any runway end or stand | connect or remove — anything routed to it strands |
+Every finding belongs to one of four **categories**, so the report reads as a whole-graph health
+check rather than a flat list: **connectivity** (is every bit of pavement reachable), **redundancy**
+(is any run drawn twice), **intersections** (are the crossings clean), **smoothness** (do the runs
+curve without kinks).
 
-Only the **sharpest** angle-finding is reported per node, and only **one** finding per disconnected
-island: a human fixes an intersection (or a component) as a unit, so that is the unit of the finding.
+| Kind | Category | Severity | What it means | Suggested fix |
+|---|---|---|---|---|
+| `disconnected` | connectivity | HIGH | an island unreachable from the main network (one finding per island) | connect it, or drop the orphaned pavement |
+| `dangling-node` | connectivity | LOW | a dead-end far (> 120 ft) from any runway end or stand | connect or remove — anything routed to it strands |
+| `near-duplicate-nodes` | redundancy | HIGH | two nodes < 15 ft apart — a routing ambiguity | merge to the midpoint |
+| `duplicate-edge` | redundancy | MED | more than one edge between the same node pair | keep one; drop the redundant paint |
+| `stub-edge` | redundancy | MED | a contracted edge < 25 ft long | collapse the stub — merge its endpoints |
+| `cusp` | intersections | HIGH | two edges leave a node < 30° apart — a spike / the star artifact | relocate or merge the node so edges leave along the real pavement |
+| `compound-intersection` | intersections | MED | ≥ 2 crossing nodes jammed within ~140 ft — the multi-node "diamond" a fillet ring digitizes | simplify the ring to a single crossing (keep the corner fillets as turn edges) |
+| `tight-turn` | intersections | MED | 30–60° between edges at a node — sharper than an aircraft taxis | round the corner toward ≥ 60° |
+| `kink` | smoothness | MED/LOW | a sharp bend (> 40°) inside one edge's polyline | resample smooth, or split at a real junction |
+
+Only the **sharpest** angle-finding is reported per node, **one** finding per disconnected island,
+and **one** per compound-intersection cluster: a human fixes an intersection (or a component) as a
+unit, so that is the unit of the finding.
+
+The report opens with the graph's shape (node / edge / component counts) and a per-category rollup,
+then lists findings worst-first under their category heading — a holistic pass over the whole field
+in one run, `make audit-taxi AIRPORT=<ICAO>`.
 
 The thresholds are geometry-quality constants (feet / degrees), not airport data — a 20° cusp is a
 cusp at every field — so they live in the engine (`packages/sim/src/ground/taxiAudit.ts`), consistent
@@ -62,9 +73,14 @@ worse. Lower the number when you improve a graph. Current baselines:
 
 | Field | total | high |
 |---|---|---|
-| KSAN | 123 | 67 |
-| KBUR | 167 | 77 |
-| KOAK | 174 | 70 |
+| KSAN | 138 | 66 |
+| KBUR | 180 | 69 |
+| KOAK | 183 | 57 |
+
+(Totals include the `compound-intersection` characterisation findings — one per messy crossing —
+which are `medium`, so the high-severity ceiling is the one that reflects genuine defects. The
+island drop and the collinear-detour collapse both already show up as lower `high` counts than the
+first cut.)
 
 These are large because the graphs really are rough — that is the point. The audit does not fix the
 data; it tells you where to look and in what order.

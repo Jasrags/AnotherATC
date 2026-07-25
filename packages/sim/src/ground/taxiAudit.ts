@@ -32,6 +32,10 @@ const KINK_DEG = 40
 /** A degree-1 node this far from any known endpoint (runway end / stand) is a dangling stub, not a
  *  legitimate dead-end. Only checked when endpoints are supplied. */
 const DANGLE_FT = 120
+/** Crossing nodes (degree ≥ 3) within this of each other are one intersection. A clean crossing is a
+ *  single such node; two or more jammed this close is a compound intersection — the multi-node
+ *  "diamond" a fillet ring digitizes, where a chart shows one crossing. */
+const CLUSTER_RADIUS_FT = 140
 
 export type TaxiFindingKind =
   | 'near-duplicate-nodes'
@@ -42,11 +46,32 @@ export type TaxiFindingKind =
   | 'duplicate-edge'
   | 'disconnected'
   | 'dangling-node'
+  | 'compound-intersection'
+
+/** The four things a graph can be wrong about, so a holistic audit reads as a health report rather
+ *  than a flat list: is it all reachable, is any pavement drawn twice, are the crossings clean, do
+ *  the runs curve smoothly. Every finding kind belongs to exactly one. */
+export type TaxiCategory = 'connectivity' | 'redundancy' | 'intersections' | 'smoothness'
+
+export const CATEGORY_OF: Record<TaxiFindingKind, TaxiCategory> = {
+  disconnected: 'connectivity',
+  'dangling-node': 'connectivity',
+  'duplicate-edge': 'redundancy',
+  'stub-edge': 'redundancy',
+  'near-duplicate-nodes': 'redundancy',
+  'compound-intersection': 'intersections',
+  cusp: 'intersections',
+  'tight-turn': 'intersections',
+  kink: 'smoothness',
+}
+
+export const TAXI_CATEGORIES: readonly TaxiCategory[] = ['connectivity', 'redundancy', 'intersections', 'smoothness']
 
 export type TaxiSeverity = 'high' | 'medium' | 'low'
 
 export interface TaxiFinding {
   kind: TaxiFindingKind
+  category: TaxiCategory
   severity: TaxiSeverity
   /** Where to look — the world point the problem centres on. */
   at: Point
@@ -63,7 +88,15 @@ export interface TaxiFinding {
 export interface TaxiAuditReport {
   findings: TaxiFinding[]
   summary: { high: number; medium: number; low: number; total: number }
+  /** Whole-graph shape, so the report opens with what it is auditing, not just what is wrong. */
+  graph: { nodes: number; edges: number; components: number }
+  /** Finding counts rolled up by category — the holistic health line. */
+  byCategory: Record<TaxiCategory, number>
 }
+
+/** A finding before its category is stamped on — the check functions build these; the category is
+ *  derived once, centrally, from the kind. */
+type RawFinding = Omit<TaxiFinding, 'category'>
 
 const SEVERITY_RANK: Record<TaxiSeverity, number> = { high: 0, medium: 1, low: 2 }
 
@@ -111,8 +144,8 @@ function refLabel(...edges: (TopoEdge | undefined)[]): string | undefined {
 }
 
 /** Near-duplicate nodes: a routing ambiguity waiting to happen (and the usual seed of a stub). */
-function findNearDuplicateNodes(nodes: TopoNode[]): TaxiFinding[] {
-  const out: TaxiFinding[] = []
+function findNearDuplicateNodes(nodes: TopoNode[]): RawFinding[] {
+  const out: RawFinding[] = []
   const limit = nm(NEAR_DUP_FT)
   for (let i = 0; i < nodes.length; i += 1) {
     for (let j = i + 1; j < nodes.length; j += 1) {
@@ -134,8 +167,8 @@ function findNearDuplicateNodes(nodes: TopoNode[]): TaxiFinding[] {
 }
 
 /** Stub edges and duplicate edges between the same node pair. */
-function findEdgeDefects(edges: TopoEdge[]): TaxiFinding[] {
-  const out: TaxiFinding[] = []
+function findEdgeDefects(edges: TopoEdge[]): RawFinding[] {
+  const out: RawFinding[] = []
   const stubLimit = nm(STUB_FT)
   // Track a representative edge (the first seen) alongside the count for each node pair, so a
   // duplicate-edge finding anchors on that real edge's geometry rather than a re-derived lookup.
@@ -178,8 +211,8 @@ function findEdgeDefects(edges: TopoEdge[]): TaxiFinding[] {
 /** Cusps and tight turns where edges meet a node — the angle between each pair of leaving
  *  directions. A near-zero angle is a spike (the star artifact); a small-but-nonzero angle is a
  *  turn sharper than an aircraft taxis. */
-function findNodeAngles(topology: TaxiTopology): TaxiFinding[] {
-  const out: TaxiFinding[] = []
+function findNodeAngles(topology: TaxiTopology): RawFinding[] {
+  const out: RawFinding[] = []
   const incident = new Map<string, TopoEdge[]>()
   for (const e of topology.edges) {
     if (e.a === e.b) continue
@@ -229,8 +262,8 @@ function findNodeAngles(topology: TaxiTopology): TaxiFinding[] {
 
 /** Kinks inside a single edge's polyline — a sharp direction change at an interior vertex, i.e. a
  *  corner in what should be one smooth run (the inward-bulging intersection fillets show up here). */
-function findKinks(edges: TopoEdge[]): TaxiFinding[] {
-  const out: TaxiFinding[] = []
+function findKinks(edges: TopoEdge[]): RawFinding[] {
+  const out: RawFinding[] = []
   for (const e of edges) {
     const g = e.geom
     for (let i = 1; i < g.length - 1; i += 1) {
@@ -255,7 +288,7 @@ function findKinks(edges: TopoEdge[]): TaxiFinding[] {
 }
 
 /** Connectivity: any node not reachable from the largest component is a disconnected island. */
-function findDisconnected(topology: TaxiTopology): TaxiFinding[] {
+function findDisconnected(topology: TaxiTopology): RawFinding[] {
   const adj = new Map<string, string[]>()
   for (const n of topology.nodes) adj.set(n.key, [])
   for (const e of topology.edges) {
@@ -306,10 +339,10 @@ function findDisconnected(topology: TaxiTopology): TaxiFinding[] {
 
 /** Degree-1 nodes far from any legitimate endpoint (runway end / stand): dangling stubs. Skipped
  *  entirely when no endpoints are supplied — without them every gate and runway end looks dangling. */
-function findDangling(topology: TaxiTopology, endpoints: Point[]): TaxiFinding[] {
+function findDangling(topology: TaxiTopology, endpoints: Point[]): RawFinding[] {
   if (endpoints.length === 0) return []
   const limit = nm(DANGLE_FT)
-  const out: TaxiFinding[] = []
+  const out: RawFinding[] = []
   for (const n of topology.nodes) {
     if (n.degree !== 1) continue
     const nearest = Math.min(...endpoints.map((p) => distNm(n.point, p)))
@@ -327,6 +360,56 @@ function findDangling(topology: TaxiTopology, endpoints: Point[]): TaxiFinding[]
   return out
 }
 
+/**
+ * Compound intersections — the multi-node "diamond". A clean crossing is one decision node; a
+ * fillet-ring digitization packs two or more crossing nodes (degree ≥ 3) within a few car-lengths,
+ * which renders as the concave star and gives routing several near-identical ways through one
+ * junction. Single-linkage clusters the crossing nodes within {@link CLUSTER_RADIUS_FT}; a cluster
+ * of two or more is one finding, anchored at its lowest-coordinate node and ranked by node count.
+ * This is characterisation, not a mechanical fix (simplifying a crossing to a single node is a data
+ * decision), so it is `medium`.
+ */
+function findCompoundIntersections(nodes: TopoNode[]): RawFinding[] {
+  const crossings = nodes.filter((n) => n.degree >= 3)
+  const limit = nm(CLUSTER_RADIUS_FT)
+  const parent = new Map<string, string>(crossings.map((n) => [n.key, n.key]))
+  const find = (k: string): string => {
+    let r = k
+    while (parent.get(r) !== r) r = parent.get(r)!
+    while (parent.get(k) !== r) {
+      const next = parent.get(k)!
+      parent.set(k, r)
+      k = next
+    }
+    return r
+  }
+  for (let i = 0; i < crossings.length; i += 1) {
+    for (let j = i + 1; j < crossings.length; j += 1) {
+      if (distNm(crossings[i]!.point, crossings[j]!.point) <= limit) parent.set(find(crossings[i]!.key), find(crossings[j]!.key))
+    }
+  }
+  const groups = new Map<string, TopoNode[]>()
+  for (const n of crossings) {
+    const r = find(n.key)
+    ;(groups.get(r) ?? groups.set(r, []).get(r)!).push(n)
+  }
+  const out: RawFinding[] = []
+  for (const g of groups.values()) {
+    if (g.length < 2) continue // a lone crossing node is a clean intersection
+    const anchor = g.reduce((lo, n) => (n.point[0] < lo.point[0] || (n.point[0] === lo.point[0] && n.point[1] < lo.point[1]) ? n : lo))
+    const extent = Math.max(...g.flatMap((a) => g.map((b) => distNm(a.point, b.point))))
+    out.push({
+      kind: 'compound-intersection',
+      severity: 'medium',
+      at: anchor.point,
+      detail: `${g.length} crossing nodes within ${feet(extent).toFixed(0)} ft — a fillet-ring "diamond" where a chart shows one crossing`,
+      suggestion: 'simplify the ring to a single crossing node (merge the crossings; keep the corner fillets as turn edges)',
+      metric: g.length,
+    })
+  }
+  return out
+}
+
 export interface TaxiAuditOptions {
   /** Legitimate dead-end points (runway ends + stand stop marks). Enables the dangling-node check;
    *  without them that check is skipped. */
@@ -338,14 +421,16 @@ export interface TaxiAuditOptions {
  * measured metric). Pure and deterministic — same topology in, same report out.
  */
 export function auditTaxiGraph(topology: TaxiTopology, opts: TaxiAuditOptions = {}): TaxiAuditReport {
-  const findings = [
+  const raw: RawFinding[] = [
     ...findNearDuplicateNodes(topology.nodes),
     ...findEdgeDefects(topology.edges),
     ...findNodeAngles(topology),
     ...findKinks(topology.edges),
     ...findDisconnected(topology),
     ...findDangling(topology, opts.endpoints ?? []),
+    ...findCompoundIntersections(topology.nodes),
   ]
+  const findings: TaxiFinding[] = raw.map((f) => ({ ...f, category: CATEGORY_OF[f.kind] }))
   // Worst first: severity, then the sharper/closer/longer offender within a severity. Kind and
   // location break ties so the order is total and the report is byte-stable across runs.
   findings.sort(
@@ -358,13 +443,39 @@ export function auditTaxiGraph(topology: TaxiTopology, opts: TaxiAuditOptions = 
   )
   const summary = { high: 0, medium: 0, low: 0, total: findings.length }
   for (const f of findings) summary[f.severity] += 1
-  return { findings, summary }
+  const byCategory: Record<TaxiCategory, number> = { connectivity: 0, redundancy: 0, intersections: 0, smoothness: 0 }
+  for (const f of findings) byCategory[f.category] += 1
+  return { findings, summary, graph: graphShape(topology), byCategory }
+}
+
+/** Node/edge count and connected-component count — the whole-graph shape the report opens with. */
+function graphShape(topology: TaxiTopology): { nodes: number; edges: number; components: number } {
+  const adj = new Map<string, string[]>()
+  for (const n of topology.nodes) adj.set(n.key, [])
+  for (const e of topology.edges) {
+    if (e.a === e.b) continue
+    adj.get(e.a)?.push(e.b)
+    adj.get(e.b)?.push(e.a)
+  }
+  const seen = new Set<string>()
+  let components = 0
+  for (const n of topology.nodes) {
+    if (seen.has(n.key)) continue
+    components += 1
+    const stack = [n.key]
+    seen.add(n.key)
+    while (stack.length) {
+      const k = stack.pop()!
+      for (const nb of adj.get(k) ?? []) if (!seen.has(nb)) { seen.add(nb); stack.push(nb) }
+    }
+  }
+  return { nodes: topology.nodes.length, edges: topology.edges.length, components }
 }
 
 /** Rank an angle-based finding by how sharp it is (smaller angle = worse), and a size-based one by
  *  how extreme (smaller distance / shorter stub = worse; kinks: sharper = worse). Normalised so the
  *  sort is "worst first" regardless of whether the metric is an angle or a length. */
-function severityMetric(f: TaxiFinding): number {
+function severityMetric(f: RawFinding): number {
   switch (f.kind) {
     case 'cusp':
     case 'tight-turn':
@@ -375,6 +486,6 @@ function severityMetric(f: TaxiFinding): number {
     case 'stub-edge':
       return f.metric // closer / shorter first
     default:
-      return -f.metric // bigger island / farther dangle first
+      return -f.metric // bigger island / farther dangle / bigger cluster first
   }
 }

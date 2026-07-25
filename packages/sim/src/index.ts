@@ -69,8 +69,15 @@ export { buildStands, findStand } from './ground/stands'
 export type { Stand } from './ground/stands'
 export { buildTaxiGraph } from './ground/taxiGraph'
 export type { TaxiGraph, TaxiTopology, TopoNode, TopoEdge } from './ground/taxiGraph'
-export { auditTaxiGraph } from './ground/taxiAudit'
-export type { TaxiFinding, TaxiFindingKind, TaxiSeverity, TaxiAuditReport, TaxiAuditOptions } from './ground/taxiAudit'
+export { auditTaxiGraph, CATEGORY_OF, TAXI_CATEGORIES } from './ground/taxiAudit'
+export type {
+  TaxiFinding,
+  TaxiFindingKind,
+  TaxiCategory,
+  TaxiSeverity,
+  TaxiAuditReport,
+  TaxiAuditOptions,
+} from './ground/taxiAudit'
 export { auditAirport, formatReport } from './world/taxiAuditReport'
 export { buildRunwayGuard } from './ground/runwayGuard'
 export { buildRunwayExits, buildRunwayIntersections, chooseExit } from './ground/runwayExits'

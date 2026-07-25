@@ -23,13 +23,17 @@ by hand — run the tool.
    (Equivalently: `AUDIT_AIRPORT=<ICAO> fnm exec --using=22 -- pnpm --filter @anotheratc/sim exec
    vitest run src/world/taxiAuditCli.test.ts --disable-console-intercept`.)
 
-2. **Summarize** the header line for each field — `N findings: H high · M med · L low` — and the
-   spread by kind. Lead with what dominates (usually `cusp` spikes and `disconnected` islands).
+2. **Read the holistic header.** The report opens with the whole-graph shape (`nodes · edges ·
+   components`) and a rollup across the four categories — **connectivity** (reachable?),
+   **redundancy** (drawn twice?), **intersections** (clean crossings?), **smoothness** (kinks?).
+   Lead with the graph shape (a `✗` on components is a split graph) and whichever category dominates
+   — usually `intersections` (`cusp` spikes + `compound-intersection` "diamonds").
 
-3. **Surface the worst spots.** The report is ranked worst-first with a world coordinate on each
-   finding. Offer to walk the top HIGH findings — cusps (spikes), near-duplicate nodes, and any
-   disconnected island (which strands whatever routes into it). Each finding carries a concrete
-   suggested smoothing.
+3. **Surface the worst spots, by category.** Findings are grouped under their category heading and
+   ranked worst-first, each with a world coordinate and a concrete suggested fix. Offer to walk the
+   worst per category: any `disconnected` island (connectivity — strands whatever routes in), the
+   `compound-intersection` clusters and sharpest `cusp`s (intersections), `duplicate-edge`s
+   (redundancy). One field, one pass — no going intersection by intersection.
 
 4. **Fixing is a data edit, not automatic.** Findings point at the OSM-derived surface data. A fix
    (merge two nodes, drop doubled paint, re-digitize a corner) is applied to the field's surface /

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { auditTaxiGraph } from './taxiAudit'
+import { auditTaxiGraph, CATEGORY_OF, TAXI_CATEGORIES } from './taxiAudit'
 import type { TaxiTopology, TopoEdge, TopoNode } from './taxiGraph'
 import type { Point } from '../world/types'
 
@@ -140,5 +140,45 @@ describe('taxi-graph geometry audit (taxiAudit)', () => {
     expect(first.findings).toEqual(second.findings) // deterministic
     expect(first.findings[0]!.severity).toBe('high') // the cusp outranks the tight turn
     expect(first.summary.total).toBe(first.findings.length)
+  })
+
+  describe('compound intersections (the fillet-ring "diamond")', () => {
+    it('groups two crossing nodes jammed close together into one finding', () => {
+      // Two degree-3 crossings ~60 ft apart — a compound intersection, not two clean ones.
+      const c1: Point = [0, 0]
+      const c2: Point = [10 * FT, 0] // 10 ft (well inside the cluster radius)
+      const topology: TaxiTopology = {
+        nodes: [node('c1', c1, 3), node('c2', c2, 3), node('n', [0, 0.3], 1), node('s', [10 * FT, -0.3], 1), node('e', [0.3, 0], 1)],
+        edges: [edge('c1', 'c2', [c1, c2]), edge('c1', 'n', [c1, [0, 0.3]]), edge('c2', 's', [c2, [10 * FT, -0.3]]), edge('c2', 'e', [c2, [0.3, 0]])],
+      }
+      const comp = auditTaxiGraph(topology).findings.find((f) => f.kind === 'compound-intersection')!
+      expect(comp).toBeTruthy()
+      expect(comp.category).toBe('intersections')
+      expect(comp.metric).toBe(2) // two crossing nodes in the ring
+    })
+
+    it('does not flag a lone crossing node (a clean intersection)', () => {
+      const c: Point = [0, 0]
+      const topology: TaxiTopology = {
+        nodes: [node('c', c, 4), node('e', [1, 0], 1), node('w', [-1, 0], 1), node('n', [0, 1], 1), node('s', [0, -1], 1)],
+        edges: [edge('c', 'e', [c, [1, 0]]), edge('c', 'w', [c, [-1, 0]]), edge('c', 'n', [c, [0, 1]]), edge('c', 's', [c, [0, -1]])],
+      }
+      expect(auditTaxiGraph(topology).findings.some((f) => f.kind === 'compound-intersection')).toBe(false)
+    })
+  })
+
+  it('reports whole-graph shape and a category rollup that accounts for every finding', () => {
+    const c: Point = [0, 0]
+    const topology: TaxiTopology = {
+      nodes: [node('c', c, 3), node('a', [1, 0], 1), node('b', [1, 0.02], 1), node('d', [1, 1], 1)],
+      edges: [edge('c', 'a', [c, [1, 0]]), edge('c', 'b', [c, [1, 0.02]]), edge('c', 'd', [c, [1, 1]])],
+    }
+    const r = auditTaxiGraph(topology)
+    expect(r.graph.nodes).toBe(4)
+    expect(r.graph.edges).toBe(3)
+    expect(r.graph.components).toBe(1)
+    // Every finding carries the category its kind maps to, and the rollup sums to the total.
+    expect(r.findings.every((f) => f.category === CATEGORY_OF[f.kind])).toBe(true)
+    expect(TAXI_CATEGORIES.reduce((sum, c2) => sum + r.byCategory[c2], 0)).toBe(r.summary.total)
   })
 })
