@@ -155,6 +155,71 @@ describe('Tower clears the crossing', () => {
   })
 })
 
+// Two parallel runways — the geometry that trips up a goal-based "is this a takeoff?" test. A
+// departure off RWY_B must cross RWY_A to reach it, so while it holds short of RWY_A its *goal*
+// sits on a runway (RWY_B) even though the runway it is holding short of is one it only crosses.
+// This is KOAK: cross 28R to depart 28L (see the multi-runway NOTE in sim.ts).
+const twoRunwaySurface: AirportSurface = {
+  icao: 'TST2',
+  name: 'Two Runway Test',
+  ref: { lat: 0, lon: 0, elevationFt: 0 },
+  units: 'nm',
+  source: 'synthetic',
+  bounds: { minX: -0.5, minY: -1.5, maxX: 2, maxY: 0.5 },
+  features: [
+    { kind: 'runway', points: [[0, 0], [2, 0]] }, // RWY_A — the one crossed
+    { kind: 'runway', points: [[0, -1], [2, -1]] }, // RWY_B — the departure runway (goal sits here)
+  ],
+}
+const guard2 = buildRunwayGuard(twoRunwaySurface)
+
+/** A departure that crosses RWY_A to reach a goal *on* RWY_B — cross one runway to depart another. */
+function crossesToDepart(id: string): AircraftInit {
+  return {
+    id,
+    callsign: id,
+    type: 'B738',
+    wake: 'M',
+    // North of RWY_A → across RWY_A (y=0) → down to a goal on RWY_B (y=-1).
+    path: [[1, 0.15], [1, 0.1], [1, -0.9], [1, -1]],
+    targetSpeed: 15,
+    intent: 'departure',
+    goalPoint: [1, -1],
+  }
+}
+
+describe('crossing one runway to depart another (multi-runway)', () => {
+  it('holding short of the crossed runway is a crossing, not a takeoff hold', () => {
+    // Regression: `holdingForTakeoff` keyed off the goal sitting on *a* runway, so a departure
+    // holding short of the runway it crosses (goal on the far runway) read as a takeoff hold —
+    // Tower then offered line-up/takeoff on a runway the aircraft has no business using, and no
+    // "cross runway". The held route ends short of the crossed runway, which is the tell.
+    const sim = createGroundSim([crossesToDepart('dep')], { guard: guard2 })
+    atHoldShort(sim, 'dep')
+    expect(A(sim, 'dep').holdingForTakeoff).toBe(false)
+  })
+
+  it('hands off to Tower and clears across, same as any transit', () => {
+    const sim = createGroundSim([crossesToDepart('dep')], { guard: guard2 })
+    atHoldShort(sim, 'dep')
+    expect(sim.dispatch({ type: 'contactTower', aircraftId: 'dep' }).ok).toBe(true)
+    expect(A(sim, 'dep').controlledBy).toBe('tower')
+    expect(sim.dispatch({ type: 'crossRunway', aircraftId: 'dep' }).ok).toBe(true)
+    expect(until(sim, () => A(sim, 'dep').onRunway)).toBe(true)
+  })
+
+  it('refuses line-up-and-wait on a runway it only crosses', () => {
+    // The sibling guard has the same multi-runway blind spot: the goal is on a runway, so a naive
+    // "goal on a runway → may line up" would drive it onto the crossed runway unaligned.
+    const sim = createGroundSim([crossesToDepart('dep')], { guard: guard2 })
+    atHoldShort(sim, 'dep')
+    sim.dispatch({ type: 'contactTower', aircraftId: 'dep' })
+    const r = sim.dispatch({ type: 'lineUpAndWait', aircraftId: 'dep' })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.reason).toMatch(/cross/i)
+  })
+})
+
 describe('Tower → Ground once the crossing is complete', () => {
   const crossing = (): ReturnType<typeof createGroundSim> => {
     const sim = createGroundSim([transit('x')], { guard })

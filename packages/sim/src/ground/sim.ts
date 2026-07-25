@@ -1255,6 +1255,11 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
   function holdingForTakeoff(ac: Internal): boolean {
     if (!ac.holdShort || ac.intent !== 'departure') return false
     if (!guard) return true // no runway model → no crossing distinction
+    // Holding short to *cross* is never a takeoff hold — not even when the ultimate goal is a
+    // further runway (KOAK: cross 28R to depart 28L). The goal sits on a runway either way, so the
+    // goal cannot tell them apart; the held route's endpoint can (a takeoff hold ends *on* the
+    // runway, a crossing ends short of it). This is the multi-runway fix the NOTE below asks for.
+    if (heldRouteCrosses(ac)) return false
     return ac.goalPoint !== null && onRunway(ac.goalPoint, guard)
   }
 
@@ -1493,21 +1498,37 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
   }
 
   /**
-   * Whether this aircraft is holding short in order to **cross** — its route continues to the
-   * far side — rather than to depart from the runway it is holding at.
+   * Whether this aircraft is holding short in order to **cross** — its route continues past the
+   * runway it is holding at — rather than to depart from that runway.
    *
-   * The discriminator is where the held portion *ends*. A transit's ends off the pavement; a
-   * departure cleared to the runway (or to an intersection on it) ends on it, and "crossing"
-   * such an aircraft would drive it onto the runway and park it there unaligned with no takeoff
-   * clearance — a runway incursion issued by the controller.
+   * The discriminator is whether the held portion ends *off the runway it is holding short of*. A
+   * transit's route continues past it; a departure cleared to that runway ends on it, and
+   * "crossing" such an aircraft would drive it onto the runway and park it there unaligned with no
+   * takeoff clearance — a runway incursion issued by the controller.
+   *
+   * The runway it holds short of is the *first* one the held route enters, not just any runway:
+   * where a departure crosses one runway to reach another (KOAK — cross 28R to depart 28L), the
+   * held route ends on the far runway (28L). That is still a crossing of the near one (28R) — the
+   * test that mattered is "does it end on the runway it's holding at", which the endpoint's runway
+   * answers, not "does it end off all runways".
    */
   function heldRouteCrosses(ac: Internal): boolean {
     if (!ac.held || ac.held.length < 2) return false
     // No runway model → no runways, so nothing is a crossing. (`plan` never splits a route
     // without a guard either, so this branch is belt and braces.)
     if (!guard) return false
-    const end = ac.held[ac.held.length - 1]
-    return end !== undefined && !onRunway(end, guard)
+    // The runway being held short of: the first the held route meets. `runwaysAlong` samples along
+    // each segment, so a route that crosses the thin runway band between two vertices — with neither
+    // vertex inside it — still resolves the near runway (a vertex-only scan would miss it).
+    const nearRunway = runwaysAlong(ac.held)[0] ?? null
+    if (nearRunway === null) return false // never reaches a runway → not held short of one
+    // Where it comes to rest — its goal, not the end of the held polyline, which can run a point or
+    // two past where it stops. A line-up/takeoff stops *on* the runway it holds at; a crossing
+    // stops off it, possibly on a *different* runway further along (cross 28R to depart 28L). So the
+    // discriminator is the runway under the stop point, compared with the near one.
+    const stop = ac.goalPoint ?? ac.held[ac.held.length - 1]
+    if (stop === undefined) return false
+    return runwayIdAt(stop, guard) !== nearRunway
   }
 
   /**
@@ -2890,12 +2911,10 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         // transcript is the whole game (see `maybeMishear`). It is also not a gate on a
         // crossing: a transit is coming straight back, and nothing is about to look for it on
         // radar. "Say again" is the fix, and the delay is the price of not having noticed.
-        // NOTE (multi-runway): `holdingForTakeoff` keys off the *goal* sitting on a runway,
-        // while its sibling `heldRouteCrosses` keys off the held route. On a single-runway
-        // field the two cannot disagree. On a field where a departure crosses one runway to
-        // reach another, an aircraft holding short of the *crossing* would still answer "yes"
-        // here — gating a crossing this deliberately exempts. Fix by deriving it from the held
-        // route's endpoint, with the rest of the multi-runway work (docs/adding-an-airport.md).
+        // A crossing deliberately exempts this squawk check — a transit is coming straight back,
+        // and nothing is about to look for it on radar. `holdingForTakeoff` now excludes crossings
+        // (it returns false once `heldRouteCrosses` is true), so a departure crossing one runway to
+        // reach another — KOAK's cross-28R-to-depart-28L — is exempted here too, as it should be.
         if (squawkUnverified(ac) && holdingForTakeoff(ac))
           return refused('verify transponder code — the read-back was never checked')
         ac.controlledBy = 'tower'
@@ -2907,7 +2926,10 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
         if (ac.controlledBy !== 'tower') return refused('not on tower frequency — hand off to tower first')
         if (ac.intent !== 'departure') return refused('only departures line up and wait')
         if (!ac.holdShort) return refused('not holding short of the runway')
-        if (guard && (!ac.goalPoint || !onRunway(ac.goalPoint, guard)))
+        // A crossing is never a line-up, even when the goal is a further runway (KOAK: cross 28R to
+        // depart 28L). `heldRouteCrosses` catches that case, which the goal-on-a-runway test alone
+        // misses — the same multi-runway blind spot fixed in `holdingForTakeoff`.
+        if (guard && (heldRouteCrosses(ac) || !ac.goalPoint || !onRunway(ac.goalPoint, guard)))
           return refused('route crosses the runway — clear it to cross, not to line up')
         const cannotRoll = takeoffBlocked(ac)
         if (cannotRoll) return refused(cannotRoll)
