@@ -2274,6 +2274,18 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
   }
 
   /**
+   * A departure's runway is wherever it is going, so taxiing it onto a runway makes *that* its
+   * departure point — retarget `goalPoint` to match. `targetRunwayId` reads the goal first, so
+   * without this a departure taxied to a second runway keeps deciding its runway from the old goal:
+   * it is refused a line-up on the runway it is physically at, and its hold-short lands by the wrong
+   * one (the DEV05 report). A departure sent to *cross* a runway has a destination beyond it — not
+   * on the pavement — so its goal is untouched; an arrival's goal is a gate and is never a runway.
+   */
+  function retargetDepartureGoal(ac: Internal, dest: Point): void {
+    if (ac.intent === 'departure' && guard && onRunway(dest, guard)) ac.goalPoint = dest
+  }
+
+  /**
    * The aircraft physically on a stand right now, if any: parked on the mark, whether that is a
    * departure yet to push back or an arrival still dwelling. This is what makes a stand a
    * resource rather than a label — occupancy used to be an emergent property of "no two fleet
@@ -2648,18 +2660,19 @@ export function createGroundSim(inits: readonly AircraftInit[], opts: GroundSimO
     if (ac.airborne && GROUND_ONLY.has(command.type)) return refused('aircraft is airborne')
     switch (command.type) {
       case 'taxiTo':
-        return routeTo(ac, command.dest, command.exact ?? false)
-          ? ACCEPTED
-          : refused('no taxi route to that point')
+        if (!routeTo(ac, command.dest, command.exact ?? false)) return refused('no taxi route to that point')
+        retargetDepartureGoal(ac, command.dest)
+        return ACCEPTED
       case 'taxiToGoal':
         // Append the exact goal so departures hold short at the runway and
         // arrivals park at the stand (rather than stopping at the nearest node).
         if (!ac.goalPoint) return refused('aircraft has no assigned goal')
         return routeToOwnGoal(ac) ? ACCEPTED : refused('no taxi route to the goal')
       case 'taxiVia':
-        return routeVia(ac, command.taxiways, command.dest, command.exact ?? false)
-          ? ACCEPTED
-          : refused('no taxi route via those taxiways')
+        if (!routeVia(ac, command.taxiways, command.dest, command.exact ?? false))
+          return refused('no taxi route via those taxiways')
+        retargetDepartureGoal(ac, command.dest)
+        return ACCEPTED
       case 'taxiViaGoal':
         if (!ac.goalPoint) return refused('aircraft has no assigned goal')
         return routeVia(ac, command.taxiways, ac.goalPoint, true)
