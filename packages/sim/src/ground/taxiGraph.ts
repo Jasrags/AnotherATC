@@ -458,6 +458,98 @@ export function buildTaxiGraph(surface: AirportSurface): TaxiGraph {
     return { nodes: topoNodes, edges }
   }
 
+  // Collapse a connector's redundant second fillet. A connector that meets a taxiway is sometimes
+  // digitized with a *second* corner-cut fillet to that taxiway, closing a small triangle — three
+  // junctions X, Y, Z where the Y–Z side is the taxiway and X reaches it via two unnamed fillets
+  // X–Y and X–Z. Both fillets tie X to the same taxiway, so one is redundant; the loop is the
+  // "diamond" the taxi audit flags (docs/taxi-graph-audit.md). Drop the redundant fillet: X then
+  // routes to the taxiway through the kept one, the triangle becomes a single clean junction, and
+  // both turn directions survive (through that junction). Fires only on the exact pattern — a
+  // compact triangle (every side under a fillet's length) of three degree-3 junctions with exactly
+  // one named (taxiway) side and two unnamed (fillet) sides — so a real routing loop or an apron
+  // ring (no named taxiway side, or a node carrying other arms) is left untouched. The kept fillet
+  // is the one whose line best continues X's own arm, so the connector runs straight into the
+  // taxiway. Runs once, from the pre-collapse topology; overlapping triangles are guarded by `used`.
+  {
+    const FILLET_MAX_NM = 150 / 6076.12 // a corner fillet, not a routing loop
+    const topo = topology()
+    const nodeByKey = new Map(topo.nodes.map((n) => [n.key, n]))
+    const inc = new Map<Key, TopoEdge[]>()
+    for (const n of topo.nodes) inc.set(n.key, [])
+    for (const e of topo.edges) {
+      if (e.a === e.b) continue
+      inc.get(e.a)?.push(e)
+      inc.get(e.b)?.push(e)
+    }
+    const between = (a: Key, b: Key): TopoEdge | undefined =>
+      topo.edges.find((e) => (e.a === a && e.b === b) || (e.a === b && e.b === a))
+    /** Direction an edge leaves node `k`, skipping coincident vertices. */
+    const leaveDir = (e: TopoEdge, k: Key): [number, number] | null => {
+      const g = e.geom
+      const from = e.a === k ? g[0]! : g[g.length - 1]!
+      const seq = e.a === k ? g.slice(1) : g.slice(0, -1).reverse()
+      for (const p of seq) {
+        const dx = p[0] - from[0]
+        const dy = p[1] - from[1]
+        const len = Math.hypot(dx, dy)
+        if (len > 0) return [dx / len, dy / len]
+      }
+      return null
+    }
+    const chains: Point[][] = []
+    const used = new Set<Key>()
+    for (const x of topo.nodes) {
+      if (x.degree !== 3 || used.has(x.key)) continue
+      const xe = inc.get(x.key) ?? []
+      if (xe.length !== 3) continue
+      const nbr = xe.map((e) => (e.a === x.key ? e.b : e.a))
+      let done = false
+      for (let i = 0; i < 3 && !done; i += 1) {
+        for (let j = i + 1; j < 3 && !done; j += 1) {
+          const y = nbr[i]!
+          const z = nbr[j]!
+          const yz = between(y, z)
+          if (!yz || yz.ref === undefined) continue // the third side must be the taxiway
+          const xy = xe[i]!
+          const xz = xe[j]!
+          if (xy.ref !== undefined || xz.ref !== undefined) continue // the two sides from X must be fillets
+          const yn = nodeByKey.get(y)
+          const zn = nodeByKey.get(z)
+          if (!yn || !zn || yn.degree !== 3 || zn.degree !== 3 || used.has(y) || used.has(z)) continue
+          if (xy.length > FILLET_MAX_NM || xz.length > FILLET_MAX_NM || yz.length > FILLET_MAX_NM) continue
+          const arm = xe.find((e) => e !== xy && e !== xz)!
+          const armDir = leaveDir(arm, x.key)
+          const dxy = leaveDir(xy, x.key)
+          const dxz = leaveDir(xz, x.key)
+          if (!armDir || !dxy || !dxz) continue
+          // Keep the fillet whose line best continues X's arm (leaves most opposite to it), drop the other.
+          const throughness = (d: [number, number]) => -(armDir[0] * d[0] + armDir[1] * d[1])
+          chains.push(throughness(dxy) >= throughness(dxz) ? xz.geom : xy.geom)
+          used.add(x.key)
+          used.add(y)
+          used.add(z)
+          done = true
+        }
+      }
+    }
+    // Remove each dropped fillet's raw edges and its now-orphaned interior vertices.
+    for (const g of chains) {
+      for (let i = 0; i < g.length - 1; i += 1) {
+        const a = keyOf(g[i]!)
+        const b = keyOf(g[i + 1]!)
+        adj.set(a, (adj.get(a) ?? []).filter((e) => e.to !== b))
+        adj.set(b, (adj.get(b) ?? []).filter((e) => e.to !== a))
+      }
+      for (let i = 1; i < g.length - 1; i += 1) {
+        const k = keyOf(g[i]!)
+        if ((adj.get(k) ?? []).length === 0) {
+          adj.delete(k)
+          nodes.delete(k)
+        }
+      }
+    }
+  }
+
   const route = (fromKey: Key, toKey: Key, fromHeadingDeg?: number): Point[] =>
     dijkstra(fromKey, toKey, undefined, fromHeadingDeg)
   const routeAvoiding = (

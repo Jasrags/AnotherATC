@@ -107,6 +107,36 @@ describe('buildTaxiGraph', () => {
     })
   })
 
+  describe('collapsing a redundant second fillet', () => {
+    // Taxiway T runs through Y=[0,0] and Z=[0.02,0]; a connector comes straight down from the north
+    // to X=[0.02,0.01] (directly above Z) and reaches T via two unnamed fillets X–Y and X–Z, closing
+    // a triangle. The straight X–Z fillet is the connector's natural continuation; X–Y is the extra.
+    const filletTriangle = (namedTaxiway: boolean): AirportSurface => ({
+      ...toy,
+      features: [
+        { kind: 'taxiway', points: [[-0.02, 0], [0, 0], [0.02, 0], [0.04, 0]], ...(namedTaxiway ? { ref: 'T' } : {}) },
+        { kind: 'taxiway', points: [[0, 0], [0.02, 0.01]] }, // fillet X–Y (the extra corner-cut)
+        { kind: 'taxiway', points: [[0.02, 0], [0.02, 0.01]] }, // fillet X–Z (straight, the natural one)
+        { kind: 'taxiway', points: [[0.02, 0.01], [0.02, 0.06]] }, // the connector's own arm, straight north
+      ],
+    })
+
+    it('drops the redundant fillet, leaving a single clean junction, connectivity preserved', () => {
+      const g = buildTaxiGraph(filletTriangle(true))
+      // The apex X and one foot contract away — X is no longer a decision node, the triangle is gone.
+      expect(g.topology().nodes.some((n) => n.point[0] === 0.02 && n.point[1] === 0.01)).toBe(false)
+      // The taxiway is intact end to end, and the connector still joins it (a straight run into Z).
+      expect(g.route(g.nearestNode([-0.02, 0])!, g.nearestNode([0.04, 0])!).length).toBeGreaterThan(0)
+      expect(g.route(g.nearestNode([0.02, 0.06])!, g.nearestNode([0.02, 0])!).length).toBeGreaterThan(0)
+    })
+
+    it('leaves the triangle alone when there is no named taxiway side (a real loop / apron ring)', () => {
+      const g = buildTaxiGraph(filletTriangle(false))
+      // No named side → not the connector-meets-taxiway pattern → the apex stays a decision node.
+      expect(g.topology().nodes.some((n) => n.point[0] === 0.02 && n.point[1] === 0.01)).toBe(true)
+    })
+  })
+
   it('reports the taxiway designator of an edge', () => {
     const named: AirportSurface = {
       ...toy,

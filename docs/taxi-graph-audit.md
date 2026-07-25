@@ -73,9 +73,9 @@ worse. Lower the number when you improve a graph. Current baselines:
 
 | Field | total | high |
 |---|---|---|
-| KSAN | 154 | 66 |
-| KBUR | 181 | 67 |
-| KOAK | 180 | 57 |
+| KSAN | 152 | 66 |
+| KBUR | 178 | 66 |
+| KOAK | 172 | 54 |
 
 (Totals include the `compound-intersection` characterisation findings — one per messy crossing —
 which are `medium`, so the high-severity ceiling is the one that reflects genuine defects. The
@@ -87,7 +87,7 @@ data; it tells you where to look and in what order.
 
 ## Automatic smoothing that *is* applied
 
-Two graph-construction passes in `buildTaxiGraph` clean up the most mechanical OSM artifacts before
+Three graph-construction passes in `buildTaxiGraph` clean up the most mechanical OSM artifacts before
 anything routes on the graph, so they never reach the audit or the scope:
 
 - **Near-coincident node merge** (~30 ft) — folds two vertices OSM digitized a few dozen feet apart
@@ -97,8 +97,16 @@ anything routes on the graph, so they never reach the audit or the scope:
   A–B), the shadow midpoint is dropped and the direct edge kept. This removes the doubled-paint
   "spike" cusps at A and B. A detour that genuinely bows away from the line (a real bypass or a
   curve) is **left alone** — only a near-collinear shadow collapses, so no real geometry is lost.
+- **Redundant-second-fillet collapse** — a connector that meets a taxiway is sometimes digitized
+  with a *second* corner-cut fillet, closing a small triangle (three junctions X, Y, Z where Y–Z is
+  the taxiway and X reaches it via two unnamed fillets). Both fillets tie X to the same taxiway, so
+  the redundant one is dropped; X routes to the taxiway through the other, the triangle becomes one
+  clean junction, and both turn directions survive through it. Fires only on the exact pattern — a
+  compact triangle of three degree-3 junctions with **exactly one named side and two unnamed
+  (fillet) sides** — so a real routing loop or an apron ring is left alone. This generalizes the
+  two KBUR fillet triangles once dropped by way-id, and clears the equivalents at KSAN and KOAK.
 
-Both are conditional and self-limiting; they fire only on the artifact, never on distinct pavement.
+All three are conditional and self-limiting; they fire only on the artifact, never on distinct pavement.
 
 ## What it does not do (yet)
 

@@ -12,9 +12,9 @@ import { auditAirport } from './taxiAuditReport'
  * *worse*. Lower the number when you improve a graph; never raise it without a reason in the diff.
  */
 const BASELINE: Record<string, { airport: Airport; maxTotal: number; maxHigh: number }> = {
-  KSAN: { airport: KSAN, maxTotal: 154, maxHigh: 66 },
-  KBUR: { airport: KBUR, maxTotal: 181, maxHigh: 67 },
-  KOAK: { airport: KOAK, maxTotal: 180, maxHigh: 57 },
+  KSAN: { airport: KSAN, maxTotal: 152, maxHigh: 66 },
+  KBUR: { airport: KBUR, maxTotal: 178, maxHigh: 66 },
+  KOAK: { airport: KOAK, maxTotal: 172, maxHigh: 54 },
 }
 
 describe('per-airport taxi-graph audit baselines', () => {

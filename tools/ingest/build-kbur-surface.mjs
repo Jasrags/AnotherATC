@@ -109,26 +109,13 @@ const REF_PATCH = {
 // real connection and stands. The two holding_position markers sitting on the cluster go with it;
 // the third nearby marker (node 8028996414, on taxiway C) is on the network and stays.
 // Same matched-or-throw guard as REF_PATCH: a re-fetch that renames these ids fails loudly.
+// The two fillet triangles once dropped here by way-id (the taxiway-B triangle near [-0.087, 0.436]
+// and the taxiway-D triangle near [-0.36, -0.09]) are now collapsed generically by the
+// redundant-second-fillet pass in taxiGraph.ts, along with the equivalents at KSAN and KOAK — so no
+// per-field drop is needed for them (docs/taxi-graph-audit.md).
 const DROP = new Set([
   99871959, 99871960, 99871982, 99871991, // the four apron-loop taxiway ways
   1154611488, 8028996387, // the two holding_position markers on that apron
-
-  // A fillet triangle on taxiway B near the west connector (~[-0.087, 0.436]) — the worst *genuine*
-  // compound intersection the audit found once the clustering was fixed (docs/taxi-graph-audit.md).
-  // Taxiway B (way 99872110) runs A→S there; the west connector (way 311355306) meets B at A; and
-  // this way (311355307) is a short link from a point on that connector to S, closing a triangle
-  // A–P–S that renders as a diamond. Dropping it leaves P and S as pass-throughs (contracted away)
-  // and A as a single clean 3-way junction — the south turn just routes through A. Nothing
-  // disconnects: P stays on the connector, S stays on B. It is a corner-cut fillet, not connectivity.
-  311355307,
-
-  // A fillet triangle on taxiway D on the SW side (~[-0.36, -0.09]). A connector (way 99872014)
-  // comes from the north, meets D at its NW foot [-0.3683, -0.0961]; this way (99871997) is an extra
-  // corner-cut fillet from the same apex to D's NE foot [-0.3451, -0.0963], closing a triangle that
-  // renders as a diamond. Dropping it leaves the apex and the NE foot as pass-throughs (contracted
-  // away) and D's junction with the connector as one clean node — the east turn routes through it.
-  // Nothing disconnects. Same asymmetric-fillet pattern as 311355307 above.
-  99871997,
 ])
 
 // Charted hot spots (not in OSM). KBUR publishes hot spots on SW3HOTSPOT.PDF;
