@@ -34,6 +34,22 @@ export type {
 } from './world/types'
 
 export { createGroundSim, APPROACH_SPEED_KT } from './ground/sim'
+export {
+  createTerminalSim,
+  TURN_RATE_DEG_S,
+  CLIMB_RATE_FT_S,
+  DESCENT_RATE_FT_S,
+  ACCEL_KT_S,
+  TRAIL_SAMPLE_S,
+  TRAIL_MAX,
+} from './terminal/sim'
+export type {
+  TerminalSim,
+  TerminalAircraft,
+  TerminalAircraftInit,
+  TerminalCommand,
+  TerminalSnapshot,
+} from './terminal/sim'
 export { AIRCRAFT_TYPES, lookupAircraftType } from './ground/aircraftTypes'
 export type { AircraftType } from './ground/aircraftTypes'
 export type {
